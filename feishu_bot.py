@@ -55,7 +55,7 @@ APP_SECRET = cfg.get("feishu_app_secret", "").strip()
 ALLOWED_OPEN_IDS: set[str] = set(cfg.get("feishu_allowed_open_ids", []) or [])
 
 if not APP_ID or not APP_SECRET:
-    print("❌ config.json 中未设置 feishu_app_id / feishu_app_secret，请先在 WebUI 或 setup 中配置")
+    print("[X] config.json 中未设置 feishu_app_id / feishu_app_secret，请先在 WebUI 或 setup 中配置")
     sys.exit(1)
 
 
@@ -587,14 +587,14 @@ def _handle_message(data: P2ImMessageReceiveV1) -> None:
             return
 
         if ALLOWED_OPEN_IDS and sender_open_id not in ALLOWED_OPEN_IDS:
-            print(f"[feishu] ⚠ 未授权 open_id：{sender_open_id}")
-            _reply_text(message_id, "⚠️ 你不在该机器人的允许列表中。\n"
+            print(f"[feishu] [!] 未授权 open_id：{sender_open_id}")
+            _reply_text(message_id, "你不在该机器人的允许列表中。\n"
                         f"请把这个 open_id 加入 config.json 的 feishu_allowed_open_ids:\n"
                         f"{sender_open_id}")
             return
 
         if not ALLOWED_OPEN_IDS:
-            print(f"[feishu] ℹ 白名单为空，已允许所有人；建议把此 open_id 加入白名单："
+            print(f"[feishu] [i] 白名单为空，已允许所有人；建议把此 open_id 加入白名单："
                   f"{sender_open_id}")
 
         # ── 提交到后台线程，立即返回 ──
@@ -634,22 +634,22 @@ def main() -> None:
         try:
             tenant_token = _api_client._config.token_manager.get_tenant_access_token()  # type: ignore
             if tenant_token:
-                print(f"✅ 凭据 OK，tenant_access_token 已获取（前 8 位）：{tenant_token[:8]}…")
+                print(f"[OK] 凭据 OK，tenant_access_token 已获取（前 8 位）：{tenant_token[:8]}…")
                 sys.exit(0)
-            print("❌ 未能获取 tenant_access_token，请检查 App ID / App Secret")
+            print("[X] 未能获取 tenant_access_token，请检查 App ID / App Secret")
             sys.exit(1)
         except Exception as e:
-            print(f"❌ 凭据校验失败：{e}")
+            print(f"[X] 凭据校验失败：{e}")
             sys.exit(1)
 
     WHOAMI_MODE = args.whoami
     if WHOAMI_MODE:
-        print("⚙️  WHOAMI 模式：bot 会把每个发送者的 open_id 原样回显，不调 agent")
+        print("[whoami] WHOAMI 模式：bot 会把每个发送者的 open_id 原样回显，不调 agent")
 
     client = _build_ws_client()
-    print(f"✅ 飞书 bot 已启动（App ID: {APP_ID[:10]}…），等待消息…")
+    print(f"[OK] 飞书 bot 已启动（App ID: {APP_ID[:10]}…），等待消息…")
     if not ALLOWED_OPEN_IDS:
-        print("ℹ️  feishu_allowed_open_ids 为空，所有人均可对话。建议加白名单后重启。")
+        print("[i] feishu_allowed_open_ids 为空，所有人均可对话。建议加白名单后重启。")
     client.start()  # 阻塞，内部 WS 自动重连
 
 
