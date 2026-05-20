@@ -570,6 +570,11 @@ def _handle_message(data: P2ImMessageReceiveV1) -> None:
         if not text:
             return
 
+        # 过滤"清空聊天记录"/撤回消息产生的系统通知
+        if text in {"此消息已删除", "该消息已被撤回"}:
+            print(f"[feishu] 跳过已删除/撤回的系统消息 message_id={message_id}")
+            return
+
         print(f"[feishu] 收到消息 from open_id={sender_open_id[:12]}… "
               f"chat_type={chat_type} text={text[:60]!r}")
 
