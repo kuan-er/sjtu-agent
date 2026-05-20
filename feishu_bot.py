@@ -52,7 +52,13 @@ def _load_cfg() -> dict:
 cfg = _load_cfg()
 APP_ID = cfg.get("feishu_app_id", "").strip()
 APP_SECRET = cfg.get("feishu_app_secret", "").strip()
-ALLOWED_OPEN_IDS: set[str] = set(cfg.get("feishu_allowed_open_ids", []) or [])
+_raw_allowed = cfg.get("feishu_allowed_open_ids", []) or []
+if isinstance(_raw_allowed, str):
+    try:
+        _raw_allowed = json.loads(_raw_allowed)
+    except Exception:
+        _raw_allowed = []
+ALLOWED_OPEN_IDS: set[str] = set(_raw_allowed)
 
 if not APP_ID or not APP_SECRET:
     print("[X] config.json 中未设置 feishu_app_id / feishu_app_secret，请先在 WebUI 或 setup 中配置")
