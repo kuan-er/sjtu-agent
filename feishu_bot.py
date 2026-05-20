@@ -18,6 +18,7 @@ feishu_bot.py — 将 agent.py 接入飞书（Lark）自建应用，长连接接
 """
 
 import argparse
+import concurrent.futures
 import io
 import json
 import re
@@ -60,6 +61,9 @@ if not APP_ID or not APP_SECRET:
 
 # ── 全局 API client（用来回复消息） ────────────────────────────────────────────
 _api_client = lark.Client.builder().app_id(APP_ID).app_secret(APP_SECRET).build()
+
+# ── 后台线程池（LLM 推理在后台线程执行，避免阻塞 WS event loop） ─────────
+_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="feishu")
 
 # ── 会话状态（每个 open_id 独立） ─────────────────────────────────────────────
 _sessions: dict[str, dict] = {}
@@ -187,10 +191,11 @@ def _is_duplicate(message_id: str) -> bool:
 _FS_MSG_MAX = 4000  # 飞书单条消息长度上限约 5000，留点余量
 
 _MD_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+_MD_BOLD_ITALIC_RE = re.compile(r"\*\*\*(.+?)\*\*\*")
 _MD_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
 _MD_ITALIC_RE = re.compile(r"(?<!\*)\*([^*\n]+?)\*(?!\*)")
 _MD_CODE_RE = re.compile(r"`([^`\n]+?)`")
-_MD_TABLE_SEP_RE = re.compile(r"^\|?\s*[-:]{3,}\s*(\|\s*[-:]{3,}\s*)*\|?\s*$")
+_MD_TABLE_SEP_RE = re.compile(r"^\|?\s*[-:]{3,}\s*\|\s*[-:]{3,}\s*(\|\s*[-:]{3,}\s*)*\|?\s*$")
 
 # 飞书 post 格式中的元素类型
 _PostElement = dict  # {"tag": "text"|"a", "text": str, ...}
@@ -218,27 +223,30 @@ def _build_post_content(md_text: str) -> _PostContent:
             paragraphs.append([])  # 空行
             continue
 
-        # 标题 → 去掉 # 前缀，加粗整行
+        # 标题 → 去掉 # 前缀，内联解析后整体加粗
         header_match = re.match(r"^(#{1,3})\s+(.+)$", stripped)
         if header_match:
-            level = len(header_match.group(1))
             text = header_match.group(2)
-            if level <= 2:
-                paragraphs.append([_el_text(text, ["bold"])])
-            else:
-                paragraphs.append([_el_text(text, ["bold"])])
+            h_elements = _parse_inline(text)
+            for el in h_elements:
+                if el.get("tag") == "text":
+                    el["style"] = (el.get("style") or []) + ["bold"]
+            paragraphs.append(h_elements)
             continue
 
-        # 无序列表 → 去掉 - 前缀
+        # 无序列表 → 去掉前缀，内联解析
         list_match = re.match(r"^[-*]\s+(.+)$", stripped)
         if list_match:
-            paragraphs.append([_el_text("• " + list_match.group(1))])
+            li_elements = _parse_inline(list_match.group(1))
+            paragraphs.append([_el_text("• ")] + li_elements)
             continue
 
-        # 有序列表 → 保留序号
-        ol_match = re.match(r"^\d+\.\s+(.+)$", stripped)
+        # 有序列表 → 提取序号和内容，内联解析
+        ol_match = re.match(r"^(\d+\.)\s+(.+)$", stripped)
         if ol_match:
-            paragraphs.append([_el_text(stripped)])
+            prefix = ol_match.group(1) + " "
+            ol_elements = _parse_inline(ol_match.group(2))
+            paragraphs.append([_el_text(prefix)] + ol_elements)
             continue
 
         # 引用块
@@ -266,20 +274,21 @@ def _parse_inline(text: str) -> _PostParagraph:
     remaining = text
 
     while remaining:
-        # 找最早的标记
+        # 找最早的标记（bold+italic 优先于 bold 和 italic）
+        bold_italic_m = _MD_BOLD_ITALIC_RE.search(remaining)
         bold_m = _MD_BOLD_RE.search(remaining)
         italic_m = _MD_ITALIC_RE.search(remaining)
         code_m = _MD_CODE_RE.search(remaining)
         link_m = _MD_LINK_RE.search(remaining)
 
         candidates = []
+        if bold_italic_m: candidates.append((bold_italic_m.start(), bold_italic_m, "bold_italic"))
         if bold_m: candidates.append((bold_m.start(), bold_m, "bold"))
         if italic_m: candidates.append((italic_m.start(), italic_m, "italic"))
         if code_m: candidates.append((code_m.start(), code_m, "code"))
         if link_m: candidates.append((link_m.start(), link_m, "link"))
 
         if not candidates:
-            # 剩余纯文本
             txt = _unescape_md(remaining)
             if txt:
                 elements.append(_el_text(txt))
@@ -294,7 +303,10 @@ def _parse_inline(text: str) -> _PostParagraph:
             if prefix:
                 elements.append(_el_text(prefix))
 
-        if first_type == "bold":
+        if first_type == "bold_italic":
+            elements.append(_el_text(first_match.group(1), ["bold", "italic"]))
+            remaining = remaining[first_match.end():]
+        elif first_type == "bold":
             elements.append(_el_text(first_match.group(1), ["bold"]))
             remaining = remaining[first_match.end():]
         elif first_type == "italic":
@@ -514,7 +526,26 @@ def _extract_text(content_json: str) -> str:
     return text.strip()
 
 
+def _process_in_thread(sender_open_id: str, message_id: str, text: str) -> None:
+    """Phase 2: 在后台线程中执行 LLM 推理 + 回复。"""
+    sess, lock = _get_session(sender_open_id)
+    if not lock.acquire(blocking=False):
+        _reply_text(message_id, "⏳ 上一条消息还在处理中，请稍候…")
+        return
+    try:
+        reply = _capture_turn(sess, text)
+    except Exception as e:
+        print(f"[feishu] 处理出错：{e}")
+        _reply_text(message_id, f"❌ 出错了：{e}")
+        return
+    finally:
+        lock.release()
+
+    _reply_text(message_id, reply)
+
+
 def _handle_message(data: P2ImMessageReceiveV1) -> None:
+    """Phase 1: 轻量同步工作（event loop 线程），立即返回让 ack 快速发出。"""
     try:
         ev = data.event
         msg = ev.message
@@ -524,14 +555,13 @@ def _handle_message(data: P2ImMessageReceiveV1) -> None:
         message_id = msg.message_id
         msg_type = msg.message_type
         chat_id = msg.chat_id
-        chat_type = msg.chat_type  # "p2p" 或 "group"
+        chat_type = msg.chat_type
 
         # ── 去重：飞书可能因 ack 超时重发同一事件 ──────────────────────
         if _is_duplicate(message_id):
             print(f"[feishu] 跳过重复消息 message_id={message_id}")
             return
 
-        # 只处理文本（其他类型先忽略）
         if msg_type != "text":
             _reply_text(message_id, f"(暂不支持的消息类型: {msg_type}，目前只接收文本)")
             return
@@ -540,45 +570,31 @@ def _handle_message(data: P2ImMessageReceiveV1) -> None:
         if not text:
             return
 
-        print(f"[feishu] 收到消息 from open_id={sender_open_id[:12]}… chat_type={chat_type} text={text[:60]!r}")
+        print(f"[feishu] 收到消息 from open_id={sender_open_id[:12]}… "
+              f"chat_type={chat_type} text={text[:60]!r}")
 
-        # whoami 调试模式：直接回 open_id
         if WHOAMI_MODE:
             _reply_text(
                 message_id,
-                f"你的 open_id 是:\n{sender_open_id}\n\n请把它加入 config.json 的 feishu_allowed_open_ids 后重启 bot。",
+                f"你的 open_id 是:\n{sender_open_id}\n\n"
+                f"请把它加入 config.json 的 feishu_allowed_open_ids 后重启 bot。",
             )
             return
 
-        # 白名单
         if ALLOWED_OPEN_IDS and sender_open_id not in ALLOWED_OPEN_IDS:
-            print(f"[feishu] ⚠ 未授权 open_id：{sender_open_id}（请加入 feishu_allowed_open_ids）")
-            _reply_text(
-                message_id,
-                "⚠️ 你不在该机器人的允许列表中。\n"
-                f"如果是你本人请把这个 open_id 加入 config.json 的 feishu_allowed_open_ids:\n{sender_open_id}",
-            )
+            print(f"[feishu] ⚠ 未授权 open_id：{sender_open_id}")
+            _reply_text(message_id, "⚠️ 你不在该机器人的允许列表中。\n"
+                        f"请把这个 open_id 加入 config.json 的 feishu_allowed_open_ids:\n"
+                        f"{sender_open_id}")
             return
 
         if not ALLOWED_OPEN_IDS:
-            print(
-                f"[feishu] ℹ 白名单为空，已允许所有人；建议把此 open_id 加入白名单：{sender_open_id}"
-            )
+            print(f"[feishu] ℹ 白名单为空，已允许所有人；建议把此 open_id 加入白名单："
+                  f"{sender_open_id}")
 
-        sess, lock = _get_session(sender_open_id)
-        if not lock.acquire(blocking=False):
-            _reply_text(message_id, "⏳ 上一条消息还在处理中，请稍候…")
-            return
-        try:
-            reply = _capture_turn(sess, text)
-        except Exception as e:
-            print(f"[feishu] 处理出错：{e}")
-            _reply_text(message_id, f"❌ 出错了：{e}")
-            return
-        finally:
-            lock.release()
+        # ── 提交到后台线程，立即返回 ──
+        _EXECUTOR.submit(_process_in_thread, sender_open_id, message_id, text)
 
-        _reply_text(message_id, reply)
     except Exception as e:
         print(f"[feishu] handler 异常：{e}")
 
