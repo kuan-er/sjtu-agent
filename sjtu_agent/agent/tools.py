@@ -3741,9 +3741,10 @@ def tool_execute_python(code: str, timeout: int = 60) -> dict:
     import sys as _sys
 
     # 注入基础 import 路径
+    from sjtu_agent.paths import PROJECT_ROOT
     preamble = (
         "import sys, os\n"
-        f"sys.path.insert(0, {str(ROOT)!r})\n"
+        f"sys.path.insert(0, {str(PROJECT_ROOT)!r})\n"
         "from pathlib import Path\n"
         "from dotenv import load_dotenv\n"
         f"load_dotenv({str(ENV_PATH)!r})\n"

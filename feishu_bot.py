@@ -76,6 +76,72 @@ _sessions: dict[str, dict] = {}
 _locks: dict[str, threading.Lock] = {}
 _sess_meta_lock = threading.Lock()
 
+# ── 会话持久化 ──────────────────────────────────────────────────────────────
+from sjtu_agent.paths import DATA_DIR
+_SESSIONS_FILE = DATA_DIR / "feishu_sessions.json"
+_SAVE_LOCK = threading.Lock()
+_MAX_SESSION_AGE_DAYS = 30
+
+
+def _load_sessions() -> None:
+    """从磁盘恢复会话状态。"""
+    if not _SESSIONS_FILE.exists():
+        return
+    try:
+        with _SAVE_LOCK:
+            data = json.loads(_SESSIONS_FILE.read_text(encoding="utf-8"))
+        cutoff = _dt.datetime.now().timestamp() - _MAX_SESSION_AGE_DAYS * 86400
+        with _sess_meta_lock:
+            for open_id, meta in data.items():
+                convs = []
+                for c in meta.get("conversations", []):
+                    if c.get("saved_at", 0) < cutoff:
+                        continue
+                    agent_cfg = agent.load_agent_config()
+                    c["model_box"] = [agent_cfg["model"]]
+                    c["client_box"] = [agent._make_client(agent_cfg)]
+                    convs.append(c)
+                if convs:
+                    _sessions[open_id] = {
+                        "conversations": convs,
+                        "current_idx": min(meta.get("current_idx", 0), len(convs) - 1),
+                        "next_name_id": meta.get("next_name_id", len(convs) + 1),
+                    }
+                    _locks[open_id] = threading.Lock()
+        if _sessions:
+            total = sum(len(m["conversations"]) for m in _sessions.values())
+            print(f"[feishu] 已恢复 {len(_sessions)} 个用户的 {total} 个对话")
+    except Exception as e:
+        print(f"[feishu] 会话恢复失败: {e}")
+
+
+def _save_sessions() -> None:
+    """将当前会话状态保存到磁盘（只保存可序列化字段）。"""
+    try:
+        _SESSIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        now_ts = _dt.datetime.now().timestamp()
+        with _sess_meta_lock:
+            data = {}
+            for open_id, meta in _sessions.items():
+                data[open_id] = {
+                    "current_idx": meta["current_idx"],
+                    "next_name_id": meta["next_name_id"],
+                    "conversations": [{
+                        "name": c["name"],
+                        "messages": c["messages"][-200:],  # 只保留最近 200 条
+                        "created_at": c["created_at"],
+                        "saved_at": now_ts,
+                    } for c in meta["conversations"]],
+                }
+        with _SAVE_LOCK:
+            _SESSIONS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        print(f"[feishu] 会话保存失败: {e}")
+
+
+# 启动时恢复会话
+_load_sessions()
+
 
 def _new_conv_dict(name: str) -> dict:
     agent_cfg = agent.load_agent_config()
@@ -702,6 +768,8 @@ def _process_in_thread(sender_open_id: str, message_id: str, text: str) -> None:
     finally:
         lock.release()
     _reply_text(message_id, reply)
+    # 每次对话后持久化会话状态
+    _save_sessions()
 
 
 def _handle_message(data: P2ImMessageReceiveV1) -> None:
