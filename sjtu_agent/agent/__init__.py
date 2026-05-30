@@ -7,7 +7,7 @@ from sjtu_agent.agent.tools import (
     tool_add_reminder, tool_list_reminders, tool_remove_reminder,
     tool_read_emails, tool_search_emails, tool_send_email,
     tool_download_assignments, tool_list_assignment_files, tool_read_assignment_file,
-    tool_parse_local_file, tool_parse_local_files,
+    tool_parse_local_file, tool_parse_local_files, tool_install_parse_backend,
     tool_search_campus, tool_browse_mysjtu,
     tool_save_credentials, tool_login_platform,
     tool_setup_canvas, tool_setup_shuiyuan,

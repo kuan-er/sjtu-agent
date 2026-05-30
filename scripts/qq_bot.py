@@ -340,6 +340,22 @@ def _extract_qq_media(message) -> dict | None:
 
 
 def _build_parser_context(local_path: Path, media_type: str = "file", max_chars: int = 3000) -> tuple[str, str]:
+    def _infer_backend_missing(parse_result: dict) -> str:
+        text = " ".join(
+            [
+                str((parse_result or {}).get("error", "") or ""),
+                str((parse_result or {}).get("content", "") or ""),
+                " ".join(str(x) for x in ((parse_result or {}).get("warnings") or [])),
+            ]
+        ).lower()
+        if "pdf ocr backend missing" in text or "pypdfium2" in text:
+            return "pdf_ocr"
+        if "whisper backend is not installed" in text or "asr backend missing" in text:
+            return "whisper"
+        if "paddleocr backend is not installed" in text or "ocr backend missing" in text or "ppt ocr backend missing" in text:
+            return "paddleocr"
+        return ""
+
     try:
         strategy = "auto"
         if media_type == "image":
@@ -367,7 +383,19 @@ def _build_parser_context(local_path: Path, media_type: str = "file", max_chars:
                 "",
             )
         err = (parse_result or {}).get("error", "")
-        return "", (err or "解析结果为空")
+        warnings = (parse_result or {}).get("warnings") or []
+        backend = _infer_backend_missing(parse_result or {})
+        if backend:
+            warn_text = "；".join(str(x) for x in warnings if x)
+            return (
+                (
+                    "\n\n[附件解析状态]\n"
+                    f"{warn_text or err or '检测到 OCR/ASR 解析模块缺失'}\n"
+                    f"建议：先询问用户是否安装解析模块；若用户同意，再调用 install_parse_backend(backend='{backend}') 安装后重试解析。"
+                ),
+                "",
+            )
+        return "", (err or ("；".join(str(x) for x in warnings if x) or "解析结果为空"))
     except Exception as ex:
         return "", str(ex)
 

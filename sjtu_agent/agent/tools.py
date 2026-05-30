@@ -39,6 +39,12 @@ from sjtu_agent.paths import (
 from sjtu_agent.parsing import parse_file as parse_router_file
 
 ROOT = PROJECT_ROOT
+_INTERACTIVE_CHAT_ENV = "SJTU_AGENT_INTERACTIVE_CHAT"
+_PARSE_BACKEND_INSTALL = {
+    "paddleocr": {"label": "OCR", "modules": ["paddleocr"], "packages": ["paddleocr==3.6.0"]},
+    "whisper": {"label": "ASR", "modules": ["whisper"], "packages": ["openai-whisper==20250625"]},
+    "pdf_ocr": {"label": "PDF OCR", "modules": ["paddleocr", "pypdfium2"], "packages": ["paddleocr==3.6.0", "pypdfium2>=4.30,<5"]},
+}
 
 try:
     from playwright.sync_api import sync_playwright
@@ -422,7 +428,7 @@ TOOLS = [
                     "start_page": {"type": "integer", "description": "PDF 起始页（1-indexed），默认 1"},
                     "strategy": {
                         "type": "string",
-                        "description": "auto/legacy/markitdown/docling/mineru/paddleocr/whisper",
+                        "description": "auto/legacy/markitdown/docling/mineru/paddleocr/whisper/pdf_ocr",
                     },
                 },
                 "required": ["file_path"],
@@ -450,10 +456,30 @@ TOOLS = [
                     "start_page": {"type": "integer", "description": "PDF 起始页（1-indexed），默认 1"},
                     "strategy": {
                         "type": "string",
-                        "description": "auto/legacy/markitdown/docling/mineru/paddleocr/whisper",
+                        "description": "auto/legacy/markitdown/docling/mineru/paddleocr/whisper/pdf_ocr",
                     },
                 },
                 "required": ["file_paths"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "install_parse_backend",
+            "description": (
+                "Install parsing backends for OCR/ASR when missing. "
+                "Call only after user confirms installation."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "backend": {
+                        "type": "string",
+                        "description": "paddleocr/whisper/pdf_ocr",
+                    },
+                },
+                "required": ["backend"],
             },
         },
     },
@@ -4730,6 +4756,123 @@ def tool_read_assignment_file(
         return {"error": str(e)}
 
 
+def _detect_missing_parse_backend(parsed: dict) -> str | None:
+    parser = str(parsed.get("parser", "")).strip().lower()
+    text = " ".join(
+        [
+            str(parsed.get("error", "") or ""),
+            str(parsed.get("content", "") or ""),
+            " ".join(str(x) for x in (parsed.get("warnings") or [])),
+        ]
+    ).lower()
+    if "pdf ocr backend missing" in text or "requires paddleocr + pypdfium2" in text:
+        return "pdf_ocr"
+    if parser == "image_stub" or "paddleocr backend is not installed" in text or "ocr backend missing" in text:
+        return "paddleocr"
+    if parser == "audio_stub" or "whisper backend is not installed" in text or "asr backend missing" in text:
+        return "whisper"
+    if "ppt ocr backend missing" in text:
+        return "paddleocr"
+    return None
+
+
+def _is_interactive_chat_for_install_prompt() -> bool:
+    if os.environ.get(_INTERACTIVE_CHAT_ENV, "").strip() != "1":
+        return False
+    stdin = getattr(sys, "stdin", None)
+    stdout = getattr(sys, "stdout", None)
+    if stdin is None or stdout is None:
+        return False
+    return bool(getattr(stdin, "isatty", lambda: False)() and getattr(stdout, "isatty", lambda: False)())
+
+
+def _ask_install_missing_backend(backend: str) -> bool:
+    meta = _PARSE_BACKEND_INSTALL.get(backend)
+    if not meta:
+        return False
+    packages = ", ".join(meta.get("packages", []))
+    prompt = (
+        f"\n[parse] Missing {meta['label']} backend '{backend}' "
+        f"(pip package: {packages}). Install now? [y/N]: "
+    )
+    try:
+        ans = input(prompt).strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        return False
+    return ans in {"y", "yes"}
+
+
+def _install_missing_backend_package(backend: str) -> tuple[bool, str]:
+    meta = _PARSE_BACKEND_INSTALL.get(backend)
+    if not meta:
+        return False, f"unknown backend: {backend}"
+    packages = [str(p).strip() for p in (meta.get("packages") or []) if str(p).strip()]
+    if not packages:
+        return False, f"no package configured for backend: {backend}"
+    cmd = [sys.executable, "-m", "pip", "install", *packages]
+    print(f"[parse] Installing {' '.join(packages)} ...")
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode == 0:
+        print(f"[parse] Installed {' '.join(packages)}.")
+        return True, ""
+    err = (proc.stderr or proc.stdout or "").strip()
+    if len(err) > 800:
+        err = err[-800:]
+    print(f"[parse] Install failed ({' '.join(packages)}): {err or 'unknown error'}")
+    return False, err
+
+
+def _append_parse_warning(parsed: dict, message: str) -> dict:
+    warnings = parsed.get("warnings")
+    if not isinstance(warnings, list):
+        warnings = []
+    if message not in warnings:
+        warnings.append(message)
+    parsed["warnings"] = warnings
+    return parsed
+
+
+def _maybe_install_missing_parse_backend_and_retry(
+    parsed: dict,
+    path: Path,
+    max_chars: int,
+    start_page: int,
+    strategy: str,
+) -> dict:
+    backend = _detect_missing_parse_backend(parsed)
+    if not backend:
+        return parsed
+    if not _is_interactive_chat_for_install_prompt():
+        return parsed
+    if not _ask_install_missing_backend(backend):
+        return _append_parse_warning(parsed, f"install_skipped:{backend}")
+
+    ok, err = _install_missing_backend_package(backend)
+    if not ok:
+        return _append_parse_warning(parsed, f"install_failed:{backend}:{err[:120]}")
+
+    retried = parse_router_file(
+        str(path),
+        max_chars=max_chars,
+        start_page=start_page,
+        strategy=strategy or "auto",
+    )
+    if retried.get("ok"):
+        return _append_parse_warning(retried, f"auto_installed:{backend}")
+    return _append_parse_warning(retried, f"auto_installed_but_retry_failed:{backend}")
+
+
+def tool_install_parse_backend(backend: str) -> dict:
+    b = str(backend or "").strip().lower()
+    meta = _PARSE_BACKEND_INSTALL.get(b)
+    if not meta:
+        return {"ok": False, "error": f"unsupported backend: {backend}", "supported": sorted(_PARSE_BACKEND_INSTALL.keys())}
+    ok, err = _install_missing_backend_package(b)
+    if not ok:
+        return {"ok": False, "backend": b, "packages": meta.get("packages", []), "error": err or "install failed"}
+    return {"ok": True, "backend": b, "packages": meta.get("packages", [])}
+
+
 def tool_parse_local_file(
     file_path: str,
     max_chars: int = 8000,
@@ -4758,6 +4901,14 @@ def tool_parse_local_file(
 
     parsed = parse_router_file(
         str(path),
+        max_chars=max_chars,
+        start_page=start_page,
+        strategy=strategy or "auto",
+    )
+
+    parsed = _maybe_install_missing_parse_backend_and_retry(
+        parsed=parsed,
+        path=path,
         max_chars=max_chars,
         start_page=start_page,
         strategy=strategy or "auto",
@@ -5064,6 +5215,7 @@ def run_tool(name: str, args: dict) -> str:
         elif name == "read_assignment_file":  r = tool_read_assignment_file(**args)
         elif name == "parse_local_file":      r = tool_parse_local_file(**args)
         elif name == "parse_local_files":     r = tool_parse_local_files(**args)
+        elif name == "install_parse_backend": r = tool_install_parse_backend(**args)
         elif name == "search_campus":         r = tool_search_campus(**args)
         elif name == "read_shuiyuan_topic":   r = tool_read_shuiyuan_topic(**args)
         elif name == "get_schedule":          r = tool_get_schedule(**args)

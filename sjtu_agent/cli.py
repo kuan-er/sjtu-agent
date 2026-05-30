@@ -28,7 +28,11 @@ def _resolve_script_path(script_name: str) -> Path:
 
 
 def _run_script(script_name: str, script_args: list[str] | None = None) -> int:
-    script = _resolve_script_path(script_name)
+    try:
+        script = _resolve_script_path(script_name)
+    except FileNotFoundError as exc:
+        print(f"[!] {exc}", file=sys.stderr)
+        return 1
     old_argv = sys.argv[:]
     sys.argv = [str(script), *(script_args or [])]
     try:
@@ -272,6 +276,16 @@ def _cmd_mcp(args: argparse.Namespace) -> int:
     return _run_script("mcp_server", args.script_args)
 
 
+def _cmd_install_parse_backends(args: argparse.Namespace) -> int:
+    script_args: list[str] = []
+    backend = getattr(args, "backend", "")
+    if backend:
+        script_args += ["--backend", backend]
+    if getattr(args, "upgrade", False):
+        script_args.append("--upgrade")
+    return _run_script("install_parse_backends", script_args)
+
+
 def _parse_kv_items(items: list[str] | None) -> dict[str, str]:
     result: dict[str, str] = {}
     for item in items or []:
@@ -438,6 +452,23 @@ def build_parser() -> argparse.ArgumentParser:
     _add_passthrough_parser(subparsers, "news-digest", "run the smart news digest (collect + rank + push)", _cmd_news_digest)
     _add_passthrough_parser(subparsers, "mcp", "start the MCP server", _cmd_mcp)
     _add_passthrough_parser(subparsers, "wechat-bot", "start the WeChat ilink bot (long-polling)", _cmd_wechat_bot)
+
+    install_parse_backends_parser = subparsers.add_parser(
+        "install-parse-backends",
+        help="install pinned OCR/ASR parser backends",
+    )
+    install_parse_backends_parser.add_argument(
+        "--backend",
+        choices=["all", "paddleocr", "pdf_ocr", "whisper"],
+        default="all",
+        help="backend group to install (default: all)",
+    )
+    install_parse_backends_parser.add_argument(
+        "--upgrade",
+        action="store_true",
+        help="pass --upgrade to pip install",
+    )
+    install_parse_backends_parser.set_defaults(func=_cmd_install_parse_backends)
 
     add_mcp_parser = subparsers.add_parser(
         "add-mcp-server",

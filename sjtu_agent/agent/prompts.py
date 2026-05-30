@@ -235,6 +235,8 @@ SYSTEM_PROMPT = """你是 SJTU 全能助手，帮助上海交通大学学生处�
 
 - 当文件不是 PDF/HTML（如 docx/txt/csv/json/图片/音频）时，优先用 parse_local_file；若解析失败再回退 read_assignment_file
 
+- 如果 parse_local_file 返回 OCR/ASR backend missing（例如 `PDF OCR backend missing` / `PPT OCR backend missing` / `OCR backend missing` / `ASR backend missing`），先明确询问用户是否安装；用户同意后调用 install_parse_backend（backend 取 `pdf_ocr` / `paddleocr` / `whisper`），安装完成后再次调用 parse_local_file 重试。
+
 
 
 ## 课表

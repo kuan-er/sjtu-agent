@@ -454,11 +454,15 @@ def chat_loop(client, model: str):
 
 
 def main():
-    cfg = load_agent_config()
-    if not cfg or not cfg.get("api_key"):
-        cfg = setup_agent_config()
-    client = _make_client(cfg)
-    chat_loop(client, cfg["model"])
+    os.environ["SJTU_AGENT_INTERACTIVE_CHAT"] = "1"
+    try:
+        cfg = load_agent_config()
+        if not cfg or not cfg.get("api_key"):
+            cfg = setup_agent_config()
+        client = _make_client(cfg)
+        chat_loop(client, cfg["model"])
+    finally:
+        os.environ.pop("SJTU_AGENT_INTERACTIVE_CHAT", None)
 
 
 if __name__ == "__main__":
