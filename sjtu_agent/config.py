@@ -206,6 +206,25 @@ class ConfigStore:
     def feishu_allowed_open_ids(self) -> list[str]:
         return self.get("feishu_allowed_open_ids", [])
 
+    # —— QQ ——--------------------------------------------------------------
+    @property
+    def qq_app_id(self) -> str:
+        return str(self.get("qq_app_id", "")).strip()
+
+    @property
+    def qq_app_secret(self) -> str:
+        return str(self.get("qq_app_secret", "")).strip()
+
+    @property
+    def qq_allowed_user_ids(self) -> list[str]:
+        raw = self.get("qq_allowed_user_ids", [])
+        if isinstance(raw, list):
+            return [str(x).strip() for x in raw if str(x).strip()]
+        if isinstance(raw, str):
+            parts = [p.strip() for p in raw.split(",")]
+            return [p for p in parts if p]
+        return []
+
     # ── 水源 ────────────────────────────────────────────────────────────
     @property
     def shuiyuan_user_api_key(self) -> str:
@@ -227,6 +246,10 @@ class ConfigStore:
     @property
     def feishu_enabled(self) -> bool:
         return bool(self.get("feishu_enabled", True))
+
+    @property
+    def qq_enabled(self) -> bool:
+        return bool(self.get("qq_enabled", True))
 
     # ── DDL 紧急保底 ────────────────────────────────────────────────────
     @property

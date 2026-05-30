@@ -76,6 +76,23 @@ def test_telegram_allowed_ids_parsed(tmp_config):
     assert store.telegram_allowed_ids == [12345, 67890]
 
 
+def test_qq_fields_parsed(tmp_config):
+    _, _, write = tmp_config
+    write({
+        "qq_app_id": "1024",
+        "qq_app_secret": "qq-secret",
+        "qq_allowed_user_ids": ["u1", "  ", "u2"],
+        "qq_enabled": False,
+    })
+
+    from sjtu_agent.config import ConfigStore
+    store = ConfigStore()
+    assert store.qq_app_id == "1024"
+    assert store.qq_app_secret == "qq-secret"
+    assert store.qq_allowed_user_ids == ["u1", "u2"]
+    assert store.qq_enabled is False
+
+
 # ---------------------------------------------------------------------------
 # 热重载
 # ---------------------------------------------------------------------------

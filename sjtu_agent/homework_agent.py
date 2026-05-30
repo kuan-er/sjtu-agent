@@ -103,15 +103,31 @@ def _extract_code_blocks(md_text: str) -> list[tuple[str, str]]:
     return blocks
 
 
-def generate_solution_files(title: str, solution: str, output_dir: Path) -> list[str]:
+def generate_solution_files(title: str, solution: str, output_dir: Path,
+                            answer_mode: bool = False) -> list[str]:
     """生成 .md + 提取代码文件。PDF/HTML 由 Claude Code 自行生成。"""
     output_dir.mkdir(parents=True, exist_ok=True)
     saved = [str(output_dir / "_解答.md")]
-    (output_dir / "_解答.md").write_text(solution, encoding="utf-8")
+
+    ai_notice = "> ⚠️ 本文由 AI 辅助生成，仅供学习参考\n\n"
+    md_content = (ai_notice + solution) if answer_mode else solution
+    (output_dir / "_解答.md").write_text(md_content, encoding="utf-8")
+
+    code_notice = {
+        "py": "# AI 辅助生成代码，供学习参考\n\n",
+        "java": "// AI 辅助生成代码，供学习参考\n\n",
+        "cpp": "// AI 辅助生成代码，供学习参考\n\n",
+        "c": "// AI 辅助生成代码，供学习参考\n\n",
+        "js": "// AI 辅助生成代码，供学习参考\n\n",
+        "ts": "// AI 辅助生成代码，供学习参考\n\n",
+        "go": "// AI 辅助生成代码，供学习参考\n\n",
+    }
+
     for i, (lang, code) in enumerate(_extract_code_blocks(solution)):
         ext = lang if lang in ("py", "java", "cpp", "c", "js", "ts", "go") else "txt"
         p = output_dir / f"_code_{i+1}.{ext}"
-        p.write_text(code, encoding="utf-8")
+        notice = code_notice.get(ext, "") if answer_mode else ""
+        p.write_text(notice + code, encoding="utf-8")
         saved.append(str(p))
     return saved
 
@@ -239,8 +255,8 @@ _CLAUDE_BIN = next((p for p in _CLAUDE_CANDIDATES if p and Path(p).exists()), ""
 
 
 def _claude_code_solve(hw_dir: Path, course: str, aname: str, content: str,
-                        brief: bool = False) -> str:
-    """使用本地 Claude Code CLI 解题。不可用时回退到 _call_llm。"""
+                        brief: bool = False, answer_mode: bool = False) -> str:
+    """使用本地 Claude Code CLI 解题。answer_mode=True 输出完整答案。"""
     if not _CLAUDE_BIN or not Path(_CLAUDE_BIN).exists():
         print("[homework] Claude Code 不可用，回退到 API 调用")
         return solve_homework(course, aname, content, brief=brief)
@@ -293,6 +309,21 @@ def _claude_code_solve(hw_dir: Path, course: str, aname: str, content: str,
 
     if brief:
         prompt += "\n注意：只要摘要，不要完整解答。"
+    elif answer_mode:
+        prompt += (
+            "\n**完整解答模式**：逐题给出详细推导/代码/结果。"
+            "\n在 _解答.md 第一行写入：> ⚠️ 本文由 AI 辅助生成，仅供学习参考"
+            "\n在 _解答.tex 中加入：\\fancyfoot[C]{AI 辅助生成 · 学习参考}"
+            "\n代码文件中头部注释：# AI 辅助生成代码，供学习参考"
+        )
+    else:
+        prompt += (
+            "\n**解题助手模式（重要）**："
+            "\n- 只输出：题目考点分析 + 解题思路框架 + 关键公式/方法提示"
+            "\n- **不要给完整答案、不写最终结果、不写完整代码**"
+            "\n- 每题末尾留白，暗示用户自己尝试"
+            "\n- 最后一行写：「📝 思考后再核对？回复『给我答案』获取完整解答」"
+        )
 
     try:
         # Windows subprocess 会截断多行参数，改用 stdin 传 prompt
@@ -323,7 +354,8 @@ def _claude_code_solve(hw_dir: Path, course: str, aname: str, content: str,
         return solve_homework(course, aname, content, brief=brief)
 
 
-def _download_and_analyze_one(d: dict, idx: int, brief: bool = False) -> str:
+def _download_and_analyze_one(d: dict, idx: int, brief: bool = False,
+                              answer_mode: bool = False) -> str:
     """下载并解答单个作业。brief=True 仅返回摘要。"""
     course = d.get("course", "未知课程")
     aname = d.get("name", "未知作业")
@@ -374,14 +406,14 @@ def _download_and_analyze_one(d: dict, idx: int, brief: bool = False) -> str:
             except Exception: pass
 
     print(f"[homework] 解题: {course} - {aname}")
-    feishu_reply = _claude_code_solve(hw_dir, course, aname, content, brief=brief)
+    feishu_reply = _claude_code_solve(hw_dir, course, aname, content, brief=brief, answer_mode=answer_mode)
 
     # 生成解答文件（从 Claude Code 写入的 _解答.md 读取完整内容）
     solution_path = hw_dir / "_解答.md"
     full_solution = solution_path.read_text(encoding="utf-8") if solution_path.exists() else feishu_reply
     title = f"{course} — {aname}"
     try:
-        files = generate_solution_files(title, full_solution, hw_dir)
+        files = generate_solution_files(title, full_solution, hw_dir, answer_mode=answer_mode)
         print(f"[homework] 已生成 {len(files)} 个文件: {files}")
     except Exception as e:
         print(f"[homework] 文件生成失败: {e}")
@@ -398,10 +430,11 @@ def _download_and_analyze_one(d: dict, idx: int, brief: bool = False) -> str:
         pass
 
     # 飞书回复
+    notice = "\n\n📝 AI 辅助生成，供学习参考" if answer_mode else ""
     return (
         f"[{idx}] {course} — {aname}\n"
         f"截止：{due_str}（{remaining}）\n\n"
-        f"{feishu_reply}{file_info}"
+        f"{feishu_reply}{file_info}{notice}"
     )
 
 
@@ -429,8 +462,8 @@ def _format_list(pending: list[dict], past: bool = False) -> str:
 
 def run_homework_check(due_within_days: int = 0, specific_idx: int | None = None,
                        list_only: bool = False, brief: bool = False,
-                       include_past: bool = False) -> str:
-    """主入口：列出或分析 Canvas 作业。include_past=True 时包含历史作业。"""
+                       include_past: bool = False, answer_mode: bool = False) -> str:
+    """主入口：列出或分析 Canvas 作业。answer_mode=True 输出完整答案。"""
     pending = _fetch_pending(include_past=include_past)
     if due_within_days > 0:
         pending = _filter_by_due(pending, due_within_days)
@@ -448,7 +481,7 @@ def run_homework_check(due_within_days: int = 0, specific_idx: int | None = None
     if specific_idx is not None:
         idx = specific_idx - 1
         if 0 <= idx < len(pending):
-            return _download_and_analyze_one(pending[idx], idx, brief=brief)
+            return _download_and_analyze_one(pending[idx], idx, brief=brief, answer_mode=answer_mode)
         return f"[homework] 无效序号：{specific_idx}，共 {len(pending)} 个（1~{len(pending)}）"
 
     # 默认：列出

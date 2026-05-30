@@ -67,6 +67,12 @@ _SERVICE_SPECS = {
         "log": "feishu_bot.task.log",
         "schedule": "onlogon",  # 登录时启动
     },
+    "qq-bot": {
+        "task_name": f"{_TASK_PREFIX}-QQBot",
+        "subcommand": "qq-bot",
+        "log": "qq_bot.task.log",
+        "schedule": "onlogon",  # 登录时启动
+    },
     "web": {
         "task_name": f"{_TASK_PREFIX}-Web",
         "subcommand": "web --no-browser",
@@ -190,7 +196,7 @@ def install(
         })
 
         # 立即触发一次（telegram-bot / wechat-bot / web，类似 run_at_load）
-        if load and success and name in ("telegram-bot", "wechat-bot", "feishu-bot", "web"):
+        if load and success and name in ("telegram-bot", "wechat-bot", "feishu-bot", "qq-bot", "web"):
             subprocess.run(["schtasks", "/Run", "/TN", task_name], capture_output=True)
 
     return {

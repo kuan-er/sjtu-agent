@@ -70,6 +70,14 @@ _SERVICE_SPECS = {
         "schedule_type": "none",
         "keep_alive": True,
     },
+    "qq-bot": {
+        "label": "com.sjtu.qq-bot",
+        "subcommand": "qq-bot",
+        "log": "qq_bot.launchd.log",
+        "run_at_load": True,
+        "schedule_type": "none",
+        "keep_alive": True,
+    },
     "news-digest": {
         "label": "com.sjtu.news-digest",
         "subcommand": "news-digest",

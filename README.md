@@ -1,8 +1,10 @@
 # SJTU Agent
 
-面向上海交通大学学生的校园助手，提供终端对话、Telegram / 飞书 / 微信 Bot、提醒守护进程和 MCP Server。
+[![Test](https://github.com/kuan-er/sjtu-agent/actions/workflows/test.yml/badge.svg)](https://github.com/kuan-er/sjtu-agent/actions/workflows/test.yml)
 
-English summary: A deployable Shanghai Jiao Tong University campus assistant with terminal chat, Telegram / Feishu (Lark) / WeChat bots, reminder daemon, and MCP server.
+面向上海交通大学学生的校园助手，提供终端对话、Telegram / 飞书 / 微信 / QQ Bot、提醒守护进程和 MCP Server。
+
+English summary: A deployable Shanghai Jiao Tong University campus assistant with terminal chat, Telegram / Feishu (Lark) / WeChat / QQ bots, reminder daemon, and MCP server.
 
 👉 **[项目展示页](https://kuan-er.github.io/sjtu-agent)**
 
@@ -96,8 +98,11 @@ sjtu-agent login --aihaoke
 sjtu-agent ddl --canvas-only
 sjtu-agent daily-report --test
 sjtu-agent telegram-bot --test
+sjtu-agent qq-bot --test
 sjtu-agent remind-check --list
 sjtu-agent mcp --http --port 8765
+sjtu-agent add-mcp-server my-tools --transport stdio --command python --arg D:/path/to/server.py
+sjtu-agent add-skill my-skill --content-file D:/path/to/SKILL.md
 sjtu-agent install-daemons
 ```
 
@@ -115,6 +120,31 @@ sjtu-agent setup --yes --skip-cookie-import --skip-launchd
 sjtu-agent setup --yes --write-daemons-only --output-dir /tmp/sjtu-agent-launchd
 ```
 
+## MCP 与技能扩展
+
+Agent 可将自身工具暴露为 MCP Server，也可加载外部 MCP Server 作为额外工具。外部 MCP Server 配置保存在 `config.json` 的 `mcp_servers` 字段中；已启用的 prompt-only 技能保存在 `skills.enabled` 字段中。
+
+添加自定义 MCP Server：
+
+```bash
+sjtu-agent add-mcp-server my-tools --transport stdio --command python --arg D:/path/to/server.py
+sjtu-agent add-mcp-server remote-tools --transport sse --url http://127.0.0.1:8765/sse
+```
+
+也可在对话中让 Agent「添加自定义 MCP Server」。首次对话触发调用仅会提示将信任外部命令或 URL，需用户明确确认后才继续。
+
+添加自定义 prompt-only 技能：
+
+```bash
+sjtu-agent add-skill my-skill --content-file D:/path/to/SKILL.md
+sjtu-agent list-skills
+sjtu-agent manage-skill disable my-skill
+```
+
+也可在对话中让 Agent 添加技能，并提供完整的 `SKILL.md` 内容或本地文件路径。
+
+如需更原生的 Agent 流程，可对 Agent 说「创建一个技能」并描述想要的行为。若需求不够明确，Agent 会追问补充信息；获得名称、触发条件和指令后，Agent 会通过 `create_skill` 创建技能。也可以通过 `list_skills` 和 `manage_skill` 列出、启用、禁用或删除技能。
+
 ## macOS 后台服务
 
 在 macOS 上，可以直接用一条命令安装内置 launchd 服务：
@@ -129,6 +159,7 @@ sjtu-agent install-daemons
 - `daily-report`：每天 `22:00` 运行一次
 - `remind-check`：每 `60` 秒运行一次
 - `telegram-bot`：登录后启动，并由 launchd 保活
+- `qq-bot`：登录后启动，并由 launchd 保活
 
 常见变体：
 
@@ -150,7 +181,7 @@ Windows 提供两种后端选择：**Task Scheduler**（默认，适合定时任
 sjtu-agent install-daemons
 ```
 
-每天 22:00 日报 + 每 60s 提醒检查 + 登录时启动 Telegram/飞书/微信 Bot + Web UI。
+每天 22:00 日报 + 每 60s 提醒检查 + 登录时启动 Telegram/飞书/微信/QQ Bot + Web UI。
 
 ### 用 psmux 管理常驻进程
 
@@ -181,7 +212,7 @@ psmux -L sjtu-agent ls
 | 查看状态 | `schtasks /Query` | `psmux -L sjtu-agent ls` |
 | 停止服务 | `schtasks /Delete` | `psmux kill-session -t <name>` |
 
-> **推荐组合**：`daily-report`、`remind-check` 用 taskschd（定时）；`feishu-bot`、`telegram-bot`、`wechat-bot`、`web` 用 psmux（常驻）。
+> **推荐组合**：`daily-report`、`remind-check` 用 taskschd（定时）；`feishu-bot`、`telegram-bot`、`wechat-bot`、`qq-bot`、`web` 用 psmux（常驻）。
 
 ## 在飞书中使用 Bot
 
@@ -256,44 +287,17 @@ psmux -L sjtu-agent ls
 | 想验证 App ID/Secret 对不对 | 终端跑 `sjtu-agent feishu-bot -- --test`（注意中间的 `--`） |
 | 想查自己的 open_id | 终端跑 `sjtu-agent feishu-bot -- --whoami`，然后随便发条消息 |
 
-### 飞书 Bot 斜杠命令
+## 在 QQ 中使用 Bot
 
-Bot 支持以下斜杠命令，在对话中直接输入即可：
-
-**对话管理**
-
-| 命令 | 功能 |
-|------|------|
-| `/new <名称>` | 创建新对话并切换 |
-| `/list` | 列出所有对话 |
-| `/switch <序号>` | 切换活跃对话 |
-| `/name <序号> <名称>` | 重命名对话 |
-| `/delete <序号>` | 删除对话 |
-| `/history` | 查看当前对话最近消息 |
-| `/help` | 显示所有命令帮助 |
-
-**作业助手（需配置 Claude Code CLI）**
-
-| 命令 | 功能 |
-|------|------|
-| `/hw` | 列出未提交的 Canvas 作业 |
-| `/hw past` | 列出历史作业（已过期） |
-| `/hw do <序号>` | 下载并解答指定作业（调用本地 Claude Code） |
-| `/hw past do <序号>` | 解答指定历史作业 |
-| `/hw brief <序号>` | 仅查看作业摘要 |
-| `/hw due <N>` | 列出 N 天内到期的作业 |
-
-解答结果输出到 `SJTU_HOMEWORK_DIR`（默认 `%APPDATA%/sjtu-agent/assignments`，可通过 `.env` 配置）。包含 `_解答.md`、代码文件（`.py` 等）以及 Claude Code 自动生成的 HTML 文件。
-
-### 作业助手工作原理
-
-1. 用户在飞书发送 `/hw do <序号>`
-2. Bot 通过 Canvas API 下载作业题目（`description.html` + 附件）
-3. 调用本地 **Claude Code CLI**（`claude -p`）在作业目录中解题
-4. Claude Code 读取题目、写出解答、生成代码文件
-5. 摘要返回飞书，完整解答保存到本地目录
-
-> **前置条件**：本机需安装 Claude Code（`npm install -g @anthropic-ai/claude-code`）并配置 API Key。
+1. 登录 QQ 机器人平台（[q.qq.com/qqbot/openclaw](https://q.qq.com/qqbot/openclaw/)），创建机器人并获取 `AppID` / `AppSecret`。
+2. 在对话里让 Agent 调用 `setup_qq`（或手动写入 `config.json` 的 `qq_app_id` / `qq_app_secret`）。
+3. 启动 Bot：`sjtu-agent qq-bot`（可选先验证：`sjtu-agent qq-bot --test`）。
+4. 让要授权的 QQ 账号给 Bot 发一条消息，拿到「QQ 用户标识」（注意：不是 QQ 号）。
+5. 把该标识回填给 Agent，调用以下工具管理白名单：
+   - `qq_add_user`：添加白名单用户
+   - `qq_list_users`：查看白名单列表
+   - `qq_remove_user`：删除白名单用户
+6. 白名单修改后，重启 `sjtu-agent qq-bot` 生效。需要后台常驻可运行 `sjtu-agent install-daemons --services qq-bot`。
 
 ### MATLAB 图表生成（可选）
 

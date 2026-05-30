@@ -209,16 +209,72 @@ def setup_agent_config() -> dict:
             raise SystemExit(0)
         return val
 
+    def _mask_secret(value: str) -> str:
+        if not value:
+            return ""
+        if len(value) <= 8:
+            return "*" * len(value)
+        return f"{value[:4]}{'*' * (len(value) - 8)}{value[-4:]}"
+
+    def _ask_keep(label: str, value: str, *, secret: bool = False) -> bool:
+        shown = _mask_secret(value) if secret else value
+        while True:
+            ans = _prompt(f"检测到已配置 {label}: {shown}，是否保留？[Y/n]: ").lower()
+            if ans in {"", "y", "yes"}:
+                return True
+            if ans in {"n", "no"}:
+                return False
+            print("请输入 y 或 n。")
+
+    current = load_agent_config()
+    base_url = str(current.get("base_url", "")).strip()
+    api_key = str(current.get("api_key", "")).strip()
+    model = str(current.get("model", "")).strip() or "deepseek-chat"
+
+    if base_url or api_key or model:
+        print("检测到已有模型配置，下面逐项询问是否保留。")
+        try:
+            if base_url and not _ask_keep("API Base URL", base_url):
+                base_url = ""
+            if api_key and not _ask_keep("API Key", api_key, secret=True):
+                api_key = ""
+            if model and not _ask_keep("模型名称", model):
+                model = "deepseek-chat"
+        except SystemExit:
+            print("\n已跳过 API 配置。部分依赖 LLM 的功能将不可用。")
+            print("你可以后续运行 sjtu-agent setup 补充配置，或使用 /model 命令修改。\n")
+            return {"base_url": "", "api_key": "", "model": "deepseek-chat"}
+
     while True:
         try:
-            base_url = _prompt("API Base URL（如 https://api.openai.com/v1，回车使用 OpenAI 官方）: ")
-            api_key  = _prompt("API Key: ")
-            model    = _prompt("模型名称（如 deepseek-chat / deepseek-v4-pro，回车默认 deepseek-chat）: ") or "deepseek-chat"
+            base_input = _prompt(
+                f"API Base URL（如 https://api.openai.com/v1，回车保留当前: {base_url or 'https://api.openai.com/v1'}）: "
+            )
+            if base_input:
+                base_url = base_input
+
+            key_hint = _mask_secret(api_key) if api_key else "未设置"
+            key_input = _prompt(f"API Key（回车保留当前: {key_hint}）: ")
+            if key_input:
+                api_key = key_input
+
+            model_input = _prompt(
+                f"模型名称（如 deepseek-chat / deepseek-v4-pro，回车保留当前: {model or 'deepseek-chat'}）: "
+            )
+            if model_input:
+                model = model_input
+            if not model:
+                model = "deepseek-chat"
         except SystemExit:
             print("\n已跳过 API 配置。部分依赖 LLM 的功能将不可用。")
             print("你可以后续运行 sjtu-agent setup 补充配置，或使用 /model 命令修改。\n")
             # 返回一个"空"配置，让 chat_loop 仍可启动（工具调用不受影响）
             return {"base_url": "", "api_key": "", "model": "deepseek-chat"}
+
+        if not api_key:
+            print("\n⚠️  API Key 不能为空。")
+            print("请重新输入（直接回车可重用上次输入的值；输入 quit 可跳过配置）\n")
+            continue
 
         resolved_url = base_url or "https://api.openai.com/v1"
         print("正在测试 API 连接，请稍候…", end="", flush=True)

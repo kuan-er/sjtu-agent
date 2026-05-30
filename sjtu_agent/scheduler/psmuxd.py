@@ -46,6 +46,10 @@ _SERVICE_SPECS = {
         "session_name": "feishu-bot",
         "subcommand": "feishu-bot",
     },
+    "qq-bot": {
+        "session_name": "qq-bot",
+        "subcommand": "qq-bot",
+    },
     "web": {
         "session_name": "web",
         "subcommand": "web --no-browser",

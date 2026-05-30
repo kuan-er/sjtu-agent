@@ -26,5 +26,26 @@
 
   "_shuiyuan_comment": "水源社区 Discourse User API Key，通过授权流程获取，不会过期",
   "shuiyuan_user_api_key": "YOUR_USER_API_KEY",
-  "shuiyuan_user_api_client_id": "YOUR_CLIENT_ID"
+  "shuiyuan_user_api_client_id": "YOUR_CLIENT_ID",
+
+  "_mcp_comment": "External MCP servers loaded by the agent. Add or edit entries manually, or use sjtu-agent add-mcp-server.",
+  "mcp_servers": {
+    "custom-example": {
+      "enabled": false,
+      "transport": "sse",
+      "url": "http://127.0.0.1:8765/sse"
+    }
+  },
+
+  "_skills_comment": "Prompt-only skills to load into the agent system prompt.",
+  "skills": {
+    "enabled": [],
+    "dirs": []
+  },
+
+  "_qq_comment": "QQ 官方机器人凭据（https://bot.q.qq.com）",
+  "qq_app_id": "",
+  "qq_app_secret": "",
+  "qq_allowed_user_ids": [],
+  "qq_enabled": true
 }

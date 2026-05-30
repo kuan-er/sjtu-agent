@@ -67,6 +67,22 @@ _SERVICE_SPECS = {
         "has_timer": False,
         "wants_after": "network-online.target",
     },
+    "feishu-bot": {
+        "unit_name": "sjtu-agent-feishu-bot",
+        "subcommand": "feishu-bot",
+        "log": "feishu_bot.systemd.log",
+        "restart": "always",
+        "has_timer": False,
+        "wants_after": "network-online.target",
+    },
+    "qq-bot": {
+        "unit_name": "sjtu-agent-qq-bot",
+        "subcommand": "qq-bot",
+        "log": "qq_bot.systemd.log",
+        "restart": "always",
+        "has_timer": False,
+        "wants_after": "network-online.target",
+    },
 }
 
 

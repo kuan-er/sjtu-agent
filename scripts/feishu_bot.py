@@ -79,6 +79,15 @@ _sessions: dict[str, dict] = {}
 _locks: dict[str, threading.Lock] = {}
 _sess_meta_lock = threading.Lock()
 
+# ── 作业解答上下文（记住最近一次 /hw do，供"给我答案"使用）────────────────
+_hw_context: dict[str, dict] = {}
+_hw_ctx_lock = threading.Lock()
+
+# ── 近期更新冷却期（防 Feishu 重发导致重复回复）──────────────────────────
+_recent_updates_cooldown: dict[str, float] = {}
+_cooldown_lock = threading.Lock()
+_COOLDOWN_SEC = 10
+
 # ── 会话持久化 ──────────────────────────────────────────────────────────────
 from sjtu_agent.paths import DATA_DIR
 _SESSIONS_FILE = DATA_DIR / "feishu_sessions.json"
@@ -190,6 +199,7 @@ _FS_CTX = (
     "## 斜杠命令（用户输入 / 开头即可触发，主动引导使用）\n"
     "遇到以下需求时，主动建议用户使用斜杠命令而非让 LLM 代劳：\n"
     "- 做作业/写作业/作业答案/帮我做XX/解题/帮我看题 → /hw do <序号> 或先 /hw\n"
+    "- 给我答案/核对答案/我要答案 → 获取完整解答（需先运行 /hw do）\n"
     "- 查看作业/有什么作业/列出作业/功课 → /hw 或 /hw list\n"
     "- N天内到期/即将截止/最近作业 → /hw due <N>\n"
     "- 历史作业/已交作业/以前作业 → /hw past\n"
@@ -209,6 +219,20 @@ _FS_CTX = (
     "💬 **对话管理**：/new /list /switch /name /delete /history\n"
     "🔍 **校园搜索**：教务处通知、水源社区、选课社区评价\n"
     "💡 特别提及 /hw do 可调用 Claude Code 自动解题（最新功能）。\n"
+)
+
+
+_RECENT_UPDATES_TEXT = (
+    "🔥 **近期更新一览**\n\n"
+    "- **🤖 QQ Bot 接入**：支持通过 QQ 机器人平台接入，含白名单管理\n"
+    "- **🧩 MCP 与 Skills 扩展**：动态工具注册，自定义 MCP Server 和 prompt-only 技能\n"
+    "- **📝 作业解题助手**：/hw do 先输出分析思路（不给答案），回复「给我答案」获取完整解答\n"
+    "- **📊 MATLAB 作业图表**：自动检测本机 MATLAB，优先生成矢量 PDF 图表嵌入 LaTeX 解答\n"
+    "- **📅 日报优化**：晚间日报自动预告明日课表，午间日报过滤已结束课程\n"
+    "- **🔢 序号从 1 开始**：对话列表和作业列表统一使用 1-based 编号\n"
+    "- **✅ CI 流水线**：GitHub Actions 自动测试（Python 3.11/3.13）\n"
+    "\n"
+    "输入 /help 查看所有命令~"
 )
 
 
@@ -289,9 +313,27 @@ _SEEN_IDS: dict[str, float] = {}
 _SEEN_IDS_LOCK = threading.Lock()
 _SEEN_TTL = 300  # 5 分钟
 
+# 内容去重（防止飞书用不同 message_id 重发同一事件）
+_SEEN_CONTENT: dict[str, tuple[str, float]] = {}
+_SEEN_CONTENT_LOCK = threading.Lock()
+_CONTENT_DEDUP_SEC = 5
+
 
 def _is_duplicate(message_id: str) -> bool:
     """检查 message_id 是否已处理过，防止飞书重发导致重复回复。"""
+
+
+def _is_duplicate_content(sender_id: str, text: str) -> bool:
+    """检查同一发送者的相同内容是否在 5 秒内已处理过。"""
+    key = f"{sender_id}:{text}"
+    now = time.time()
+    with _SEEN_CONTENT_LOCK:
+        if key in _SEEN_CONTENT:
+            _, ts = _SEEN_CONTENT[key]
+            if now - ts < _CONTENT_DEDUP_SEC:
+                return True
+        _SEEN_CONTENT[key] = (text, now)
+    return False
     now = time.time()
     with _SEEN_IDS_LOCK:
         expired = [mid for mid, ts in _SEEN_IDS.items() if now - ts > _SEEN_TTL]
@@ -718,8 +760,28 @@ def _extract_text(content_json: str) -> str:
 
 # ── 多对话命令处理 ──────────────────────────────────────────────────────────
 
+def _do_hw_answer(open_id: str) -> str:
+    """执行 /hw answer 或自然语言触发"给我答案"。"""
+    with _hw_ctx_lock:
+        ctx = _hw_context.get(open_id, {})
+    if not ctx:
+        return "[homework] 请先用 /hw do <序号> 分析作业。"
+    from sjtu_agent.homework_agent import run_homework_check
+    return "[homework] 📝 正在生成完整解答…\n\n" + run_homework_check(
+        specific_idx=ctx["idx"], answer_mode=True)
+
+
 def _handle_commands(open_id: str, text: str) -> str | None:
     """解析并执行对话管理命令。返回命令结果文本（None 表示不是命令）。"""
+    # 自然语言触发"给我答案"
+    answer_phrases = {"给我答案", "给答案", "核对答案", "我要答案", "获取完整解答",
+                      "看答案", "要答案", "上答案", "出答案"}
+    if text.strip() in answer_phrases:
+        with _hw_ctx_lock:
+            ctx = _hw_context.get(open_id, {})
+        if ctx:
+            return _do_hw_answer(open_id)
+        return "[homework] 请先用 /hw do <序号> 分析作业，再要答案哦~"
     if not text.startswith("/"):
         return None
     parts = text.strip().split(maxsplit=2)
@@ -808,6 +870,7 @@ def _handle_commands(open_id: str, text: str) -> str | None:
                 "`/hw brief <序号>`  仅查看摘要\n"
                 "`/hw due <N>`  N 天内到期\n"
                 "`/hw past`  查看历史作业\n"
+                "`/hw answer`  获取完整解答（分析后使用）\n"
                 "`/hw all`  分析全部作业\n"
                 "`/hw list`  列出作业（同 /hw）\n\n"
                 "ℹ️  `/help`  显示此帮助"
@@ -822,7 +885,10 @@ def _handle_commands(open_id: str, text: str) -> str | None:
                     idx = int(parts[2])
                 except ValueError:
                     return f"无效序号：{parts[2]}"
-                return "[homework] 正在解题…\n\n" + run_homework_check(specific_idx=idx)
+                # 记住上下文供"给我答案"使用
+                with _hw_ctx_lock:
+                    _hw_context[open_id] = {"idx": idx}
+                return "[homework] 🧠 解题助手模式…\n\n" + run_homework_check(specific_idx=idx)
             elif sub == "brief":
                 if len(parts) < 3:
                     return "用法：/hw brief <序号>"
@@ -849,6 +915,8 @@ def _handle_commands(open_id: str, text: str) -> str | None:
                 return run_homework_check(due_within_days=days, list_only=True)
             elif sub == "all":
                 return run_homework_check(due_within_days=3650, include_past=True, list_only=True)
+            elif sub == "answer":
+                return _do_hw_answer(open_id)
             else:
                 return run_homework_check(list_only=True)
         return f"未知命令：{cmd}。输入 /help 查看可用命令。"
@@ -871,6 +939,10 @@ def _process_hw_command(sender_open_id: str, message_id: str, text: str) -> None
 
 def _process_in_thread(sender_open_id: str, message_id: str, text: str) -> None:
     """Phase 2: 在后台线程中执行 LLM 推理 + 回复。"""
+    # 防御性检查：如果主循环已拦截并回复，不再走 LLM
+    t = text.strip()
+    if any(kw in t for kw in ["最近更新", "新功能", "新版变化", "更新了什么"]):
+        return
     conv, meta, lock = _get_active_conv(sender_open_id)
     if not lock.acquire(blocking=False):
         _reply_text(message_id, "上一条消息还在处理中，请稍候…")
@@ -925,6 +997,24 @@ def _handle_message(data: P2ImMessageReceiveV1) -> None:
         if not text:
             return
 
+        # 内容去重：防止飞书用不同 message_id 重发同一事件
+        if _is_duplicate_content(sender_open_id, text):
+            print(f"[feishu] 跳过重复内容: {text[:40]!r}")
+            return
+
+        # ── 自然语言短语拦截 ────────────────────────────────────────
+        t = text.strip()
+        if any(kw in t for kw in ["最近更新", "新功能", "新版变化", "更新了什么"]):
+            now = time.time()
+            with _cooldown_lock:
+                last = _recent_updates_cooldown.get(sender_open_id, 0)
+                if now - last < _COOLDOWN_SEC:
+                    return  # 冷却期内，跳过重复
+                _recent_updates_cooldown[sender_open_id] = now
+            print(f"[feishu] 拦截近期更新: {text[:40]!r}")
+            _reply_text(message_id, _RECENT_UPDATES_TEXT)
+            return
+
         # 过滤"清空聊天记录"/撤回消息产生的系统通知
         if text in {"此消息已删除", "该消息已被撤回"}:
             print(f"[feishu] 跳过已删除/撤回的系统消息 message_id={message_id}")
@@ -932,8 +1022,27 @@ def _handle_message(data: P2ImMessageReceiveV1) -> None:
 
         # ── 多对话命令拦截 ──────────────────────────────────────────
         # /hw 系列是重命令（网络 I/O + LLM），放到后台线程避免阻塞 event loop
-        if text.strip().lower().startswith("/hw"):
+        if t.lower().startswith("/hw"):
             print(f"[feishu] 命令（后台执行）: {text[:40]!r}")
+            # 在主线程中提前保存 /hw do 上下文，避免后台线程延迟导致丢失
+            parts = text.strip().split(maxsplit=2)
+            if len(parts) >= 3 and parts[1].lower() in ("do", "past"):
+                sub = parts[1]
+                rest = parts[2] if len(parts) > 2 else ""
+                if sub == "past":
+                    rest_parts = rest.split(maxsplit=1)
+                    if rest_parts and rest_parts[0] == "do" and len(rest_parts) >= 2:
+                        try:
+                            with _hw_ctx_lock:
+                                _hw_context[sender_open_id] = {"idx": int(rest_parts[1])}
+                        except ValueError:
+                            pass
+                else:
+                    try:
+                        with _hw_ctx_lock:
+                            _hw_context[sender_open_id] = {"idx": int(rest.split()[0])}
+                    except (ValueError, IndexError):
+                        pass
             _reply_text(message_id, "[homework] 正在处理，请稍候…")
             _EXECUTOR.submit(_process_hw_command, sender_open_id, message_id, text)
             return
@@ -1009,13 +1118,19 @@ def main() -> None:
 
     if args.test:
         # 测 token 是否能换取，证明 app_id/secret 没填错
-        from lark_oapi.core.http.transport import Transport
+        import requests as _requests
         try:
-            tenant_token = _api_client._config.token_manager.get_tenant_access_token()  # type: ignore
-            if tenant_token:
-                print(f"[OK] 凭据 OK，tenant_access_token 已获取（前 8 位）：{tenant_token[:8]}…")
+            r = _requests.post(
+                "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+                json={"app_id": APP_ID, "app_secret": APP_SECRET},
+                timeout=10,
+            )
+            data = r.json()
+            if data.get("code") == 0:
+                token = data.get("tenant_access_token", "")
+                print(f"[OK] 凭据 OK，tenant_access_token 已获取（前 8 位）：{token[:8]}…")
                 sys.exit(0)
-            print("[X] 未能获取 tenant_access_token，请检查 App ID / App Secret")
+            print(f"[X] 未能获取 tenant_access_token: {data.get('msg', r.text[:100])}")
             sys.exit(1)
         except Exception as e:
             print(f"[X] 凭据校验失败：{e}")

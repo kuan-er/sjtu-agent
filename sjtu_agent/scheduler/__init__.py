@@ -33,6 +33,8 @@ def _default_service_names() -> tuple[str, ...]:
         names.remove("wechat-bot")
     if not cfg.get("feishu_enabled", True) and "feishu-bot" in names:
         names.remove("feishu-bot")
+    if not cfg.get("qq_enabled", True) and "qq-bot" in names:
+        names.remove("qq-bot")
     return tuple(names)
 
 
@@ -148,7 +150,7 @@ def daemon_status(
 def available_service_names() -> tuple[str, ...]:
     """返回所有可用的服务名称。"""
     return ("daily-report", "morning-report", "noon-report", "remind-check",
-            "telegram-bot", "wechat-bot", "feishu-bot")
+            "telegram-bot", "wechat-bot", "feishu-bot", "qq-bot")
 
 
 def current_platform_name() -> str:

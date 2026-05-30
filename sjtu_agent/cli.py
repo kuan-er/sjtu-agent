@@ -26,21 +26,6 @@ def _run_module(module_name: str, script_args: list[str] | None = None) -> int:
         sys.argv = old_argv
 
 
-def _run_script(script_name: str, script_args: list[str] | None = None) -> int:
-    root = Path(__file__).resolve().parent.parent
-    script = root / "scripts" / f"{script_name}.py"
-    old_argv = sys.argv[:]
-    sys.argv = [str(script), *(script_args or [])]
-    try:
-        runpy.run_path(str(script), run_name="__main__")
-        return 0
-    except SystemExit as exc:
-        code = exc.code
-        return code if isinstance(code, int) else 0
-    finally:
-        sys.argv = old_argv
-
-
 def _cmd_doctor(_: argparse.Namespace) -> int:
     import agent
 
@@ -169,8 +154,8 @@ def _cmd_update(args: argparse.Namespace) -> int:
                 print("[!] 自动更新失败，请手动处理：")
                 print(f"    cd {PROJECT_ROOT}")
                 print("    git status    # 查看当前状态")
-                print("    git rebase --abort   # 如果正在 rebase 中，先中止")
-                print("    如有未推送的提交: git pull --rebase")
+                print("    git log --oneline -5   # 查看本地提交")
+                print("    如有未推送的本地提交，可尝试: git pull --rebase")
                 print("    或放弃本地修改: git reset --hard origin/main")
                 return 1
 
@@ -219,7 +204,7 @@ def _cmd_chat(args: argparse.Namespace) -> int:
 
 
 def _cmd_setup_config(args: argparse.Namespace) -> int:
-    return _run_script("setup_config", args.script_args)
+    return _run_module("setup_config", args.script_args)
 
 
 def _cmd_login(args: argparse.Namespace) -> int:
@@ -231,32 +216,128 @@ def _cmd_ddl(args: argparse.Namespace) -> int:
 
 
 def _cmd_daily_report(args: argparse.Namespace) -> int:
-    passthru = list(args.script_args) if args.script_args else []
-    if getattr(args, "type", "evening") != "evening":
-        passthru = ["--type", args.type] + passthru
-    if getattr(args, "test", False):
-        passthru = ["--test"] + passthru
-    return _run_script("daily_report", passthru)
+    return _run_module("daily_report", args.script_args)
 
 
 def _cmd_telegram_bot(args: argparse.Namespace) -> int:
-    return _run_script("telegram_bot", args.script_args)
+    return _run_module("telegram_bot", args.script_args)
 
 
 def _cmd_feishu_bot(args: argparse.Namespace) -> int:
-    return _run_script("feishu_bot", args.script_args)
+    root = Path(__file__).resolve().parent.parent
+    script = root / "feishu_bot.py"
+    old_argv = sys.argv[:]
+    sys.argv = [str(script), *(args.script_args or [])]
+    try:
+        runpy.run_path(str(script), run_name="__main__")
+        return 0
+    except SystemExit as exc:
+        code = exc.code
+        return code if isinstance(code, int) else 0
+    finally:
+        sys.argv = old_argv
+
+
+def _cmd_qq_bot(args: argparse.Namespace) -> int:
+    return _run_script("qq_bot", args.script_args)
 
 
 def _cmd_remind_check(args: argparse.Namespace) -> int:
-    return _run_script("remind_check", args.script_args)
+    return _run_module("remind_check", args.script_args)
 
 
 def _cmd_news_digest(args: argparse.Namespace) -> int:
-    return _run_script("news_digest", args.script_args)
+    """运行智能新闻日报（采集 + 排序 + 推送）。"""
+    root = Path(__file__).resolve().parent.parent
+    script = root / "news_digest.py"
+    old_argv = sys.argv[:]
+    sys.argv = [str(script), *(args.script_args or [])]
+    try:
+        import runpy
+        runpy.run_path(str(script), run_name="__main__")
+    finally:
+        sys.argv = old_argv
+    return 0
 
 
 def _cmd_mcp(args: argparse.Namespace) -> int:
-    return _run_script("mcp_server", args.script_args)
+    return _run_module("mcp_server", args.script_args)
+
+
+def _parse_kv_items(items: list[str] | None) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for item in items or []:
+        if "=" not in item:
+            raise ValueError(f"Expected KEY=VALUE, got: {item}")
+        key, value = item.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise ValueError(f"Empty key in: {item}")
+        result[key] = value
+    return result
+
+
+def _cmd_add_mcp_server(args: argparse.Namespace) -> int:
+    from sjtu_agent.agent.tools import tool_add_mcp_server
+
+    try:
+        env = _parse_kv_items(args.env)
+        headers = _parse_kv_items(args.header)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    payload = tool_add_mcp_server(
+        server_id=args.server_id,
+        transport=args.transport,
+        command=args.command or "",
+        args=args.arg or [],
+        url=args.url or "",
+        cwd=args.cwd or "",
+        env=env,
+        headers=headers,
+        enabled=not args.disabled,
+        call_timeout=args.call_timeout,
+        acknowledge_external_mcp=True,
+    )
+    print_json(payload)
+    return 0 if payload.get("ok") else 1
+
+
+def _cmd_add_skill(args: argparse.Namespace) -> int:
+    from sjtu_agent.agent.tools import tool_add_skill
+
+    content = args.content or ""
+    if args.content_file:
+        try:
+            content = Path(args.content_file).read_text(encoding="utf-8")
+        except OSError as exc:
+            print(f"failed to read --content-file: {exc}", file=sys.stderr)
+            return 1
+    payload = tool_add_skill(
+        name=args.name,
+        content=content,
+        source_file=args.source_file or "",
+        enabled=not args.disabled,
+    )
+    print_json(payload)
+    return 0 if payload.get("ok") else 1
+
+
+def _cmd_list_skills(args: argparse.Namespace) -> int:
+    from sjtu_agent.agent.tools import tool_list_skills
+
+    payload = tool_list_skills(include_content=args.include_content)
+    print_json(payload)
+    return 0 if payload.get("ok") else 1
+
+
+def _cmd_manage_skill(args: argparse.Namespace) -> int:
+    from sjtu_agent.agent.tools import tool_manage_skill
+
+    payload = tool_manage_skill(action=args.action, name=args.name)
+    print_json(payload)
+    return 0 if payload.get("ok") else 1
 
 
 def _cmd_web(args: argparse.Namespace) -> int:
@@ -266,7 +347,19 @@ def _cmd_web(args: argparse.Namespace) -> int:
 
 
 def _cmd_wechat_bot(args: argparse.Namespace) -> int:
-    return _run_script("wechat_bot", args.script_args)
+    # wechat_bot.py 位于项目根目录，用 run_path 直接执行脚本文件
+    root = Path(__file__).resolve().parent.parent
+    script = root / "wechat_bot.py"
+    old_argv = sys.argv[:]
+    sys.argv = [str(script), *(args.script_args or [])]
+    try:
+        runpy.run_path(str(script), run_name="__main__")
+        return 0
+    except SystemExit as exc:
+        code = exc.code
+        return code if isinstance(code, int) else 0
+    finally:
+        sys.argv = old_argv
 
 
 def _parse_hhmm(value: str) -> tuple[int, int]:
@@ -341,18 +434,56 @@ def build_parser() -> argparse.ArgumentParser:
     _add_passthrough_parser(subparsers, "setup-config", "build config.json from browser cookies", _cmd_setup_config)
     _add_passthrough_parser(subparsers, "login", "refresh platform cookies with Playwright", _cmd_login)
     _add_passthrough_parser(subparsers, "ddl", "run the DDL checker report", _cmd_ddl)
-    daily_rpt = subparsers.add_parser("daily-report", help="generate or send the daily report")
-    daily_rpt.add_argument("--type", choices=["morning", "noon", "evening"],
-                           default="evening", help="report type")
-    daily_rpt.add_argument("--test", action="store_true", help="print only, do not send")
-    daily_rpt.add_argument("script_args", nargs=argparse.REMAINDER, help=argparse.SUPPRESS)
-    daily_rpt.set_defaults(func=_cmd_daily_report)
+    _add_passthrough_parser(subparsers, "daily-report", "generate or send the daily report", _cmd_daily_report)
     _add_passthrough_parser(subparsers, "telegram-bot", "start the Telegram bot", _cmd_telegram_bot)
     _add_passthrough_parser(subparsers, "feishu-bot", "start the Feishu (Lark) bot (long connection)", _cmd_feishu_bot)
+    _add_passthrough_parser(subparsers, "qq-bot", "start the QQ official bot (botpy)", _cmd_qq_bot)
     _add_passthrough_parser(subparsers, "remind-check", "run the reminder daemon once", _cmd_remind_check)
     _add_passthrough_parser(subparsers, "news-digest", "run the smart news digest (collect + rank + push)", _cmd_news_digest)
     _add_passthrough_parser(subparsers, "mcp", "start the MCP server", _cmd_mcp)
     _add_passthrough_parser(subparsers, "wechat-bot", "start the WeChat ilink bot (long-polling)", _cmd_wechat_bot)
+
+    add_mcp_parser = subparsers.add_parser(
+        "add-mcp-server",
+        help="register a custom external MCP server",
+    )
+    add_mcp_parser.add_argument("server_id", help="short MCP server id")
+    add_mcp_parser.add_argument("--transport", default="stdio", choices=["stdio", "sse", "streamable_http", "http"])
+    add_mcp_parser.add_argument("--command", default="", help="command for stdio transport")
+    add_mcp_parser.add_argument("--arg", action="append", default=[], help="stdio command argument; repeat for multiple args")
+    add_mcp_parser.add_argument("--url", default="", help="MCP endpoint URL for sse/http transports")
+    add_mcp_parser.add_argument("--cwd", default="", help="working directory for stdio transport")
+    add_mcp_parser.add_argument("--env", action="append", default=[], help="environment variable KEY=VALUE; repeatable")
+    add_mcp_parser.add_argument("--header", action="append", default=[], help="HTTP header KEY=VALUE; repeatable")
+    add_mcp_parser.add_argument("--call-timeout", type=int, default=120, help="tool call timeout in seconds")
+    add_mcp_parser.add_argument("--disabled", action="store_true", help="write config but do not enable")
+    add_mcp_parser.set_defaults(func=_cmd_add_mcp_server)
+
+    add_skill_parser = subparsers.add_parser(
+        "add-skill",
+        help="create or enable a custom prompt-only skill",
+    )
+    add_skill_parser.add_argument("name", help="skill name / directory id")
+    add_skill_parser.add_argument("--content", default="", help="SKILL.md content")
+    add_skill_parser.add_argument("--content-file", default="", help="read SKILL.md content from this file")
+    add_skill_parser.add_argument("--source-file", default="", help="copy skill content from an existing local SKILL.md file")
+    add_skill_parser.add_argument("--disabled", action="store_true", help="write the skill but do not enable it")
+    add_skill_parser.set_defaults(func=_cmd_add_skill)
+
+    list_skills_parser = subparsers.add_parser(
+        "list-skills",
+        help="list prompt-only skills and enabled state",
+    )
+    list_skills_parser.add_argument("--include-content", action="store_true", help="include full SKILL.md content")
+    list_skills_parser.set_defaults(func=_cmd_list_skills)
+
+    manage_skill_parser = subparsers.add_parser(
+        "manage-skill",
+        help="enable, disable, or delete a prompt-only skill",
+    )
+    manage_skill_parser.add_argument("action", choices=["enable", "disable", "delete"])
+    manage_skill_parser.add_argument("name", help="skill name / directory id")
+    manage_skill_parser.set_defaults(func=_cmd_manage_skill)
 
     web_parser = subparsers.add_parser("web", help="open the local web configuration UI in your browser")
     web_parser.add_argument(
