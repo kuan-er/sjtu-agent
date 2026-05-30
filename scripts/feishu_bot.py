@@ -447,11 +447,18 @@ def _guess_suffix(filename: str, content_type: str, default: str = ".bin") -> st
     return default
 
 
-def _download_feishu_resource(message_id: str, file_key: str, res_type: str, filename: str = "") -> Path:
+def _resource_query_type(msg_type: str) -> str:
+    # Feishu message resource API accepts only image|file:
+    # image -> image; file/audio/media -> file.
+    return "image" if msg_type == "image" else "file"
+
+
+def _download_feishu_resource(message_id: str, file_key: str, msg_type: str, filename: str = "") -> Path:
     token = _get_tenant_access_token()
     url = f"https://open.feishu.cn/open-apis/im/v1/messages/{message_id}/resources/{file_key}"
-    resp = requests.get(url, params={"type": res_type}, headers={"Authorization": f"Bearer {token}"}, timeout=60)
-    if resp.status_code != 200 and res_type == "audio":
+    query_type = _resource_query_type(msg_type)
+    resp = requests.get(url, params={"type": query_type}, headers={"Authorization": f"Bearer {token}"}, timeout=60)
+    if resp.status_code != 200 and msg_type == "audio":
         resp = requests.get(url, params={"type": "file"}, headers={"Authorization": f"Bearer {token}"}, timeout=60)
     if resp.status_code != 200:
         raise RuntimeError(f"下载飞书资源失败: HTTP {resp.status_code} {resp.text[:200]}")
@@ -459,7 +466,7 @@ def _download_feishu_resource(message_id: str, file_key: str, res_type: str, fil
     suffix = _guess_suffix(filename, resp.headers.get("content-type", ""), default=".bin")
     name = (filename or "").strip()
     if not name:
-        name = f"{res_type}_{file_key[:10]}{suffix}"
+        name = f"{msg_type}_{file_key[:10]}{suffix}"
     save_path = _TMP_DIR / name
     save_path.write_bytes(resp.content)
     return save_path
@@ -487,6 +494,12 @@ def _extract_media_ref(msg_type: str, content_json: str) -> dict | None:
             return None
         file_name = str(obj.get("file_name", "") or f"audio_{audio_key[:10]}.m4a").strip()
         return {"type": "audio", "key": audio_key, "filename": file_name}
+    if msg_type == "media":
+        media_key = str(obj.get("file_key", "") or "").strip()
+        if not media_key:
+            return None
+        file_name = str(obj.get("file_name", "") or f"media_{media_key[:10]}.mp4").strip()
+        return {"type": "media", "key": media_key, "filename": file_name}
     return None
 
 
@@ -1152,7 +1165,7 @@ def _process_media_in_thread(sender_open_id: str, message_id: str, msg_type: str
         local_path = _download_feishu_resource(
             message_id=message_id,
             file_key=media["key"],
-            res_type=media["type"],
+            msg_type=media["type"],
             filename=media.get("filename", ""),
         )
         model = conv["model_box"][0]
@@ -1175,7 +1188,8 @@ def _process_media_in_thread(sender_open_id: str, message_id: str, msg_type: str
             _reply_text(message_id, reply)
             return
 
-        parsed_ctx, parse_err = _build_parser_context(local_path, media_type=msg_type)
+        parser_media_type = "audio" if msg_type == "audio" else ("image" if msg_type == "image" else "file")
+        parsed_ctx, parse_err = _build_parser_context(local_path, media_type=parser_media_type)
         user_text = (
             f"[用户通过飞书发送了附件]\n"
             f"  类型：{msg_type}\n"
@@ -1227,7 +1241,7 @@ def _handle_message(data: P2ImMessageReceiveV1) -> None:
                   f"age={time.time() - create_time_ms / 1000:.0f}s")
             return
 
-        media_supported = msg_type in {"image", "file", "audio"}
+        media_supported = msg_type in {"image", "file", "audio", "media"}
         text = ""
         if msg_type == "text":
             text = _extract_text(msg.content)
@@ -1238,7 +1252,7 @@ def _handle_message(data: P2ImMessageReceiveV1) -> None:
                 print(f"[feishu] 跳过重复内容: {text[:40]!r}")
                 return
         elif not media_supported:
-            _reply_text(message_id, f"(暂不支持的消息类型: {msg_type}，目前支持文本、图片、文件、音频)")
+            _reply_text(message_id, f"(暂不支持的消息类型: {msg_type}，目前支持文本、图片、文件、音频、视频)")
             return
 
         # ── 自然语言短语拦截 ────────────────────────────────────────
