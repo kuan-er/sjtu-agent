@@ -34,6 +34,7 @@ from sjtu_agent.paths import (
     atomic_write_json,
     read_json_safe,
 )
+from sjtu_agent.parsing import parse_file as parse_router_file
 
 try:
     from playwright.sync_api import sync_playwright
@@ -273,6 +274,58 @@ TOOLS = [
                     },
                 },
                 "required": ["file_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "parse_local_file",
+            "description": (
+                "统一解析本地文件内容（支持多种文本/文档/图片/音频格式，按后端能力自动路由）。"
+                "优先用于 read_assignment_file 不支持的类型。"
+                "当 strategy=auto 时会自动选择可用解析器。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "本地文件路径"},
+                    "max_chars": {"type": "integer", "description": "最多返回字符数，默认 8000"},
+                    "start_page": {"type": "integer", "description": "PDF 起始页（1-indexed），默认 1"},
+                    "strategy": {
+                        "type": "string",
+                        "description": "auto/legacy/markitdown/docling/mineru/paddleocr/whisper",
+                    },
+                },
+                "required": ["file_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "parse_local_files",
+            "description": (
+                "批量解析多个本地文件并合并结果。"
+                "适合用户一次上传多个文件（题面+附录+图片）时统一抽取内容。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "本地文件路径列表",
+                    },
+                    "per_file_max_chars": {"type": "integer", "description": "每个文件最大字符数，默认 4000"},
+                    "total_max_chars": {"type": "integer", "description": "合并内容总字符上限，默认 12000"},
+                    "start_page": {"type": "integer", "description": "PDF 起始页（1-indexed），默认 1"},
+                    "strategy": {
+                        "type": "string",
+                        "description": "auto/legacy/markitdown/docling/mineru/paddleocr/whisper",
+                    },
+                },
+                "required": ["file_paths"],
             },
         },
     },
@@ -3811,7 +3864,11 @@ def tool_list_assignment_files(
             files = [
                 {"name": f.name, "path": str(f.resolve()), "size_kb": round(f.stat().st_size / 1024, 1)}
                 for f in sorted(asgn_dir.iterdir())
-                if f.is_file() and f.suffix.lower() in {".pdf", ".html", ".png", ".jpg", ".docx", ".zip"}
+                if f.is_file() and f.suffix.lower() in {
+                    ".pdf", ".html", ".htm", ".png", ".jpg", ".jpeg", ".webp",
+                    ".docx", ".doc", ".txt", ".md", ".csv", ".tsv", ".json",
+                    ".xlsx", ".xls", ".pptx", ".ppt", ".zip", ".mp3", ".wav", ".m4a", ".mp4",
+                }
             ]
             if files:
                 assignments.append({"assignment": asgn_dir.name, "files": files})
@@ -3887,6 +3944,111 @@ def tool_read_assignment_file(
             return {"error": f"暂不支持 {suffix} 格式，目前支持 PDF 和 HTML"}
     except Exception as e:
         return {"error": str(e)}
+
+
+def tool_parse_local_file(
+    file_path: str,
+    max_chars: int = 8000,
+    start_page: int = 1,
+    strategy: str = "auto",
+) -> dict:
+    """
+    New parse router entrypoint.
+    Keeps read_assignment_file unchanged as fallback when strategy asks for legacy
+    or when auto parse fails on PDF/HTML.
+    """
+    path = Path(file_path)
+    if not path.exists():
+        path = ROOT / file_path
+    if not path.exists():
+        return {"error": f"文件不存在: {file_path}，请确认路径"}
+
+    if (strategy or "").strip().lower() == "legacy":
+        legacy = tool_read_assignment_file(str(path), max_chars=max_chars, start_page=start_page)
+        return {
+            "ok": "error" not in legacy,
+            "parser": "legacy_read_assignment_file",
+            "fallback_used": True,
+            **legacy,
+        }
+
+    parsed = parse_router_file(
+        str(path),
+        max_chars=max_chars,
+        start_page=start_page,
+        strategy=strategy or "auto",
+    )
+
+    if parsed.get("ok"):
+        return parsed
+
+    # Keep previous stable behavior as hard fallback for legacy-supported formats.
+    if path.suffix.lower() in {".pdf", ".html", ".htm"}:
+        legacy = tool_read_assignment_file(str(path), max_chars=max_chars, start_page=start_page)
+        if "error" not in legacy:
+            return {
+                "ok": True,
+                "parser": "legacy_read_assignment_file",
+                "fallback_used": True,
+                "warnings": [f"router_failed: {parsed.get('error', 'unknown error')}"],
+                **legacy,
+            }
+    return parsed
+
+
+def tool_parse_local_files(
+    file_paths: list[str],
+    per_file_max_chars: int = 4000,
+    total_max_chars: int = 12000,
+    start_page: int = 1,
+    strategy: str = "auto",
+) -> dict:
+    # Keep fallback behavior inside each file parse by delegating to tool_parse_local_file.
+    if not isinstance(file_paths, list) or not file_paths:
+        return {"error": "file_paths 不能为空"}
+
+    merged: list[str] = []
+    items: list[dict] = []
+    failures: list[dict] = []
+    total_chars = 0
+
+    for p in file_paths:
+        item = tool_parse_local_file(
+            file_path=str(p),
+            max_chars=per_file_max_chars,
+            start_page=start_page,
+            strategy=strategy,
+        )
+        ok = bool(item.get("ok", "error" not in item))
+        items.append(item)
+        if not ok:
+            failures.append({"file_path": str(p), "error": item.get("error", "parse failed")})
+            continue
+
+        content = str(item.get("content", "") or "")
+        if not content:
+            continue
+        header = f"===== {item.get('file', Path(str(p)).name)} =====\n"
+        block = header + content + "\n"
+        if total_chars + len(block) > total_max_chars:
+            remain = max(0, total_max_chars - total_chars)
+            if remain > 0:
+                merged.append(block[:remain])
+                total_chars += remain
+            break
+        merged.append(block)
+        total_chars += len(block)
+
+    return {
+        "ok": True,
+        "count": len(file_paths),
+        "success_count": len(file_paths) - len(failures),
+        "failure_count": len(failures),
+        "failures": failures,
+        "truncated": total_chars >= total_max_chars,
+        "content": "\n".join(merged).strip(),
+        "items": items,
+    }
 
 
 def tool_download_assignments(
@@ -4113,6 +4275,8 @@ def run_tool(name: str, args: dict) -> str:
         elif name == "download_assignments":r = tool_download_assignments(**args)
         elif name == "list_assignment_files": r = tool_list_assignment_files(**args)
         elif name == "read_assignment_file":  r = tool_read_assignment_file(**args)
+        elif name == "parse_local_file":      r = tool_parse_local_file(**args)
+        elif name == "parse_local_files":     r = tool_parse_local_files(**args)
         elif name == "search_campus":         r = tool_search_campus(**args)
         elif name == "read_shuiyuan_topic":   r = tool_read_shuiyuan_topic(**args)
         elif name == "get_schedule":          r = tool_get_schedule(**args)

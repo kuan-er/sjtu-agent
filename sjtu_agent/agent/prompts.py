@@ -224,6 +224,8 @@ SYSTEM_PROMPT = """你是 SJTU 全能助手，帮助上海交通大学学生处�
 
 - 若 truncated=true，可继续读下一段（用 start_page）
 
+- 当文件不是 PDF/HTML（如 docx/txt/csv/json/图片/音频）时，优先用 parse_local_file；若解析失败再回退 read_assignment_file
+
 
 
 ## 课表
@@ -455,6 +457,10 @@ _TOOL_LABELS = {
     "list_assignment_files":  "正在列出作业文件",
 
     "read_assignment_file":   "正在读取作业内容",
+
+    "parse_local_file":       "正在解析文件内容",
+
+    "parse_local_files":      "正在批量解析文件内容",
 
     "search_campus":          "正在搜索校园内容",
 
