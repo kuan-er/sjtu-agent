@@ -305,7 +305,7 @@ def _download_media(url: str, media_type: str = "file", filename: str = "") -> P
 
 
 def _extract_qq_media(message) -> dict | None:
-    # Prefer botpy's attachments collection.
+    # Official botpy message model: media arrives via attachments.
     attachments = getattr(message, "attachments", None)
     if isinstance(attachments, list):
         for att in attachments:
@@ -331,19 +331,10 @@ def _extract_qq_media(message) -> dict | None:
                 media_type = "audio"
             return {"type": media_type, "url": url, "filename": filename}
 
-    # Some event payloads provide direct image URL fields.
-    for key in ("image", "image_url", "audio_url", "voice_url", "ptt_url", "record_url", "video_url", "file_url", "url"):
-        val = getattr(message, key, None)
-        if isinstance(val, str) and val.startswith(("http://", "https://")):
-            if "image" in key:
-                media_type = "image"
-            elif any(x in key for x in ("audio", "voice", "ptt", "record")):
-                media_type = "audio"
-            elif "video" in key:
-                media_type = "video"
-            else:
-                media_type = "file"
-            return {"type": media_type, "url": val, "filename": ""}
+    # Compatibility fallback for non-standard gateways.
+    image = getattr(message, "image", None)
+    if isinstance(image, str) and image.startswith(("http://", "https://")):
+        return {"type": "image", "url": image, "filename": ""}
 
     return None
 

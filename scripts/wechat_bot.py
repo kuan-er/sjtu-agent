@@ -415,60 +415,88 @@ def _download_media(url: str, media_type: str = "file", filename: str = "") -> P
     return save_path
 
 
+def _extract_url_from_media_blob(blob: dict) -> str:
+    if not isinstance(blob, dict):
+        return ""
+    # Doc-first: OpenClaw/iLink official wrappers may expose these direct URL fields.
+    for key in ("url", "download_url", "file_url"):
+        val = blob.get(key)
+        if isinstance(val, str) and val.startswith(("http://", "https://")):
+            return val
+    # Common nested key in iLink message schema.
+    media = blob.get("media")
+    if isinstance(media, dict):
+        for key in ("url", "download_url", "file_url"):
+            val = media.get(key)
+            if isinstance(val, str) and val.startswith(("http://", "https://")):
+                return val
+    # Compatibility fallback for non-standard gateways.
+    for val in blob.values():
+        if isinstance(val, str) and val.startswith(("http://", "https://")):
+            return val
+        if isinstance(val, dict):
+            nested = _extract_url_from_media_blob(val)
+            if nested:
+                return nested
+    return ""
+
+
 def _extract_message_payload(item_list: list[dict]) -> tuple[str, dict | None]:
     text = ""
     media: dict | None = None
     for item in item_list:
-        itype = item.get("type")
+        try:
+            itype = int(item.get("type"))
+        except Exception:
+            itype = 0
         if itype == 1 and not text:
             text = item.get("text_item", {}).get("text", "").strip()
             continue
         if media is not None:
             continue
 
-        for key in ("image_item", "file_item", "video_item", "audio_item", "voice_item", "speech_item", "ptt_item"):
-            blob = item.get(key, {}) if isinstance(item.get(key, {}), dict) else {}
-            url = str(
-                blob.get("url", "")
-                or blob.get("download_url", "")
-                or blob.get("voice_url", "")
-                or blob.get("audio_url", "")
-                or blob.get("file_url", "")
-                or ""
-            ).strip()
-            name = str(blob.get("file_name", "") or blob.get("name", "") or "").strip()
-            if url:
-                if key == "image_item":
-                    media_type = "image"
-                elif key in {"audio_item", "voice_item", "speech_item", "ptt_item"}:
-                    media_type = "audio"
-                elif key == "video_item":
-                    media_type = "video"
-                else:
-                    media_type = "file"
-                media = {"type": media_type, "url": url, "filename": name}
-                break
-
-        if media is not None:
+        # Official item mapping:
+        # 2=image_item, 3=voice_item, 4=file_item, 5=video_item
+        if itype == 2:
+            blob = item.get("image_item", {}) if isinstance(item.get("image_item", {}), dict) else {}
+            media = {
+                "type": "image",
+                "url": _extract_url_from_media_blob(blob),
+                "filename": str(blob.get("file_name", "") or blob.get("name", "") or "").strip(),
+                "stt_text": "",
+            }
             continue
 
-        if isinstance(item.get("url"), str) and item.get("url"):
-            media = {"type": "file", "url": item["url"], "filename": ""}
+        if itype == 3:
+            blob = item.get("voice_item", {}) if isinstance(item.get("voice_item", {}), dict) else {}
+            stt_text = str(blob.get("text", "") or "").strip()
+            media = {
+                "type": "audio",
+                "url": _extract_url_from_media_blob(blob),
+                "filename": str(blob.get("file_name", "") or blob.get("name", "") or "").strip(),
+                "stt_text": stt_text,
+            }
             continue
 
-        for key, val in item.items():
-            if isinstance(val, str) and val.startswith(("http://", "https://")):
-                k = key.lower()
-                if "image" in k:
-                    media_type = "image"
-                elif "audio" in k or "voice" in k:
-                    media_type = "audio"
-                elif "video" in k:
-                    media_type = "video"
-                else:
-                    media_type = "file"
-                media = {"type": media_type, "url": val, "filename": ""}
-                break
+        if itype == 4:
+            blob = item.get("file_item", {}) if isinstance(item.get("file_item", {}), dict) else {}
+            media = {
+                "type": "file",
+                "url": _extract_url_from_media_blob(blob),
+                "filename": str(blob.get("file_name", "") or blob.get("name", "") or "").strip(),
+                "stt_text": "",
+            }
+            continue
+
+        if itype == 5:
+            blob = item.get("video_item", {}) if isinstance(item.get("video_item", {}), dict) else {}
+            media = {
+                "type": "video",
+                "url": _extract_url_from_media_blob(blob),
+                "filename": str(blob.get("file_name", "") or blob.get("name", "") or "").strip(),
+                "stt_text": "",
+            }
+            continue
 
     return text, media
 
@@ -550,12 +578,32 @@ def handle_message(client: ILinkClient, msg: dict) -> None:
             model = sess["model_box"][0]
             reply = ""
             if media is not None:
+                media_type = media.get("type", "file")
+                media_url = media.get("url", "")
+                stt_text = str(media.get("stt_text", "") or "").strip()
+
+                # Voice item may include platform STT text even when no direct media URL is exposed.
+                if media_type == "audio" and not media_url and stt_text:
+                    prompt = (
+                        "[用户发送了语音消息，平台转写如下]\n"
+                        f"{stt_text}\n\n"
+                        "请根据这段转写内容回答用户；若信息不足，再追问。"
+                    )
+                    if text:
+                        prompt += f"\n\n用户补充：{text}"
+                    reply = _capture_turn(sess, prompt)
+                    _send_chunks(client, reply, from_user, ctx_token)
+                    return
+
+                if not media_url:
+                    raise RuntimeError("该媒体消息未提供可下载 URL（可能仅包含加密 CDN 引用）")
+
                 local_path = _download_media(
-                    media.get("url", ""),
-                    media_type=media.get("type", "file"),
+                    media_url,
+                    media_type=media_type,
                     filename=media.get("filename", ""),
                 )
-                if media.get("type") == "image" and _model_supports_vision(model):
+                if media_type == "image" and _model_supports_vision(model):
                     img_bytes = local_path.read_bytes()
                     b64 = base64.b64encode(img_bytes).decode()
                     content: list = []
