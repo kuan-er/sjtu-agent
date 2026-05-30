@@ -16,12 +16,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 import io
 import json
 import re
 import sys
 import threading
 import time
+import tempfile
 import datetime as _dt
 from pathlib import Path
 
@@ -44,6 +46,8 @@ from botpy.message import Message, DirectMessage
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[mKABCDEFGHJKST]")
 _MENTION_RE = re.compile(r"<@!?\d+>")
+_TMP_DIR = Path(tempfile.mkdtemp(prefix="sjtu_qq_"))
+_AUDIO_SUFFIXES = {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".amr", ".silk", ".aac"}
 
 
 def _load_cfg() -> dict:
@@ -206,6 +210,177 @@ def _split_text(text: str, max_len: int = 1500) -> list[str]:
     return chunks
 
 
+def _model_supports_vision(model: str) -> bool:
+    m = (model or "").lower()
+    return any(kw in m for kw in [
+        "vision", "gpt-4o", "gpt-4-turbo", "claude-3", "claude-4",
+        "gemini", "qwen-vl", "qwen3vl", "glm-4v", "internvl",
+        "sonnet-4", "opus-4", "haiku-4",
+    ])
+
+
+def _capture_turn_multimodal(sess: dict, content: list) -> str:
+    if not sess["messages"]:
+        sess["messages"].append({"role": "system", "content": agent.SYSTEM_PROMPT + _build_date_ctx() + _QQ_CTX})
+    else:
+        sess["messages"][0]["content"] = agent.SYSTEM_PROMPT + _build_date_ctx() + _QQ_CTX
+    sess["messages"].append({"role": "user", "content": content})
+
+    buf = io.StringIO()
+    old_stdout = sys.stdout
+    sys.stdout = buf
+    try:
+        agent._run_one_turn(
+            sess["client_box"][0],
+            sess["model_box"][0],
+            sess["messages"],
+        )
+    finally:
+        sys.stdout = old_stdout
+
+    clean = _ANSI_RE.sub("", buf.getvalue())
+    marker = "Agent: "
+    idx = clean.rfind(marker)
+    if idx == -1:
+        for m in reversed(sess["messages"]):
+            if m.get("role") == "assistant":
+                c = m.get("content", "")
+                if isinstance(c, str):
+                    return c.strip() or "(已完成)"
+                if isinstance(c, list):
+                    texts = [b.get("text", "") for b in c if b.get("type") == "text"]
+                    return "\n".join(texts).strip() or "(已完成)"
+        return "(已完成)"
+    return clean[idx + len(marker):].strip()
+
+
+def _guess_suffix_from_url(url: str, default: str = ".bin") -> str:
+    path = str(url or "").split("?")[0]
+    suffix = Path(path).suffix.lower()
+    return suffix or default
+
+
+def _guess_suffix_from_content_type(content_type: str, media_type: str = "file") -> str:
+    ct = (content_type or "").lower()
+    if "jpeg" in ct:
+        return ".jpg"
+    if "png" in ct:
+        return ".png"
+    if "webp" in ct:
+        return ".webp"
+    if "gif" in ct:
+        return ".gif"
+    if "pdf" in ct:
+        return ".pdf"
+    if "mpeg" in ct:
+        return ".mp3"
+    if "wav" in ct:
+        return ".wav"
+    if "mp4" in ct:
+        return ".mp4"
+    if "ogg" in ct:
+        return ".ogg"
+    if media_type == "audio":
+        return ".m4a"
+    if media_type == "image":
+        return ".jpg"
+    return ".bin"
+
+
+def _download_media(url: str, media_type: str = "file", filename: str = "") -> Path:
+    if not url:
+        raise RuntimeError("附件下载地址为空")
+    resp = requests.get(url, timeout=60)
+    if resp.status_code != 200:
+        raise RuntimeError(f"下载附件失败: HTTP {resp.status_code}")
+    name = (filename or "").strip()
+    if not name:
+        suffix = _guess_suffix_from_url(url, default="")
+        if not suffix:
+            suffix = _guess_suffix_from_content_type(resp.headers.get("content-type", ""), media_type=media_type)
+        name = f"qq_media_{int(time.time())}{suffix}"
+    save_path = _TMP_DIR / name
+    save_path.write_bytes(resp.content)
+    return save_path
+
+
+def _extract_qq_media(message) -> dict | None:
+    # Prefer botpy's attachments collection.
+    attachments = getattr(message, "attachments", None)
+    if isinstance(attachments, list):
+        for att in attachments:
+            url = str(getattr(att, "url", "") or "")
+            filename = str(getattr(att, "filename", "") or "")
+            content_type = str(getattr(att, "content_type", "") or "").lower()
+            if not url:
+                continue
+            if content_type.startswith("image/"):
+                media_type = "image"
+            elif content_type.startswith("audio/"):
+                media_type = "audio"
+            elif content_type.startswith("video/"):
+                media_type = "video"
+            else:
+                media_type = "file"
+            if media_type == "file" and _guess_suffix_from_url(url) in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}:
+                media_type = "image"
+            if media_type == "file" and (
+                Path(filename).suffix.lower() in _AUDIO_SUFFIXES
+                or _guess_suffix_from_url(url).lower() in _AUDIO_SUFFIXES
+            ):
+                media_type = "audio"
+            return {"type": media_type, "url": url, "filename": filename}
+
+    # Some event payloads provide direct image URL fields.
+    for key in ("image", "image_url", "audio_url", "voice_url", "ptt_url", "record_url", "video_url", "file_url", "url"):
+        val = getattr(message, key, None)
+        if isinstance(val, str) and val.startswith(("http://", "https://")):
+            if "image" in key:
+                media_type = "image"
+            elif any(x in key for x in ("audio", "voice", "ptt", "record")):
+                media_type = "audio"
+            elif "video" in key:
+                media_type = "video"
+            else:
+                media_type = "file"
+            return {"type": media_type, "url": val, "filename": ""}
+
+    return None
+
+
+def _build_parser_context(local_path: Path, media_type: str = "file", max_chars: int = 3000) -> tuple[str, str]:
+    try:
+        strategy = "auto"
+        if media_type == "image":
+            strategy = "paddleocr"
+        elif media_type == "audio":
+            strategy = "whisper"
+        parse_result = agent.tool_parse_local_file(
+            str(local_path),
+            max_chars=4000,
+            start_page=1,
+            strategy=strategy,
+        )
+        if not (parse_result or {}).get("ok") and strategy in {"paddleocr", "whisper"}:
+            parse_result = agent.tool_parse_local_file(
+                str(local_path),
+                max_chars=4000,
+                start_page=1,
+                strategy="auto",
+            )
+        extracted = (parse_result or {}).get("content", "")
+        if extracted:
+            parser_name = parse_result.get("parser", "unknown")
+            return (
+                f"\n\n以下是附件提取的文字内容（parser={parser_name}）：\n```\n{extracted[:max_chars]}\n```",
+                "",
+            )
+        err = (parse_result or {}).get("error", "")
+        return "", (err or "解析结果为空")
+    except Exception as ex:
+        return "", str(ex)
+
+
 class QQAgentClient(botpy.Client):
     async def on_ready(self):
         me = getattr(getattr(self, "robot", None), "username", "")
@@ -252,7 +427,8 @@ class QQAgentClient(botpy.Client):
             )
             return
 
-        if not text:
+        media = _extract_qq_media(message)
+        if not text and media is None:
             await self._reply_once(message, "请直接发送要咨询的内容。")
             return
 
@@ -263,7 +439,56 @@ class QQAgentClient(botpy.Client):
             return
 
         try:
-            reply = await asyncio.to_thread(_capture_turn, sess, text)
+            model = sess["model_box"][0]
+            if media is not None:
+                local_path = await asyncio.to_thread(
+                    _download_media,
+                    media.get("url", ""),
+                    media.get("type", "file"),
+                    media.get("filename", ""),
+                )
+                if media.get("type") == "image" and _model_supports_vision(model):
+                    img_bytes = local_path.read_bytes()
+                    b64 = base64.b64encode(img_bytes).decode()
+                    content: list = []
+                    if text:
+                        content.append({"type": "text", "text": text})
+                    else:
+                        content.append({"type": "text", "text": "用户发送了一张图片，请先描述内容，再回答用户问题。"})
+                    if agent._is_anthropic_model(model):
+                        content.append({
+                            "type": "image",
+                            "source": {"type": "base64", "media_type": "image/jpeg", "data": b64},
+                        })
+                    else:
+                        content.append({
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+                        })
+                    reply = await asyncio.to_thread(_capture_turn_multimodal, sess, content)
+                else:
+                    parsed_ctx, parse_err = await asyncio.to_thread(
+                        _build_parser_context,
+                        local_path,
+                        media.get("type", "file"),
+                    )
+                    user_text = (
+                        f"[用户通过 QQ 发送了附件]\n"
+                        f"  类型：{media.get('type', 'file')}\n"
+                        f"  文件名：{local_path.name}\n"
+                        f"  本地路径：{local_path}\n"
+                        f"  文件大小：{local_path.stat().st_size // 1024} KB"
+                    )
+                    if parsed_ctx:
+                        user_text += parsed_ctx
+                    else:
+                        user_text += f"\n\n（附件解析失败：{parse_err}）"
+                    if text:
+                        user_text += f"\n\n用户补充：{text}"
+                    user_text += "\n\n请根据已提取内容回答；若信息不足，再向用户追问。"
+                    reply = await asyncio.to_thread(_capture_turn, sess, user_text)
+            else:
+                reply = await asyncio.to_thread(_capture_turn, sess, text)
         except Exception as e:
             await self._reply_once(message, f"处理失败：{e}")
             return

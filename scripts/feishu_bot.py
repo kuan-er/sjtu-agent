@@ -18,6 +18,7 @@ feishu_bot.py — 将 agent.py 接入飞书（Lark）自建应用，长连接接
 """
 
 import argparse
+import base64
 import concurrent.futures
 import io
 import json
@@ -25,9 +26,11 @@ import re
 import sys
 import threading
 import time
+import tempfile
 import datetime as _dt
 from pathlib import Path
 
+import requests
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
@@ -317,10 +320,23 @@ _SEEN_TTL = 300  # 5 分钟
 _SEEN_CONTENT: dict[str, tuple[str, float]] = {}
 _SEEN_CONTENT_LOCK = threading.Lock()
 _CONTENT_DEDUP_SEC = 5
+_TMP_DIR = Path(tempfile.mkdtemp(prefix="sjtu_feishu_"))
+_TOKEN_LOCK = threading.Lock()
+_TENANT_TOKEN = ""
+_TENANT_TOKEN_EXPIRES_AT = 0.0
 
 
 def _is_duplicate(message_id: str) -> bool:
     """检查 message_id 是否已处理过，防止飞书重发导致重复回复。"""
+    now = time.time()
+    with _SEEN_IDS_LOCK:
+        expired = [mid for mid, ts in _SEEN_IDS.items() if now - ts > _SEEN_TTL]
+        for mid in expired:
+            del _SEEN_IDS[mid]
+        if message_id in _SEEN_IDS:
+            return True
+        _SEEN_IDS[message_id] = now
+        return False
 
 
 def _is_duplicate_content(sender_id: str, text: str) -> bool:
@@ -334,15 +350,144 @@ def _is_duplicate_content(sender_id: str, text: str) -> bool:
                 return True
         _SEEN_CONTENT[key] = (text, now)
     return False
+
+
+def _model_supports_vision(model: str) -> bool:
+    m = (model or "").lower()
+    return any(kw in m for kw in [
+        "vision", "gpt-4o", "gpt-4-turbo", "claude-3", "claude-4",
+        "gemini", "qwen-vl", "qwen3vl", "glm-4v", "internvl",
+        "sonnet-4", "opus-4", "haiku-4",
+    ])
+
+
+def _capture_turn_multimodal(sess: dict, content: list) -> str:
+    _init_messages(sess)
+    if sess["messages"] and sess["messages"][0]["role"] == "system":
+        sess["messages"][0]["content"] = agent.SYSTEM_PROMPT + _build_date_ctx() + _FS_CTX
+    sess["messages"].append({"role": "user", "content": content})
+
+    buf = io.StringIO()
+    old_stdout = sys.stdout
+    sys.stdout = buf
+    try:
+        agent._run_one_turn(
+            sess["client_box"][0],
+            sess["model_box"][0],
+            sess["messages"],
+        )
+    finally:
+        sys.stdout = old_stdout
+
+    clean = _ANSI_RE.sub("", buf.getvalue())
+    marker = "Agent: "
+    idx = clean.rfind(marker)
+    if idx == -1:
+        for m in reversed(sess["messages"]):
+            if m.get("role") == "assistant":
+                c = m.get("content", "")
+                if isinstance(c, str):
+                    return c.strip() or "(已完成)"
+                if isinstance(c, list):
+                    texts = [b.get("text", "") for b in c if b.get("type") == "text"]
+                    return "\n".join(texts).strip() or "(已完成)"
+        return "(已完成)"
+    return clean[idx + len(marker):].strip()
+
+
+def _get_tenant_access_token() -> str:
+    global _TENANT_TOKEN, _TENANT_TOKEN_EXPIRES_AT
     now = time.time()
-    with _SEEN_IDS_LOCK:
-        expired = [mid for mid, ts in _SEEN_IDS.items() if now - ts > _SEEN_TTL]
-        for mid in expired:
-            del _SEEN_IDS[mid]
-        if message_id in _SEEN_IDS:
-            return True
-        _SEEN_IDS[message_id] = now
-        return False
+    with _TOKEN_LOCK:
+        if _TENANT_TOKEN and now < _TENANT_TOKEN_EXPIRES_AT - 30:
+            return _TENANT_TOKEN
+
+        resp = requests.post(
+            "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+            json={"app_id": APP_ID, "app_secret": APP_SECRET},
+            timeout=15,
+        )
+        data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+        if data.get("code") != 0 or not data.get("tenant_access_token"):
+            raise RuntimeError(f"获取 tenant_access_token 失败: {data or resp.text[:200]}")
+
+        _TENANT_TOKEN = data["tenant_access_token"]
+        expires_in = int(data.get("expire", 7200) or 7200)
+        _TENANT_TOKEN_EXPIRES_AT = now + max(60, expires_in)
+        return _TENANT_TOKEN
+
+
+def _guess_suffix(filename: str, content_type: str, default: str = ".bin") -> str:
+    name = (filename or "").strip()
+    if "." in name:
+        return Path(name).suffix.lower() or default
+    ct = (content_type or "").lower()
+    if "jpeg" in ct:
+        return ".jpg"
+    if "png" in ct:
+        return ".png"
+    if "webp" in ct:
+        return ".webp"
+    if "gif" in ct:
+        return ".gif"
+    if "pdf" in ct:
+        return ".pdf"
+    if "json" in ct:
+        return ".json"
+    if "plain" in ct or "text/" in ct:
+        return ".txt"
+    if "msword" in ct:
+        return ".doc"
+    if "officedocument.wordprocessingml" in ct:
+        return ".docx"
+    if "officedocument.presentationml" in ct:
+        return ".pptx"
+    if "officedocument.spreadsheetml" in ct:
+        return ".xlsx"
+    return default
+
+
+def _download_feishu_resource(message_id: str, file_key: str, res_type: str, filename: str = "") -> Path:
+    token = _get_tenant_access_token()
+    url = f"https://open.feishu.cn/open-apis/im/v1/messages/{message_id}/resources/{file_key}"
+    resp = requests.get(url, params={"type": res_type}, headers={"Authorization": f"Bearer {token}"}, timeout=60)
+    if resp.status_code != 200 and res_type == "audio":
+        resp = requests.get(url, params={"type": "file"}, headers={"Authorization": f"Bearer {token}"}, timeout=60)
+    if resp.status_code != 200:
+        raise RuntimeError(f"下载飞书资源失败: HTTP {resp.status_code} {resp.text[:200]}")
+
+    suffix = _guess_suffix(filename, resp.headers.get("content-type", ""), default=".bin")
+    name = (filename or "").strip()
+    if not name:
+        name = f"{res_type}_{file_key[:10]}{suffix}"
+    save_path = _TMP_DIR / name
+    save_path.write_bytes(resp.content)
+    return save_path
+
+
+def _extract_media_ref(msg_type: str, content_json: str) -> dict | None:
+    try:
+        obj = json.loads(content_json or "{}")
+    except Exception:
+        return None
+    if msg_type == "image":
+        image_key = str(obj.get("image_key", "") or "").strip()
+        if not image_key:
+            return None
+        return {"type": "image", "key": image_key, "filename": f"image_{image_key[:10]}.jpg"}
+    if msg_type == "file":
+        file_key = str(obj.get("file_key", "") or "").strip()
+        if not file_key:
+            return None
+        file_name = str(obj.get("file_name", "") or "").strip()
+        return {"type": "file", "key": file_key, "filename": file_name}
+    if msg_type == "audio":
+        audio_key = str(obj.get("file_key", "") or obj.get("audio_key", "") or "").strip()
+        if not audio_key:
+            return None
+        file_name = str(obj.get("file_name", "") or f"audio_{audio_key[:10]}.m4a").strip()
+        return {"type": "audio", "key": audio_key, "filename": file_name}
+    return None
 
 
 # ── Markdown → 飞书 post / interactive 转换 ───────────────────────────────────
@@ -937,10 +1082,43 @@ def _process_hw_command(sender_open_id: str, message_id: str, text: str) -> None
         _reply_text(message_id, f"[homework] 出错：{e}")
 
 
+def _build_parser_context(local_path: Path, media_type: str = "file", max_chars: int = 3000) -> tuple[str, str]:
+    try:
+        strategy = "auto"
+        if media_type == "image":
+            strategy = "paddleocr"
+        elif media_type == "audio":
+            strategy = "whisper"
+        parse_result = agent.tool_parse_local_file(
+            str(local_path),
+            max_chars=4000,
+            start_page=1,
+            strategy=strategy,
+        )
+        if not (parse_result or {}).get("ok") and strategy in {"paddleocr", "whisper"}:
+            parse_result = agent.tool_parse_local_file(
+                str(local_path),
+                max_chars=4000,
+                start_page=1,
+                strategy="auto",
+            )
+        extracted = (parse_result or {}).get("content", "")
+        if extracted:
+            parser_name = parse_result.get("parser", "unknown")
+            return (
+                f"\n\n以下是附件提取的文字内容（parser={parser_name}）：\n```\n{extracted[:max_chars]}\n```",
+                "",
+            )
+        err = (parse_result or {}).get("error", "")
+        return "", (err or "解析结果为空")
+    except Exception as ex:
+        return "", str(ex)
+
+
 def _process_in_thread(sender_open_id: str, message_id: str, text: str) -> None:
     """Phase 2: 在后台线程中执行 LLM 推理 + 回复。"""
     # 防御性检查：如果主循环已拦截并回复，不再走 LLM
-    t = text.strip()
+    t = text.strip() if text else ""
     if any(kw in t for kw in ["最近更新", "新功能", "新版变化", "更新了什么"]):
         return
     conv, meta, lock = _get_active_conv(sender_open_id)
@@ -958,6 +1136,66 @@ def _process_in_thread(sender_open_id: str, message_id: str, text: str) -> None:
     _reply_text(message_id, reply)
     # 每次对话后持久化会话状态
     _save_sessions()
+
+
+def _process_media_in_thread(sender_open_id: str, message_id: str, msg_type: str, content_json: str) -> None:
+    conv, meta, lock = _get_active_conv(sender_open_id)
+    if not lock.acquire(blocking=False):
+        _reply_text(message_id, "上一条消息还在处理中，请稍候…")
+        return
+    try:
+        media = _extract_media_ref(msg_type, content_json)
+        if not media:
+            _reply_text(message_id, f"暂不支持解析该消息内容（类型={msg_type}）。")
+            return
+
+        local_path = _download_feishu_resource(
+            message_id=message_id,
+            file_key=media["key"],
+            res_type=media["type"],
+            filename=media.get("filename", ""),
+        )
+        model = conv["model_box"][0]
+
+        if msg_type == "image" and _model_supports_vision(model):
+            img_bytes = local_path.read_bytes()
+            b64 = base64.b64encode(img_bytes).decode()
+            content: list = [{"type": "text", "text": "用户发送了一张图片，请先描述图片内容，再回答用户问题。"}]
+            if agent._is_anthropic_model(model):
+                content.append({
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": "image/jpeg", "data": b64},
+                })
+            else:
+                content.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+                })
+            reply = _capture_turn_multimodal(conv, content)
+            _reply_text(message_id, reply)
+            return
+
+        parsed_ctx, parse_err = _build_parser_context(local_path, media_type=msg_type)
+        user_text = (
+            f"[用户通过飞书发送了附件]\n"
+            f"  类型：{msg_type}\n"
+            f"  文件名：{local_path.name}\n"
+            f"  本地路径：{local_path}\n"
+            f"  文件大小：{local_path.stat().st_size // 1024} KB"
+        )
+        if parsed_ctx:
+            user_text += parsed_ctx
+        else:
+            user_text += f"\n\n（附件解析失败：{parse_err}）"
+        user_text += "\n\n请根据已提取内容回答；若信息不足，再向用户追问。"
+        reply = _capture_turn(conv, user_text)
+        _reply_text(message_id, reply)
+    except Exception as e:
+        print(f"[feishu] 媒体处理出错：{e}")
+        _reply_text(message_id, f"附件处理失败：{e}")
+    finally:
+        lock.release()
+        _save_sessions()
 
 
 def _handle_message(data: P2ImMessageReceiveV1) -> None:
@@ -989,21 +1227,22 @@ def _handle_message(data: P2ImMessageReceiveV1) -> None:
                   f"age={time.time() - create_time_ms / 1000:.0f}s")
             return
 
-        if msg_type != "text":
-            _reply_text(message_id, f"(暂不支持的消息类型: {msg_type}，目前只接收文本)")
-            return
-
-        text = _extract_text(msg.content)
-        if not text:
-            return
-
-        # 内容去重：防止飞书用不同 message_id 重发同一事件
-        if _is_duplicate_content(sender_open_id, text):
-            print(f"[feishu] 跳过重复内容: {text[:40]!r}")
+        media_supported = msg_type in {"image", "file", "audio"}
+        text = ""
+        if msg_type == "text":
+            text = _extract_text(msg.content)
+            if not text:
+                return
+            # 内容去重：防止飞书用不同 message_id 重发同一事件
+            if _is_duplicate_content(sender_open_id, text):
+                print(f"[feishu] 跳过重复内容: {text[:40]!r}")
+                return
+        elif not media_supported:
+            _reply_text(message_id, f"(暂不支持的消息类型: {msg_type}，目前支持文本、图片、文件、音频)")
             return
 
         # ── 自然语言短语拦截 ────────────────────────────────────────
-        t = text.strip()
+        t = text.strip() if text else ""
         if any(kw in t for kw in ["最近更新", "新功能", "新版变化", "更新了什么"]):
             now = time.time()
             with _cooldown_lock:
@@ -1086,7 +1325,10 @@ def _handle_message(data: P2ImMessageReceiveV1) -> None:
                 pass
 
         # ── 提交到后台线程，立即返回 ──
-        _EXECUTOR.submit(_process_in_thread, sender_open_id, message_id, text)
+        if msg_type == "text":
+            _EXECUTOR.submit(_process_in_thread, sender_open_id, message_id, text)
+        else:
+            _EXECUTOR.submit(_process_media_in_thread, sender_open_id, message_id, msg_type, msg.content)
 
     except Exception as e:
         print(f"[feishu] handler 异常：{e}")

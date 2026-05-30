@@ -38,6 +38,8 @@ from sjtu_agent.paths import (
 )
 from sjtu_agent.parsing import parse_file as parse_router_file
 
+ROOT = PROJECT_ROOT
+
 try:
     from playwright.sync_api import sync_playwright
     HAS_PLAYWRIGHT = True
