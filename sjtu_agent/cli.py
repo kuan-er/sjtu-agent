@@ -58,6 +58,22 @@ def _run_module(module_name: str, script_args: list[str] | None = None) -> int:
         sys.argv = old_argv
 
 
+def _run_script(script_name: str, script_args: list[str] | None = None) -> int:
+    """Run a script from the scripts/ directory via runpy.run_path."""
+    root = Path(__file__).resolve().parent.parent
+    script = root / "scripts" / f"{script_name}.py"
+    old_argv = sys.argv[:]
+    sys.argv = [str(script), *(script_args or [])]
+    try:
+        runpy.run_path(str(script), run_name="__main__")
+        return 0
+    except SystemExit as exc:
+        code = exc.code
+        return code if isinstance(code, int) else 0
+    finally:
+        sys.argv = old_argv
+
+
 def _cmd_doctor(_: argparse.Namespace) -> int:
     import agent
 
@@ -263,6 +279,10 @@ def _cmd_qq_bot(args: argparse.Namespace) -> int:
     return _run_script("qq_bot", args.script_args)
 
 
+def _cmd_email_watcher(args: argparse.Namespace) -> int:
+    return _run_script("email_watcher", args.script_args)
+
+
 def _cmd_remind_check(args: argparse.Namespace) -> int:
     return _run_script("remind_check", args.script_args)
 
@@ -448,6 +468,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_passthrough_parser(subparsers, "telegram-bot", "start the Telegram bot", _cmd_telegram_bot)
     _add_passthrough_parser(subparsers, "feishu-bot", "start the Feishu (Lark) bot (long connection)", _cmd_feishu_bot)
     _add_passthrough_parser(subparsers, "qq-bot", "start the QQ official bot (botpy)", _cmd_qq_bot)
+    _add_passthrough_parser(subparsers, "email-watcher", "monitor SJTU email and push new mail via Feishu", _cmd_email_watcher)
     _add_passthrough_parser(subparsers, "remind-check", "run the reminder daemon once", _cmd_remind_check)
     _add_passthrough_parser(subparsers, "news-digest", "run the smart news digest (collect + rank + push)", _cmd_news_digest)
     _add_passthrough_parser(subparsers, "mcp", "start the MCP server", _cmd_mcp)

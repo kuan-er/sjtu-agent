@@ -214,6 +214,21 @@ psmux -L sjtu-agent ls
 
 > **推荐组合**：`daily-report`、`remind-check` 用 taskschd（定时）；`feishu-bot`、`telegram-bot`、`wechat-bot`、`qq-bot`、`web` 用 psmux（常驻）。
 
+### 飞书 Bot 桌面启动器（Windows）
+
+提供图形界面启动器，无需打开终端即可一键启动/停止飞书 Bot：
+
+```batch
+# 双击运行即可
+install\launch-feishu.bat
+```
+
+功能：
+- ▶ 启动 / ■ 停止飞书 Bot
+- 查看 Bot 运行状态和最近输出
+- 无终端窗口，纯 GUI 操作
+- 需要 psmux 已安装
+
 ## 在飞书中使用 Bot
 
 > 每位用户需要**自建一个飞书应用**作为 bot 的"外壳"（飞书不支持公共多租户 bot，必须挂在你自己的组织/账号下）。整个过程约 5 分钟。

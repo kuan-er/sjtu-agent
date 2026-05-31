@@ -75,6 +75,14 @@ _SERVICE_SPECS = {
         "has_timer": False,
         "wants_after": "network-online.target",
     },
+    "email-watcher": {
+        "unit_name": "sjtu-agent-email-watcher",
+        "subcommand": "email-watcher",
+        "log": "email_watcher.systemd.log",
+        "restart": "always",
+        "has_timer": False,
+        "wants_after": "network-online.target",
+    },
     "qq-bot": {
         "unit_name": "sjtu-agent-qq-bot",
         "subcommand": "qq-bot",

@@ -70,6 +70,14 @@ _SERVICE_SPECS = {
         "schedule_type": "none",
         "keep_alive": True,
     },
+    "email-watcher": {
+        "label": "com.sjtu.email-watcher",
+        "subcommand": "email-watcher",
+        "log": "email_watcher.launchd.log",
+        "run_at_load": True,
+        "schedule_type": "none",
+        "keep_alive": True,
+    },
     "qq-bot": {
         "label": "com.sjtu.qq-bot",
         "subcommand": "qq-bot",

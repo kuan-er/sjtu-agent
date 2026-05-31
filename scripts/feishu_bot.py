@@ -233,6 +233,8 @@ _RECENT_UPDATES_TEXT = (
     "- **📊 MATLAB 作业图表**：自动检测本机 MATLAB，优先生成矢量 PDF 图表嵌入 LaTeX 解答\n"
     "- **📅 日报优化**：晚间日报自动预告明日课表，午间日报过滤已结束课程\n"
     "- **🔢 序号从 1 开始**：对话列表和作业列表统一使用 1-based 编号\n"
+    "- **📧 邮件监控**：自动检查交大邮箱新邮件，推送到飞书（纯通知，永不发送/删除）\n"
+    "- **📄 LaTeX 模板**：/template 套用 SJTU 毕业论文/课程报告模板，自动格式化 + 编译 PDF\n"
     "- **✅ CI 流水线**：GitHub Actions 自动测试（Python 3.11/3.13）\n"
     "\n"
     "输入 /help 查看所有命令~"
@@ -1077,6 +1079,24 @@ def _handle_commands(open_id: str, text: str) -> str | None:
                 return _do_hw_answer(open_id)
             else:
                 return run_homework_check(list_only=True)
+        if cmd == "/template":
+            sub = parts[1].strip() if len(parts) > 1 else ""
+            from sjtu_agent.overleaf_client import list_local_templates
+            templates = list_local_templates()
+            if not templates:
+                return "暂无可用模板。请从 SJTU Overleaf Gallery 克隆模板到本地。"
+            if not sub:
+                lines = ["📄 **可用模板**："]
+                for t in templates:
+                    src = "📦 内置" if t["source"] == "builtin" else "📥 下载"
+                    lines.append(f"  [{t['name']}] {t['description']} {src}")
+                lines.append("\n/template <名称> 套用模板")
+                return "\n".join(lines)
+            # 查找模板
+            match = next((t for t in templates if t["name"] == sub), None)
+            if not match:
+                return f"模板不存在: {sub}。用 /template 查看可用模板。"
+            return f"[template] 📄 模板 {sub} 已就绪。\n\n由于模板文件需从 SJTU Overleaf Gallery 获取具体 .cls/.sty 文件，请先执行：\n```\ngit clone https://latex.sjtu.edu.cn/git/<project-id> sjtu_agent/sjtu_templates/{sub}\n```\n完成后即可用 /template {sub} 套用。"
         return f"未知命令：{cmd}。输入 /help 查看可用命令。"
 
 

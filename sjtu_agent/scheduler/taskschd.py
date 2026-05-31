@@ -49,6 +49,12 @@ _SERVICE_SPECS = {
         "log": "remind_check.task.log",
         "schedule": "minute",   # 每分钟
     },
+    "email-watcher": {
+        "task_name": f"{_TASK_PREFIX}-EmailWatcher",
+        "subcommand": "email-watcher --once",
+        "log": "email_watcher.task.log",
+        "schedule": "minute",
+    },
     "telegram-bot": {
         "task_name": f"{_TASK_PREFIX}-TelegramBot",
         "subcommand": "telegram-bot",
