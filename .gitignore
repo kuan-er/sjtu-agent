@@ -37,3 +37,7 @@ com.sjtu.*.plist
 
 # Session summaries
 sessions/
+
+# Local runtime test artifacts
+.test_runtime_manual/
+.test_runtime_other/
