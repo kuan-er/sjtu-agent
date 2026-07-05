@@ -112,13 +112,21 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_ddls",
-            "description": "获取所有平台（Canvas / AI 好课（aihaoke） / 中国大学MOOC）未完成 DDL，按截止时间升序。",
+            "description": "获取所有平台（Canvas / AI 好课（aihaoke） / 中国大学MOOC）未完成 DDL，按截止时间升序。默认自动过滤 Canvas 课程通知（评分/问卷等非作业条目）。",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "skip_canvas":  {"type": "boolean"},
                     "skip_aihaoke": {"type": "boolean"},
                     "skip_icourse": {"type": "boolean"},
+                    "classify": {
+                        "type": "boolean",
+                        "description": "是否对 Canvas 作业进行智能分类（区分真实作业与课程通知）。日报和用户主动查 DDL 时传 true。",
+                    },
+                    "include_notifications": {
+                        "type": "boolean",
+                        "description": "是否包含课程通知类条目。用户说「全部」「包括通知」时传 true。默认 false（过滤通知）。",
+                    },
                 },
                 "required": [],
             },
@@ -1432,7 +1440,7 @@ def _serialize_ddl(item: dict, now=None) -> dict:
         now = _dt.datetime.now(dc.CST)
     total_seconds = (item["due"] - now).total_seconds()
     hours_left    = int(total_seconds / 3600)
-    return {
+    result = {
         "platform":   item["platform"],
         "course":     item["course"],
         "name":       item["name"],
@@ -1441,6 +1449,11 @@ def _serialize_ddl(item: dict, now=None) -> dict:
         "expired":    total_seconds < 0,
         "submitted":  item.get("submitted", False),
     }
+    # 如果有分类信息则带上
+    if item.get("type"):
+        result["type"] = item["type"]
+        result["type_confidence"] = item.get("type_confidence", 0.0)
+    return result
 
 
 def _serialize_lab(lab: dict | None) -> dict | None:
@@ -2097,19 +2110,23 @@ def _ddl_cache_set(cache_key: str, data: list) -> None:
     _ddl_cache_save(store)
 
 
-def _fetch_ddls_parallel(cfg: dict, skip_canvas=False, skip_aihaoke=False, skip_icourse=False) -> list:
+def _fetch_ddls_parallel(cfg: dict, skip_canvas=False, skip_aihaoke=False,
+                          skip_icourse=False, classify: bool = False) -> list:
     """并行拉取各平台 DDL，返回合并列表（未排序）。
-    优先使用 15 分钟内的磁盘缓存，缓存命中时无需发起任何网络请求。
+    优先使用 15 分钟内的磁盘缓存。
+    classify=True 时使用独立缓存键（含 description/type），避免缓存污染。
     """
     import concurrent.futures as _cf
 
     cache_key = f"{skip_canvas},{skip_aihaoke},{skip_icourse}"
+    if classify:
+        cache_key += ",classify"
     cached = _ddl_cache_get(cache_key)
     if cached is not None:
         return cached
 
     tasks = []
-    if not skip_canvas:   tasks.append(("canvas",  lambda: dc.fetch_canvas(cfg)))
+    if not skip_canvas:   tasks.append(("canvas",  lambda: dc.fetch_canvas(cfg, classify=classify)))
     if not skip_aihaoke:  tasks.append(("aihaoke", lambda: dc.fetch_aihaoke(cfg)))
     if not skip_icourse:  tasks.append(("icourse", lambda: dc.fetch_icourse(cfg)))
 
@@ -2355,20 +2372,47 @@ def _check_for_updates() -> None:
 _UPDATE_AVAILABLE: dict = {}
 
 
-def tool_get_ddls(skip_canvas=False, skip_aihaoke=False, skip_icourse=False):
+def tool_get_ddls(skip_canvas=False, skip_aihaoke=False, skip_icourse=False,
+                  classify: bool = False, include_notifications: bool = False):
     import datetime as _dt
     cfg = dc.load_config()
     now = _dt.datetime.now(dc.CST)
-    all_ddl = _fetch_ddls_parallel(cfg, skip_canvas, skip_aihaoke, skip_icourse)
+
+    # 当 classify=True 时，需要原始数据（含 description）做分类
+    fetch_classify = classify
+    all_ddl = _fetch_ddls_parallel(cfg, skip_canvas, skip_aihaoke, skip_icourse,
+                                    classify=fetch_classify)
+
+    if classify:
+        _classify_canvas_ddls(all_ddl)
+
     all_ddl.sort(key=lambda x: x["due"])
     warnings = []
     if not skip_canvas and not (cfg.get("canvas_token") and not cfg.get("canvas_token", "").startswith("YOUR_")):
         warnings.append("Canvas 未配置 token；请先调用 setup_canvas 获取引导，生成后再用 save_credentials 保存。")
-    return {
+
+    serialized = [_serialize_ddl(x, now) for x in all_ddl if not x.get("submitted")]
+
+    # 默认过滤通知类（除非用户明确要求）
+    notification_count = 0
+    if classify and not include_notifications:
+        filtered = []
+        for d in serialized:
+            if d.get("type") == "notification":
+                notification_count += 1
+            else:
+                filtered.append(d)
+        serialized = filtered
+
+    result = {
         "current_time": now.strftime("%Y-%m-%d %H:%M"),
-        "ddls": [_serialize_ddl(x, now) for x in all_ddl if not x.get("submitted")],
+        "ddls": serialized,
         "warnings": warnings,
     }
+    if classify and notification_count > 0:
+        result["filtered_notifications"] = notification_count
+        result["hint"] = f"已过滤 {notification_count} 条课程通知（评分/问卷/公告等）。回复「全部DDL」可查看所有条目。"
+    return result
 
 
 def tool_get_next_lab():
