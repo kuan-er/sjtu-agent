@@ -114,8 +114,9 @@ def make_session(cookies: dict, referer: str = "") -> requests.Session:
 
 # ── Platform 1: Canvas LMS ────────────────────────────────────────────────────
 
-def fetch_canvas(cfg: dict, include_past: bool = False) -> list[dict]:
-    """通过 Canvas REST API 获取作业。include_past=True 时包含已过期的历史作业。"""
+def fetch_canvas(cfg: dict, include_past: bool = False, classify: bool = False) -> list[dict]:
+    """通过 Canvas REST API 获取作业。include_past=True 时包含已过期的历史作业。
+    classify=True 时额外返回 description 和 submission_types 字段用于智能分类。"""
     token = cfg.get("canvas_token", "").strip()
     base = cfg.get("canvas_base_url", "https://oc.sjtu.edu.cn").rstrip("/")
     if not token or token.startswith("YOUR_"):
@@ -165,7 +166,11 @@ def fetch_canvas(cfg: dict, include_past: bool = False) -> list[dict]:
                 due = parse_dt(a.get("due_at", ""))
                 if not include_past and (not due or due < datetime.now(CST)):
                     continue
-                pending.append({"id": a["id"], "name": a.get("name", "未知作业"), "due": due})
+                item = {"id": a["id"], "name": a.get("name", "未知作业"), "due": due}
+                if classify:
+                    item["description"] = a.get("description", "") or ""
+                    item["submission_types"] = a.get("submission_types", []) or []
+                pending.append(item)
             asgn_url = r.links.get("next", {}).get("url")
             asgn_params = {}
 
@@ -189,7 +194,7 @@ def fetch_canvas(cfg: dict, include_past: bool = False) -> list[dict]:
             print(f"[Canvas] 查询 {cname} 提交状态失败：{e}")
 
         for a in pending:
-            results.append({
+            entry = {
                 "platform": "Canvas",
                 "course": cname,
                 "name": a["name"],
@@ -198,7 +203,11 @@ def fetch_canvas(cfg: dict, include_past: bool = False) -> list[dict]:
                 "course_id": cid,
                 "assignment_id": a["id"],
                 "url": f"{base}/courses/{cid}/assignments/{a['id']}",
-            })
+            }
+            if classify:
+                entry["description"] = a.get("description", "")
+                entry["submission_types"] = a.get("submission_types", [])
+            results.append(entry)
 
     return results
 
