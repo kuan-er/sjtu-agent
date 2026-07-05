@@ -381,8 +381,11 @@ class TestFrequencyStats:
         assert _compute_frequency_stats([]) == {}
 
     def test_weighting(self):
+        import datetime as _dt
         from sjtu_agent.agent.tools._dining import _compute_frequency_stats
-        stats = _compute_frequency_stats(SAMPLE_DINING_HISTORY)
+        # Use a fixed "now" just after the sample data dates so test is not time-sensitive
+        fixed_now = _dt.datetime(2026, 6, 19, 0, 0, 0, tzinfo=CST)
+        stats = _compute_frequency_stats(SAMPLE_DINING_HISTORY, now=fixed_now)
         # canteen 300 appears 3 times: June 15, 16, 17
         # all within 7 days → 2x weight each = 6.0
         assert stats[300] == pytest.approx(6.0, abs=0.1)
@@ -536,7 +539,7 @@ class TestScoreCanteen:
             _compute_time_stats, _compute_last_visits, _compute_cuisine_history,
         )
         now = _dt.datetime(2026, 6, 18, 12, 0, 0, tzinfo=CST)
-        freq = _compute_frequency_stats(SAMPLE_DINING_HISTORY)
+        freq = _compute_frequency_stats(SAMPLE_DINING_HISTORY, now=now)
         time_s = _compute_time_stats(SAMPLE_DINING_HISTORY)
         last = _compute_last_visits(SAMPLE_DINING_HISTORY)
         cuisine = _compute_cuisine_history(SAMPLE_DINING_HISTORY)

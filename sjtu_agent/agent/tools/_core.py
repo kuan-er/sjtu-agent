@@ -72,6 +72,10 @@ from sjtu_agent.agent.tools._user_profile import (
     TOOLS_ENTRIES as _USER_PROFILE_TOOLS,
     tool_get_user_profile, tool_update_user_profile,
 )
+from sjtu_agent.agent.tools._report_prefs import (
+    TOOLS_ENTRIES as _REPORT_PREFS_TOOLS,
+    tool_get_report_preferences, tool_update_report_preferences,
+)
 from sjtu_agent.agent.tools._python_exec import (
     TOOLS_ENTRIES as _PYTHON_EXEC_TOOLS,
     tool_execute_python,
@@ -112,13 +116,21 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_ddls",
-            "description": "获取所有平台（Canvas / AI 好课（aihaoke） / 中国大学MOOC）未完成 DDL，按截止时间升序。",
+            "description": "获取所有平台（Canvas / AI 好课（aihaoke） / 中国大学MOOC）未完成 DDL，按截止时间升序。默认自动过滤 Canvas 课程通知（评分/问卷等非作业条目）。",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "skip_canvas":  {"type": "boolean"},
                     "skip_aihaoke": {"type": "boolean"},
                     "skip_icourse": {"type": "boolean"},
+                    "classify": {
+                        "type": "boolean",
+                        "description": "是否对 Canvas 作业进行智能分类（区分真实作业与课程通知）。日报和用户主动查 DDL 时传 true。",
+                    },
+                    "include_notifications": {
+                        "type": "boolean",
+                        "description": "是否包含课程通知类条目。用户说「全部」「包括通知」时传 true。默认 false（过滤通知）。",
+                    },
                 },
                 "required": [],
             },
@@ -826,6 +838,7 @@ TOOLS = [
     },
     *_REMINDER_TOOLS,
     *_USER_PROFILE_TOOLS,
+    *_REPORT_PREFS_TOOLS,
     *_PLATFORM_TOOLS,
     {
         "type": "function",
@@ -1432,7 +1445,7 @@ def _serialize_ddl(item: dict, now=None) -> dict:
         now = _dt.datetime.now(dc.CST)
     total_seconds = (item["due"] - now).total_seconds()
     hours_left    = int(total_seconds / 3600)
-    return {
+    result = {
         "platform":   item["platform"],
         "course":     item["course"],
         "name":       item["name"],
@@ -1441,6 +1454,11 @@ def _serialize_ddl(item: dict, now=None) -> dict:
         "expired":    total_seconds < 0,
         "submitted":  item.get("submitted", False),
     }
+    # 如果有分类信息则带上
+    if item.get("type"):
+        result["type"] = item["type"]
+        result["type_confidence"] = item.get("type_confidence", 0.0)
+    return result
 
 
 def _serialize_lab(lab: dict | None) -> dict | None:
@@ -2097,19 +2115,23 @@ def _ddl_cache_set(cache_key: str, data: list) -> None:
     _ddl_cache_save(store)
 
 
-def _fetch_ddls_parallel(cfg: dict, skip_canvas=False, skip_aihaoke=False, skip_icourse=False) -> list:
+def _fetch_ddls_parallel(cfg: dict, skip_canvas=False, skip_aihaoke=False,
+                          skip_icourse=False, classify: bool = False) -> list:
     """并行拉取各平台 DDL，返回合并列表（未排序）。
-    优先使用 15 分钟内的磁盘缓存，缓存命中时无需发起任何网络请求。
+    优先使用 15 分钟内的磁盘缓存。
+    classify=True 时使用独立缓存键（含 description/type），避免缓存污染。
     """
     import concurrent.futures as _cf
 
     cache_key = f"{skip_canvas},{skip_aihaoke},{skip_icourse}"
+    if classify:
+        cache_key += ",classify"
     cached = _ddl_cache_get(cache_key)
     if cached is not None:
         return cached
 
     tasks = []
-    if not skip_canvas:   tasks.append(("canvas",  lambda: dc.fetch_canvas(cfg)))
+    if not skip_canvas:   tasks.append(("canvas",  lambda: dc.fetch_canvas(cfg, classify=classify)))
     if not skip_aihaoke:  tasks.append(("aihaoke", lambda: dc.fetch_aihaoke(cfg)))
     if not skip_icourse:  tasks.append(("icourse", lambda: dc.fetch_icourse(cfg)))
 
@@ -2127,6 +2149,135 @@ def _fetch_ddls_parallel(cfg: dict, skip_canvas=False, skip_aihaoke=False, skip_
 
     _ddl_cache_set(cache_key, all_ddl)
     return all_ddl
+
+
+def _classify_canvas_ddls(ddls: list) -> list:
+    """对 Canvas DDL 列表进行智能分类（作业 / 通知 / 其他）。
+
+    规则预筛 + LLM 批量分类。结果写回每个 dict 的 type 和 type_confidence 字段。
+    仅处理 platform == "Canvas" 且有 description 字段的项。
+    """
+    import json as _json
+    from sjtu_agent.agent.chat_loop import load_agent_config as _load_cfg
+    from sjtu_agent.agent.runner import _make_client as _make_llm_client
+
+    # 只处理 Canvas 且有 description 的项
+    canvas_items = [
+        (i, d) for i, d in enumerate(ddls)
+        if d.get("platform") == "Canvas" and d.get("description") is not None
+    ]
+    if not canvas_items:
+        return ddls
+
+    # ── 规则预筛 ──
+    notification_keywords = ["通知", "公告", "提醒", "评分", "评价", "问卷", "反馈",
+                              "评分标准", "课程介绍", "Syllabus", "教学大纲"]
+    need_llm = []
+    for idx, d in canvas_items:
+        desc = (d.get("description") or "").strip()
+        sub_types = d.get("submission_types") or []
+        name = d.get("name", "")
+
+        # 规则1: submission_types 为 ["none"] 或空，且名称/描述含关键词 → notification
+        is_none_submission = (not sub_types or sub_types == ["none"])
+        if is_none_submission:
+            text = f"{name} {desc}"
+            if any(kw in text for kw in notification_keywords):
+                d["type"] = "notification"
+                d["type_confidence"] = 1.0
+                continue
+
+        # 规则2: submission_types 包含实际提交类型 (online_upload/online_text_entry/online_url)
+        #         且名称不含通知关键词 → 疑似作业，交给 LLM
+        has_real_submission = any(
+            t in sub_types for t in ["online_upload", "online_text_entry", "online_url",
+                                      "online_quiz", "external_tool", "media_recording"]
+        )
+        if has_real_submission:
+            need_llm.append((idx, d))
+            continue
+
+        # 规则3: 没有 description 且 submission_types 为 none → notification
+        if not desc and is_none_submission:
+            d["type"] = "notification"
+            d["type_confidence"] = 1.0
+            continue
+
+        # 剩余 → LLM 判断
+        need_llm.append((idx, d))
+
+    if not need_llm:
+        return ddls
+
+    # ── LLM 批量分类 ──
+    # 构建简洁的分类请求
+    items_for_llm = []
+    for idx, d in need_llm:
+        desc = (d.get("description") or "")[:500]  # 截断长描述
+        items_for_llm.append({
+            "index": len(items_for_llm),
+            "course": d.get("course", ""),
+            "name": d.get("name", ""),
+            "description": desc,
+            "submission_types": d.get("submission_types", []),
+        })
+
+    prompt = f"""判断以下 Canvas 条目是「作业/任务」还是「课程通知」。
+
+条目列表：
+{_json.dumps(items_for_llm, ensure_ascii=False, indent=2)}
+
+判断标准：
+- 要求学生提交/完成具体内容（做题、写报告、上传文件）→ "assignment"
+- 仅信息告知、无需提交（课程安排通知、评分提醒、问卷、反馈征集、Syllabus）→ "notification"
+- 评价/评分/问卷/反馈/课程介绍 → "notification"
+- 不确定 → "unknown"
+
+返回 JSON 数组（只返回 JSON，不要其他文字）：
+[{{"index": 0, "type": "assignment", "confidence": 0.95}}, ...]"""
+
+    try:
+        agent_cfg = _load_cfg()
+        client = _make_llm_client(agent_cfg)
+        model = agent_cfg.get("model", "deepseek-chat")
+
+        # 使用轻量模型调用（非流式，快速返回）
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=1024,
+            temperature=0.1,  # 低温度，追求一致分类
+        )
+        text = resp.choices[0].message.content or ""
+
+        # 解析 JSON（防御：可能有 markdown 包裹）
+        text = text.strip()
+        if text.startswith("```"):
+            # 去掉 ```json ... ``` 包裹
+            lines = text.split("\n")
+            text = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+        classifications = _json.loads(text)
+
+        # 写回结果
+        class_map = {c["index"]: c for c in classifications}
+        for local_idx, (orig_idx, d) in enumerate(need_llm):
+            c = class_map.get(local_idx, {})
+            d["type"] = c.get("type", "unknown")
+            d["type_confidence"] = c.get("confidence", 0.0)
+
+    except Exception as e:
+        print(f"[DDL classify] LLM 分类失败，全部标记为 unknown: {e}")
+        for idx, d in need_llm:
+            d.setdefault("type", "unknown")
+            d.setdefault("type_confidence", 0.0)
+
+    # 确保所有 Canvas 项都有 type（防御）
+    for d in ddls:
+        if d.get("platform") == "Canvas":
+            d.setdefault("type", "unknown")
+            d.setdefault("type_confidence", 0.0)
+
+    return ddls
 
 
 def _prefetch_ddls_background() -> None:
@@ -2226,20 +2377,47 @@ def _check_for_updates() -> None:
 _UPDATE_AVAILABLE: dict = {}
 
 
-def tool_get_ddls(skip_canvas=False, skip_aihaoke=False, skip_icourse=False):
+def tool_get_ddls(skip_canvas=False, skip_aihaoke=False, skip_icourse=False,
+                  classify: bool = False, include_notifications: bool = False):
     import datetime as _dt
     cfg = dc.load_config()
     now = _dt.datetime.now(dc.CST)
-    all_ddl = _fetch_ddls_parallel(cfg, skip_canvas, skip_aihaoke, skip_icourse)
+
+    # 当 classify=True 时，需要原始数据（含 description）做分类
+    fetch_classify = classify
+    all_ddl = _fetch_ddls_parallel(cfg, skip_canvas, skip_aihaoke, skip_icourse,
+                                    classify=fetch_classify)
+
+    if classify:
+        _classify_canvas_ddls(all_ddl)
+
     all_ddl.sort(key=lambda x: x["due"])
     warnings = []
     if not skip_canvas and not (cfg.get("canvas_token") and not cfg.get("canvas_token", "").startswith("YOUR_")):
         warnings.append("Canvas 未配置 token；请先调用 setup_canvas 获取引导，生成后再用 save_credentials 保存。")
-    return {
+
+    serialized = [_serialize_ddl(x, now) for x in all_ddl if not x.get("submitted")]
+
+    # 默认过滤通知类（除非用户明确要求）
+    notification_count = 0
+    if classify and not include_notifications:
+        filtered = []
+        for d in serialized:
+            if d.get("type") == "notification":
+                notification_count += 1
+            else:
+                filtered.append(d)
+        serialized = filtered
+
+    result = {
         "current_time": now.strftime("%Y-%m-%d %H:%M"),
-        "ddls": [_serialize_ddl(x, now) for x in all_ddl if not x.get("submitted")],
+        "ddls": serialized,
         "warnings": warnings,
     }
+    if classify and notification_count > 0:
+        result["filtered_notifications"] = notification_count
+        result["hint"] = f"已过滤 {notification_count} 条课程通知（评分/问卷/公告等）。回复「全部DDL」可查看所有条目。"
+    return result
 
 
 def tool_get_next_lab():
@@ -3592,6 +3770,8 @@ def run_tool(name: str, args: dict) -> str:
         elif name == "execute_python":           r = tool_execute_python(**args)
         elif name == "update_user_profile":      r = tool_update_user_profile(**args)
         elif name == "get_user_profile":         r = tool_get_user_profile()
+        elif name == "update_report_preferences": r = tool_update_report_preferences(**args)
+        elif name == "get_report_preferences":    r = tool_get_report_preferences()
         elif name == "setup_telegram":           r = tool_setup_telegram(**args)
         elif name == "setup_wechat":             r = tool_setup_wechat()
         elif name == "setup_feishu":             r = tool_setup_feishu(**args)
