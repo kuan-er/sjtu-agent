@@ -150,7 +150,7 @@ def _collect_data(report_type: str = "evening") -> dict:
     date_arg = "明天" if report_type == "evening" else "今天"
     results = {}
     tasks = {
-        "ddls":     lambda: agent.tool_get_ddls(),
+        "ddls":     lambda: agent.tool_get_ddls(classify=True),
         "schedule": lambda: agent.tool_get_schedule(query_type="day", date=date_arg),
         "lab":      lambda: agent.tool_get_next_lab(),
         "jwc":      lambda: agent.tool_search_campus("通知 公告", sites=["jwc"], max_results=4),
@@ -189,6 +189,29 @@ def _build_care_note() -> str:
     except Exception:
         pass
     return ""
+
+def _load_report_preferences(report_type: str) -> dict:
+    """加载日报偏好，合并通用设置和报别特定设置。"""
+    try:
+        cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        prefs = cfg.get("report_preferences", {})
+    except Exception:
+        return {"sections": {"ddl": True, "schedule": True, "lab": True, "jwc": True, "news": True, "tips": True}, "custom_instructions": ""}
+
+    # 默认值
+    default_sections = {"ddl": True, "schedule": True, "lab": True, "jwc": True, "news": True, "tips": True}
+    sections = {**default_sections, **prefs.get("sections", {})}
+    custom = prefs.get("custom_instructions", "")
+
+    # 报别特定覆盖
+    per_type = prefs.get("per_type", {}).get(report_type, {})
+    if per_type.get("sections"):
+        sections.update(per_type["sections"])
+    if per_type.get("custom_instructions"):
+        custom = per_type["custom_instructions"]
+
+    return {"sections": sections, "custom_instructions": custom}
+
 
 def build_report(report_type: str = "evening") -> str:
     """收集数据 → 调用 AI 生成中文汇报 → 返回 HTML 格式字符串。"""
@@ -289,6 +312,39 @@ def build_report(report_type: str = "evening") -> str:
         return "\n".join(lines)
 
     schedule_section_label = "明日课表" if report_type == "evening" else "今日课表"
+
+    # 读取日报偏好
+    prefs = _load_report_preferences(report_type)
+    enabled_sections = prefs["sections"]
+    custom_instructions = prefs["custom_instructions"]
+
+    _type_hints = {
+        "morning": "今日课程安排+今日截止DDL+晨间行动建议（如：早上有什么课、今天要交什么）",
+        "noon":   "下午及晚间课程安排+临近DDL提醒+午间行动建议（如：下午有什么课、明天截止的作业；上午课程已结束无需再提）",
+        "evening": "今日总结+明日课程预告+晚间行动建议（如：今天完成了什么、明天有什么课、要准备什么）",
+    }
+    hint = _type_hints.get(report_type, _type_hints["evening"])
+    schedule_prompt_header = "明日课程" if report_type == "evening" else "今日课程"
+
+    # --- 动态构建 AI 提示词 ---
+    section_templates = {
+        "ddl": (f"""📚 <b>作业 DDL</b>：列出今日/本周截止任务（如无则写"暂无紧急 DDL ✅"）；每条注明距截止时间
+今日截止（{len(today_ddls)} 项）：
+{chr(10).join(_fmt_ddl(d) for d in today_ddls) or "（无）"}
+本周内截止（{len(week_ddls)} 项）：
+{chr(10).join(_fmt_ddl(d) for d in week_ddls) or "（无）"}"""),
+        "schedule": (f"""📅 <b>{schedule_prompt_header}</b>：课程名+时间（如无课则写"无课"）
+{_fmt_schedule(schedule_raw)}"""),
+        "lab": (f"""🔬 <b>下次实验</b>：时间、地点（如无则写"暂无安排"）
+{_fmt_lab(lab_raw)}"""),
+        "jwc": (f"""📢 <b>教务通知</b>：最多2条关键通知摘要（如无则写"暂无新通知"）
+{_fmt_jwc(jwc_raw)}"""),
+        "news": (f"""📰 <b>校园动态</b>：从校园新闻中选取1-2条最相关或有趣的摘要（如无则写"暂无"）
+{news_raw or "（暂无）"}"""),
+        "tips": "💡 <b>行动建议</b>：根据当前 DDL 紧急程度和时段，用1-2句话给出具体建议",
+    }
+
+    # 构建 data_ctx（DDL 详情和校历始终包含，供 LLM 参考）
     data_ctx = f"""当前时间：{date_str} {now.strftime('%H:%M')}
 
 【DDL 汇总（共 {len(all_ddls)} 项未完成）】
@@ -313,7 +369,7 @@ def build_report(report_type: str = "evening") -> str:
 【校园新闻/水源热帖（近24h）】
 {news_raw or "（暂无）"}"""
 
-    # 校历假日/调休上下文
+    # 校历
     try:
         from sjtu_agent.calendar import AcademicCalendar
         from sjtu_agent.paths import DATA_DIR
@@ -325,13 +381,16 @@ def build_report(report_type: str = "evening") -> str:
 
     _THINK_RE = __import__("re").compile(r"<think>.*?</think>", __import__("re").DOTALL)
 
-    _type_hints = {
-        "morning": "今日课程安排+今日截止DDL+晨间行动建议（如：早上有什么课、今天要交什么）",
-        "noon":   "下午及晚间课程安排+临近DDL提醒+午间行动建议（如：下午有什么课、明天截止的作业；上午课程已结束无需再提）",
-        "evening": "今日总结+明日课程预告+晚间行动建议（如：今天完成了什么、明天有什么课、要准备什么）",
-    }
-    hint = _type_hints.get(report_type, _type_hints["evening"])
-    schedule_prompt_header = "明日课程" if report_type == "evening" else "今日课程"
+    # 构建启用的 section 列表
+    section_order = ["ddl", "schedule", "lab", "jwc", "news", "tips"]
+    enabled_list = [section_templates[k] for k in section_order if enabled_sections.get(k, True)]
+
+    if not enabled_list:
+        # 用户把所有模块都关了
+        enabled_list = ["请告知用户当前日报所有模块均已隐藏，建议至少开启一个模块。"]
+
+    # 构建提示词
+    extra_line = f"\n额外要求：{custom_instructions}" if custom_instructions else ""
     prompt = f"""你是一个贴心的学习助手，请根据以下数据为上海交通大学学生生成一份{label}。
 
 要求：
@@ -339,17 +398,12 @@ def build_report(report_type: str = "evening") -> str:
 - 语气友好简洁，像朋友发消息，不要太正式
 - 全部用中文
 - 时间段：现在是{report_type}（{hint}）
-- 按以下固定结构输出：
+- 按以下结构输出（只输出启用的模块，顺序不变）：
 
 第1行：📊 <b>{date_str} {label}</b>
 
-然后依次输出以下几节（每节空一行）：
-📚 <b>作业 DDL</b>：列出今日/本周截止任务（如无则写"暂无紧急 DDL ✅"）；每条注明距截止时间
-📅 <b>{schedule_prompt_header}</b>：课程名+时间（如无课则写"无课"）
-🔬 <b>下次实验</b>：时间、地点（如无则写"暂无安排"）
-📢 <b>教务通知</b>：最多2条关键通知摘要（如无则写"暂无新通知"）
-📰 <b>校园动态</b>：从校园新闻中选取1-2条最相关或有趣的摘要（如无则写"暂无"）
-💡 <b>行动建议</b>：根据当前 DDL 紧急程度和时段，用1-2句话给出具体建议
+然后依次输出以下启用的模块（每节空一行）：
+{chr(10).join(enabled_list)}{extra_line}
 
 以下是收集到的数据：
 {data_ctx}
