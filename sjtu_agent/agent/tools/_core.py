@@ -72,6 +72,10 @@ from sjtu_agent.agent.tools._user_profile import (
     TOOLS_ENTRIES as _USER_PROFILE_TOOLS,
     tool_get_user_profile, tool_update_user_profile,
 )
+from sjtu_agent.agent.tools._report_prefs import (
+    TOOLS_ENTRIES as _REPORT_PREFS_TOOLS,
+    tool_get_report_preferences, tool_update_report_preferences,
+)
 from sjtu_agent.agent.tools._python_exec import (
     TOOLS_ENTRIES as _PYTHON_EXEC_TOOLS,
     tool_execute_python,
@@ -834,6 +838,7 @@ TOOLS = [
     },
     *_REMINDER_TOOLS,
     *_USER_PROFILE_TOOLS,
+    *_REPORT_PREFS_TOOLS,
     *_PLATFORM_TOOLS,
     {
         "type": "function",
@@ -3765,6 +3770,8 @@ def run_tool(name: str, args: dict) -> str:
         elif name == "execute_python":           r = tool_execute_python(**args)
         elif name == "update_user_profile":      r = tool_update_user_profile(**args)
         elif name == "get_user_profile":         r = tool_get_user_profile()
+        elif name == "update_report_preferences": r = tool_update_report_preferences(**args)
+        elif name == "get_report_preferences":    r = tool_get_report_preferences()
         elif name == "setup_telegram":           r = tool_setup_telegram(**args)
         elif name == "setup_wechat":             r = tool_setup_wechat()
         elif name == "setup_feishu":             r = tool_setup_feishu(**args)
