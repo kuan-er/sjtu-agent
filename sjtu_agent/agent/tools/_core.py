@@ -2129,6 +2129,135 @@ def _fetch_ddls_parallel(cfg: dict, skip_canvas=False, skip_aihaoke=False, skip_
     return all_ddl
 
 
+def _classify_canvas_ddls(ddls: list) -> list:
+    """对 Canvas DDL 列表进行智能分类（作业 / 通知 / 其他）。
+
+    规则预筛 + LLM 批量分类。结果写回每个 dict 的 type 和 type_confidence 字段。
+    仅处理 platform == "Canvas" 且有 description 字段的项。
+    """
+    import json as _json
+    from sjtu_agent.agent.chat_loop import load_agent_config as _load_cfg
+    from sjtu_agent.agent.runner import _make_client as _make_llm_client
+
+    # 只处理 Canvas 且有 description 的项
+    canvas_items = [
+        (i, d) for i, d in enumerate(ddls)
+        if d.get("platform") == "Canvas" and d.get("description") is not None
+    ]
+    if not canvas_items:
+        return ddls
+
+    # ── 规则预筛 ──
+    notification_keywords = ["通知", "公告", "提醒", "评分", "评价", "问卷", "反馈",
+                              "评分标准", "课程介绍", "Syllabus", "教学大纲"]
+    need_llm = []
+    for idx, d in canvas_items:
+        desc = (d.get("description") or "").strip()
+        sub_types = d.get("submission_types") or []
+        name = d.get("name", "")
+
+        # 规则1: submission_types 为 ["none"] 或空，且名称/描述含关键词 → notification
+        is_none_submission = (not sub_types or sub_types == ["none"])
+        if is_none_submission:
+            text = f"{name} {desc}"
+            if any(kw in text for kw in notification_keywords):
+                d["type"] = "notification"
+                d["type_confidence"] = 1.0
+                continue
+
+        # 规则2: submission_types 包含实际提交类型 (online_upload/online_text_entry/online_url)
+        #         且名称不含通知关键词 → 疑似作业，交给 LLM
+        has_real_submission = any(
+            t in sub_types for t in ["online_upload", "online_text_entry", "online_url",
+                                      "online_quiz", "external_tool", "media_recording"]
+        )
+        if has_real_submission:
+            need_llm.append((idx, d))
+            continue
+
+        # 规则3: 没有 description 且 submission_types 为 none → notification
+        if not desc and is_none_submission:
+            d["type"] = "notification"
+            d["type_confidence"] = 1.0
+            continue
+
+        # 剩余 → LLM 判断
+        need_llm.append((idx, d))
+
+    if not need_llm:
+        return ddls
+
+    # ── LLM 批量分类 ──
+    # 构建简洁的分类请求
+    items_for_llm = []
+    for idx, d in need_llm:
+        desc = (d.get("description") or "")[:500]  # 截断长描述
+        items_for_llm.append({
+            "index": len(items_for_llm),
+            "course": d.get("course", ""),
+            "name": d.get("name", ""),
+            "description": desc,
+            "submission_types": d.get("submission_types", []),
+        })
+
+    prompt = f"""判断以下 Canvas 条目是「作业/任务」还是「课程通知」。
+
+条目列表：
+{_json.dumps(items_for_llm, ensure_ascii=False, indent=2)}
+
+判断标准：
+- 要求学生提交/完成具体内容（做题、写报告、上传文件）→ "assignment"
+- 仅信息告知、无需提交（课程安排通知、评分提醒、问卷、反馈征集、Syllabus）→ "notification"
+- 评价/评分/问卷/反馈/课程介绍 → "notification"
+- 不确定 → "unknown"
+
+返回 JSON 数组（只返回 JSON，不要其他文字）：
+[{{"index": 0, "type": "assignment", "confidence": 0.95}}, ...]"""
+
+    try:
+        agent_cfg = _load_cfg()
+        client = _make_llm_client(agent_cfg)
+        model = agent_cfg.get("model", "deepseek-chat")
+
+        # 使用轻量模型调用（非流式，快速返回）
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=1024,
+            temperature=0.1,  # 低温度，追求一致分类
+        )
+        text = resp.choices[0].message.content or ""
+
+        # 解析 JSON（防御：可能有 markdown 包裹）
+        text = text.strip()
+        if text.startswith("```"):
+            # 去掉 ```json ... ``` 包裹
+            lines = text.split("\n")
+            text = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+        classifications = _json.loads(text)
+
+        # 写回结果
+        class_map = {c["index"]: c for c in classifications}
+        for local_idx, (orig_idx, d) in enumerate(need_llm):
+            c = class_map.get(local_idx, {})
+            d["type"] = c.get("type", "unknown")
+            d["type_confidence"] = c.get("confidence", 0.0)
+
+    except Exception as e:
+        print(f"[DDL classify] LLM 分类失败，全部标记为 unknown: {e}")
+        for idx, d in need_llm:
+            d.setdefault("type", "unknown")
+            d.setdefault("type_confidence", 0.0)
+
+    # 确保所有 Canvas 项都有 type（防御）
+    for d in ddls:
+        if d.get("platform") == "Canvas":
+            d.setdefault("type", "unknown")
+            d.setdefault("type_confidence", 0.0)
+
+    return ddls
+
+
 def _prefetch_ddls_background() -> None:
     """在独立子进程中静默预热 DDL 缓存，不阻塞主进程，不向终端输出任何内容。
     子进程的 stdout/stderr 统一重定向到 devnull，完全不干扰主进程终端。
