@@ -123,9 +123,20 @@ def _save_prefs(prefs: dict) -> None:
 
 
 def tool_get_report_preferences() -> dict:
-    """Read current report preferences."""
+    """Read current report preferences, including per-type overrides."""
     prefs = _load_prefs()
-    return {"preferences": prefs}
+    # Surface per-type overrides so users can see effective settings
+    effective = {}
+    for rt in ("morning", "noon", "evening"):
+        per_type = prefs.get("per_type", {}).get(rt, {})
+        rt_sections = dict(prefs["sections"])
+        if per_type.get("sections"):
+            rt_sections.update(per_type["sections"])
+        rt_custom = per_type.get("custom_instructions") or prefs.get("custom_instructions", "")
+        effective[rt] = {"sections": rt_sections}
+        if rt_custom:
+            effective[rt]["custom_instructions"] = rt_custom
+    return {"preferences": prefs, "effective": effective}
 
 
 def tool_update_report_preferences(

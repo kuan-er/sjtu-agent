@@ -129,7 +129,7 @@ SYSTEM_PROMPT = """你是 SJTU 全能助手，帮助上海交通大学学生处�
 
 - 无待完成任务时明确告知
 
-- 获取 DDL 时默认传 classify=True，自动区分真实作业和课程通知（评分/问卷/公告等）
+- 获取 DDL 时应传 classify=True，自动区分真实作业和课程通知（评分/问卷/公告等）
 - 如果返回结果包含 filtered_notifications 和 hint，按 hint 提示用户
 - 用户说「全部」「包括通知」「所有DDL」时传 include_notifications=True
 - 分类为 notification 的条目在展示时标注 📢 而非 📝

@@ -591,14 +591,15 @@ W_CUISINE = 0.20
 
 
 
-def _compute_frequency_stats(history: list[dict]) -> dict[int, float]:
+def _compute_frequency_stats(history: list[dict], now=None) -> dict[int, float]:
     """Count visits per canteen with recency weighting.
 
     Visits in last 7 days: 2x weight
     Visits in last 30 days: 1.5x weight
     Older: 1x weight
     """
-    now = _dt.datetime.now(dc.CST)
+    if now is None:
+        now = _dt.datetime.now(dc.CST)
     freq: dict[int, float] = {}
     for r in history:
         cid = r.get("canteen_id", 0)
