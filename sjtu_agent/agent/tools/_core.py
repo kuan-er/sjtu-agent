@@ -2172,11 +2172,19 @@ def _classify_canvas_ddls(ddls: list) -> list:
     # ── 规则预筛 ──
     notification_keywords = ["通知", "公告", "提醒", "评分", "评价", "问卷", "反馈",
                               "评分标准", "课程介绍", "Syllabus", "教学大纲"]
+    # 强通知关键词 — 无论 submission_types 是什么，名称含这些词就是通知
+    strong_notification_keywords = ["评分", "评价", "问卷", "反馈", "评分标准"]
     need_llm = []
     for idx, d in canvas_items:
         desc = (d.get("description") or "").strip()
         sub_types = d.get("submission_types") or []
         name = d.get("name", "")
+
+        # 规则0: 名称含强通知关键词 → 直接判 notification（不管 submission_types）
+        if any(kw in name for kw in strong_notification_keywords):
+            d["type"] = "notification"
+            d["type_confidence"] = 1.0
+            continue
 
         # 规则1: submission_types 为 ["none"] 或空，且名称/描述含关键词 → notification
         is_none_submission = (not sub_types or sub_types == ["none"])
