@@ -74,7 +74,7 @@ sjtu_agent/
   agent/              # LLM chat engine (refactored from root-level agent.py in 2026-05)
     __init__.py       # re-exports all public symbols
     prompts.py        # SYSTEM_PROMPT, date context builder, tool labels (~22KB)
-    tools.py          # TOOLS definitions + all tool_xxx implementations (~172KB — largest file)
+    tools/            # TOOLS definitions + tool_xxx implementations (split by domain, _core.py kernel)
     runner.py         # LLM client creation, single-turn execution, streaming
     chat_loop.py      # config loading, chat main loop, startup logic
 
@@ -106,7 +106,7 @@ sjtu_agent/
 
 **Runtime layout**: Data lives in a platform-specific user data directory (`~/.local/share/sjtu-agent` on Linux, `~/Library/Application Support/sjtu-agent` on macOS, `%APPDATA%/sjtu-agent` on Windows). On first run, `ensure_runtime_layout()` migrates legacy files (`.env`, `config.json`, etc.) from the project root.
 
-**Agent tool system** (`agent/tools/`): Each tool is a `tool_xxx` function + a `TOOLS` dict entry. The `run_tool(name, args)` function dispatches by name. Tools are split by domain across submodules (`_reminders.py`, `_email.py`, `_mcp_skills.py`, `_platforms.py`, etc.), with the tightly-coupled kernel remaining in `_core.py` (~135KB).
+**Agent tool system** (`agent/tools/`): Each tool is a `tool_xxx` function + a `TOOLS` dict entry. The `run_tool(name, args)` function dispatches by name. Tools are split by domain across submodules (`_reminders.py`, `_email.py`, `_mcp_skills.py`, `_platforms.py`, etc.), with the tightly-coupled kernel remaining in `_core.py` (~3700 lines).
 
 **Bot architecture**: All three bots (Telegram, Feishu, WeChat) share the same `agent/chat_loop.py` engine. Each bot adds its own platform-specific message handling layer. A `BaseBotRunner` abstraction is planned (`docs/REFACTOR_PLAN.md` §2.2) but not yet implemented.
 
@@ -130,6 +130,7 @@ New code should go into `sjtu_agent/`, not these root or script files.
 ### Refactoring status
 
 Per `docs/REFACTOR_PLAN.md`:
-- **Done**: Phase 1 (ConfigStore singleton), Phase 2.1 (agent.py split into `sjtu_agent/agent/`), tools.py split into `agent/tools/` subpackage (7 domain-specific submodules, `_core.py` ~135KB)
+- **Done**: Phase 2.1 (agent.py split into `sjtu_agent/agent/`), tools.py split into `agent/tools/` subpackage (7 domain-specific submodules + `_report_prefs.py`, `_core.py` ~3700 lines)
+- **Partial**: Phase 1 (ConfigStore) — 类已实现 + 测试，纯读取点已迁移（20 处）；受保护的读写路径（setup/save + P0 凭据保护）保留直接文件操作。`run_tool` 已注册表化（`_TOOL_REGISTRY`）
 - **Not done**: Phase 2.2 (BotRunner base class to deduplicate telegram/wechat ~65% shared code), Phase 3 (Notifier abstraction, BasePlatform for DDL scrapers), Phase 4 (unified logging)
-- CI workflow exists (`.github/workflows/test.yml`, 45 tests) but coverage is thin
+- CI workflow exists (`.github/workflows/test.yml`, 299 tests) but coverage is thin
