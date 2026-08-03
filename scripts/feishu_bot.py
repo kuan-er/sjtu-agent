@@ -410,6 +410,20 @@ def _extract_media_ref(msg_type: str, content_json: str) -> dict | None:
 # ── 回复消息 ──────────────────────────────────────────────────────────────────
 
 
+def _call_reply(req) -> object | None:
+    """调用飞书 reply API。异常记录日志并返回 None，绝不逃逸导致线程静默死亡。
+
+    背景（issue #93）：重启后第一条消息偶发无回复。首次回复需重新拉
+    tenant_access_token（缓存重启后清空），若该请求抛 Python 异常且未捕获，
+    后台线程会静默退出——用户看到"没回复"，日志里也看不到任何错误。
+    """
+    try:
+        return _api_client.im.v1.message.reply(req)
+    except Exception as e:
+        print(f"[feishu] reply API 异常: {e}")
+        return None
+
+
 def _reply_text(message_id: str, text: str) -> None:
     """回复消息，自动检测表格并选择合适的格式（post 或 interactive）。"""
     if not text:
@@ -445,7 +459,9 @@ def _reply_text(message_id: str, text: str) -> None:
             )
             .build()
         )
-        resp = _api_client.im.v1.message.reply(req)
+        resp = _call_reply(req)
+        if resp is None:
+            break
         if not resp.success():
             print(f"[feishu] post 回复失败 code={resp.code} msg={resp.msg}，降级为 text")
             # 只发送剩余未成功段落为纯文本
@@ -472,7 +488,9 @@ def _reply_card(message_id: str, text: str) -> None:
         )
         .build()
     )
-    resp = _api_client.im.v1.message.reply(req)
+    resp = _call_reply(req)
+    if resp is None:
+        return
     if not resp.success():
         print(f"[feishu] card 回复失败 code={resp.code} msg={resp.msg}")
         # 降级为 text（此时表格渲染为纯文本）
@@ -496,7 +514,9 @@ def _reply_raw_text(message_id: str, text: str) -> None:
             )
             .build()
         )
-        resp = _api_client.im.v1.message.reply(req)
+        resp = _call_reply(req)
+        if resp is None:
+            break
         if not resp.success():
             print(f"[feishu] 回复失败 code={resp.code} msg={resp.msg}")
             break
@@ -976,7 +996,11 @@ def _process_in_thread(sender_open_id: str, message_id: str, text: str) -> None:
     t = text.strip() if text else ""
     if any(kw in t for kw in ["最近更新", "新功能", "新版变化", "更新了什么"]):
         return
-    conv, meta, lock = _conv_mgr.get_active(sender_open_id)
+    try:
+        conv, meta, lock = _conv_mgr.get_active(sender_open_id)
+    except Exception as e:
+        print(f"[feishu] get_active 异常: {e}")
+        return
     if not lock.acquire(blocking=False):
         _reply_text(message_id, "上一条消息还在处理中，请稍候…")
         return
@@ -1002,7 +1026,11 @@ def _process_in_thread(sender_open_id: str, message_id: str, text: str) -> None:
 
 
 def _process_media_in_thread(sender_open_id: str, message_id: str, msg_type: str, content_json: str) -> None:
-    conv, meta, lock = _conv_mgr.get_active(sender_open_id)
+    try:
+        conv, meta, lock = _conv_mgr.get_active(sender_open_id)
+    except Exception as e:
+        print(f"[feishu] get_active 异常: {e}")
+        return
     if not lock.acquire(blocking=False):
         _reply_text(message_id, "上一条消息还在处理中，请稍候…")
         return
