@@ -1245,11 +1245,15 @@ def _handle_message(data: P2ImMessageReceiveV1) -> None:
         if sender_open_id:
             try:
                 cfg_data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-                if cfg_data.get("feishu_open_id") != sender_open_id:
+            except Exception as e:
+                print(f"[feishu] 跳过 open_id 持久化：config.json 读取失败: {e}")
+                cfg_data = None
+            if cfg_data is not None and cfg_data.get("feishu_open_id") != sender_open_id:
+                try:
                     cfg_data["feishu_open_id"] = sender_open_id
                     CONFIG_PATH.write_text(json.dumps(cfg_data, ensure_ascii=False, indent=2), encoding="utf-8")
-            except Exception:
-                pass
+                except Exception as e:
+                    print(f"[feishu] open_id 写入失败: {e}")
 
         # ── 提交到后台线程，立即返回 ──
         if msg_type == "text":

@@ -1812,8 +1812,10 @@ def tool_setup_course_community(username: str = "", password: str = "") -> dict:
 
     cfg = {}
     if _CFG.exists():
-        try: cfg = _json.loads(_CFG.read_text(encoding="utf-8"))
-        except Exception: pass
+        try:
+            cfg = _json.loads(_CFG.read_text(encoding="utf-8"))
+        except Exception as e:
+            return {"error": f"config.json 读取失败，已中止保存以保护现有配置: {e}"}
     cfg["course_sjtu_cookies"] = course_cookies
     _CFG.write_text(_json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
     return {
@@ -1980,8 +1982,8 @@ def tool_save_credentials(
     if CONFIG_PATH.exists():
         try:
             cfg = json.loads(CONFIG_PATH.read_text())
-        except Exception:
-            pass
+        except Exception as e:
+            return {"error": f"config.json 读取失败，已中止保存以保护现有配置: {e}"}
 
     cfg.setdefault("canvas_base_url", "https://oc.sjtu.edu.cn")
     cfg.setdefault("aihaoke_cookies", {})
