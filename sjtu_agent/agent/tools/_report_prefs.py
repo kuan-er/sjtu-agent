@@ -3,6 +3,7 @@
 import json
 
 from sjtu_agent.paths import CONFIG_PATH, atomic_write_json
+from sjtu_agent.config import cfg as _cfg
 
 # ---- Default preferences ------------------------------------------------
 _DEFAULT_SECTIONS = {
@@ -89,20 +90,16 @@ TOOLS_ENTRIES = [
 
 def _load_prefs() -> dict:
     """Load report preferences from config.json, returning defaults if absent."""
-    try:
-        if CONFIG_PATH.exists():
-            cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-            prefs = cfg.get("report_preferences")
-            if prefs and isinstance(prefs, dict):
-                merged = dict(_DEFAULT_PREFS)
-                merged["sections"] = {**_DEFAULT_SECTIONS, **prefs.get("sections", {})}
-                merged["custom_instructions"] = prefs.get("custom_instructions", "")
-                merged["per_type"] = prefs.get("per_type", {})
-                for rt in ("morning", "noon", "evening"):
-                    merged["per_type"].setdefault(rt, {})
-                return merged
-    except Exception:
-        pass
+    _cfg.reload_if_changed()
+    prefs = _cfg.get("report_preferences")
+    if prefs and isinstance(prefs, dict):
+        merged = dict(_DEFAULT_PREFS)
+        merged["sections"] = {**_DEFAULT_SECTIONS, **prefs.get("sections", {})}
+        merged["custom_instructions"] = prefs.get("custom_instructions", "")
+        merged["per_type"] = prefs.get("per_type", {})
+        for rt in ("morning", "noon", "evening"):
+            merged["per_type"].setdefault(rt, {})
+        return merged
     return dict(_DEFAULT_PREFS)
 
 

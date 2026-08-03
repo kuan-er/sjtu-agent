@@ -40,6 +40,7 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 from sjtu_agent.paths import CONFIG_PATH
+from sjtu_agent.config import cfg as _cfg
 
 import agent
 import botpy
@@ -54,10 +55,8 @@ _AUDIO_SUFFIXES = {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".amr", ".silk", ".a
 
 
 def _load_cfg() -> dict:
-    try:
-        return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
+    _cfg.reload_if_changed()
+    return _cfg.raw()
 
 
 cfg = _load_cfg()

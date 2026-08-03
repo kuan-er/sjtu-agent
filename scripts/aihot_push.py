@@ -161,12 +161,9 @@ def main() -> None:
     from sjtu_agent.feishu_client import send_post_message
 
     # open_id 从 config.json 读取
-    try:
-        from sjtu_agent.paths import CONFIG_PATH
-        cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-        open_id = cfg.get("feishu_open_id", "")
-    except Exception:
-        open_id = ""
+    from sjtu_agent.config import cfg as _cfg
+    _cfg.reload_if_changed()
+    open_id = _cfg.get("feishu_open_id", "")
 
     if not open_id:
         print("[aihot] 未配置 feishu_open_id，跳过推送。请先在飞书 Bot 中发一条消息以记录 open_id。")

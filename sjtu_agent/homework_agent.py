@@ -16,21 +16,17 @@ import re
 from pathlib import Path
 
 from sjtu_agent.paths import ASSIGNMENTS_DIR
+from sjtu_agent.config import cfg as _cfg
 
 import agent
 
 
 def _get_feishu_config() -> dict | None:
     """读取飞书配置用于推送。"""
-    from sjtu_agent.paths import CONFIG_PATH
-    if not CONFIG_PATH.exists():
-        return None
-    try:
-        cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-        if cfg.get("feishu_app_id") and cfg.get("feishu_open_id"):
-            return cfg
-    except Exception:
-        pass
+    _cfg.reload_if_changed()
+    cfg = _cfg.raw()
+    if cfg.get("feishu_app_id") and cfg.get("feishu_open_id"):
+        return cfg
     return None
 
 
@@ -265,16 +261,11 @@ def _claude_code_solve(hw_dir: Path, course: str, aname: str, content: str,
 
     # 读取用户信息作为上下文
     user_ctx = ""
-    try:
-        from sjtu_agent.paths import CONFIG_PATH, ENV_PATH
-        cfg_data = {}
-        if CONFIG_PATH.exists():
-            cfg_data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-        jaccount = cfg_data.get("jaccount_username", "") or ""
-        if jaccount:
-            user_ctx = f"\n用户信息：jAccount 用户名 {jaccount}"
-    except Exception:
-        pass
+    _cfg.reload_if_changed()
+    cfg_data = _cfg.raw()
+    jaccount = cfg_data.get("jaccount_username", "") or ""
+    if jaccount:
+        user_ctx = f"\n用户信息：jAccount 用户名 {jaccount}"
 
     prompt = f"""在当前目录完成{aname}（{course}）。{user_ctx}
 

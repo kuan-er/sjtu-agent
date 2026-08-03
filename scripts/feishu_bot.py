@@ -34,6 +34,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from sjtu_agent.paths import CONFIG_PATH
+from sjtu_agent.config import cfg as _cfg
 
 import lark_oapi as lark
 from lark_oapi.api.im.v1 import (
@@ -54,10 +55,8 @@ from sjtu_agent.feishu.conversations import FeishuConversationManager
 
 
 def _load_cfg() -> dict:
-    try:
-        return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+    _cfg.reload_if_changed()
+    return _cfg.raw()
 
 
 cfg = _load_cfg()

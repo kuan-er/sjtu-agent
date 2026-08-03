@@ -130,10 +130,9 @@ def _save_state(last_uid: int, sent_uids: set) -> None:
 
 def _push_feishu(text: str) -> bool:
     """通过飞书 API 向用户发送私聊消息。返回是否成功。"""
-    try:
-        cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return False
+    from sjtu_agent.config import cfg as _cfg
+    _cfg.reload_if_changed()
+    cfg = _cfg.raw()
     open_id = cfg.get("feishu_open_id", "")
     if not open_id:
         return False

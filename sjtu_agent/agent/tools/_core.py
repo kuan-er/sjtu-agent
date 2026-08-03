@@ -37,6 +37,7 @@ from sjtu_agent.paths import (
     read_json_safe,
 )
 from sjtu_agent.parsing import parse_file as parse_router_file
+from sjtu_agent.config import cfg as _cfg
 
 ROOT = PROJECT_ROOT
 _INTERACTIVE_CHAT_ENV = "SJTU_AGENT_INTERACTIVE_CHAT"
@@ -1482,12 +1483,8 @@ def tool_check_setup() -> dict:
     agent_cfg = load_agent_config()
     canvas_auto_ready, canvas_auto_reason = _canvas_auto_setup_state()
 
-    cfg = {}
-    if CONFIG_PATH.exists():
-        try:
-            cfg = json.loads(CONFIG_PATH.read_text())
-        except Exception:
-            pass
+    _cfg.reload_if_changed()
+    cfg = _cfg.raw()
 
     def has_cookies(key: str) -> bool:
         return bool(cfg.get(key))
@@ -1811,18 +1808,11 @@ _COURSE_PLUS_BASE = "https://course.sjtu.plus"
 
 def _course_plus_request(path: str, params: dict | None = None, max_retry: int = 2):
     """Call course.sjtu.plus API (v2). Uses stored cookies."""
-    import json as _json
     import time as _time
     import requests as _rq
-    from sjtu_agent.paths import CONFIG_PATH as _CFG
 
-    cookies = {}
-    try:
-        cfg = _json.loads(_CFG.read_text(encoding="utf-8"))
-        if cfg.get("course_sjtu_cookies"):
-            cookies = cfg["course_sjtu_cookies"]
-    except Exception:
-        pass
+    _cfg.reload_if_changed()
+    cookies = _cfg.get("course_sjtu_cookies") or {}
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",

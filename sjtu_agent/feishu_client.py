@@ -11,6 +11,7 @@ import time
 import requests
 
 from sjtu_agent.paths import CONFIG_PATH
+from sjtu_agent.config import cfg as _cfg
 
 _TENANT_TOKEN: str = ""
 _TENANT_TOKEN_EXPIRES_AT: float = 0.0
@@ -44,10 +45,8 @@ def get_tenant_access_token(app_id: str, app_secret: str) -> str:
 
 
 def _load_feishu_config() -> dict | None:
-    try:
-        cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return None
+    _cfg.reload_if_changed()
+    cfg = _cfg.raw()
     if not cfg.get("feishu_app_id") or not cfg.get("feishu_app_secret"):
         return None
     return cfg

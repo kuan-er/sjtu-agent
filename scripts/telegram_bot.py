@@ -34,6 +34,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from sjtu_agent.paths import CONFIG_PATH
+from sjtu_agent.config import cfg as _cfg
 
 import telebot
 import agent
@@ -42,7 +43,8 @@ import ddl_checker as dc
 # ── 配置加载 ──────────────────────────────────────────────────────────────────
 
 def _load_cfg() -> dict:
-    return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    _cfg.reload_if_changed()
+    return _cfg.raw()
 
 cfg         = _load_cfg()
 BOT_TOKEN   = cfg.get("telegram_token", "")

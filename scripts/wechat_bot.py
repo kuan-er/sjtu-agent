@@ -54,6 +54,7 @@ import qrcode  # pip install qrcode[pil]
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from sjtu_agent.paths import CONFIG_PATH
+from sjtu_agent.config import cfg as _cfg
 
 import agent
 
@@ -224,7 +225,8 @@ def do_login() -> tuple[str, str, str]:
 # ── 配置读写 ──────────────────────────────────────────────────────────────────
 
 def _load_cfg() -> dict:
-    return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    _cfg.reload_if_changed()
+    return _cfg.raw()
 
 
 def _save_cfg(cfg: dict) -> None:
