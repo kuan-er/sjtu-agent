@@ -1105,7 +1105,7 @@ async function testApi() {
   resultEl.innerHTML = '<div class="spinner"></div><span>正在连接…</span>';
 
   try {
-    const res = await fetch('/api/test/api'), {
+    const res = await fetch('/api/test/api', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ api_key: apiKey, base_url: baseUrl, model }),
@@ -1128,7 +1128,7 @@ async function testApi() {
 
 // ── Save helpers ─────────────────────────────────────────────────────────────
 async function postSave(payload) {
-  const res = await fetch('/api/config/save'), {
+  const res = await fetch('/api/config/save', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -1232,7 +1232,7 @@ async function savePushChannels() {
 async function startFeishuBot() {
   showToast('正在启动飞书 bot…');
   try {
-    const r = await fetch('/api/feishu/start'), { method: 'POST' });
+    const r = await fetch('/api/feishu/start', { method: 'POST' });
     const data = await r.json();
     if (data.ok) showToast(data.message || '飞书 bot 已启动');
     else showToast(data.error || '启动失败', 'error');
@@ -1250,7 +1250,7 @@ function setDot(id, ok) {
 
 async function refreshStatus() {
   try {
-    const res = await fetch('/api/status'));
+    const res = await fetch('/api/status');
     const s = await res.json();
     setDot('st-api',      s.api);
     setDot('st-canvas',   s.canvas);
@@ -1265,7 +1265,7 @@ async function refreshStatus() {
 
 async function loadConfig() {
   try {
-    const res = await fetch('/api/config'));
+    const res = await fetch('/api/config');
     const c = await res.json();
 
     // API page
@@ -1484,7 +1484,7 @@ async function sendChat() {
   let currentToolCard = null;
 
   try {
-    const res = await fetch('/api/chat'), {
+    const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message: msg }),
@@ -1604,7 +1604,7 @@ function _showWechatQR(data) {
 }
 
 async function clearChat() {
-  await fetch('/api/chat/clear'), { method: 'POST' });
+  await fetch('/api/chat/clear', { method: 'POST' });
   const msgs = document.getElementById('chat-messages');
   msgs.innerHTML = `
     <div class="msg assistant">

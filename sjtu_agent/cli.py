@@ -429,10 +429,12 @@ def _cmd_install_daemons(args: argparse.Namespace) -> int:
         import webbrowser
         import urllib.request
         url = "http://127.0.0.1:7860"
-        # Poll until web service is up (max 15s) instead of a fixed sleep
+        # Poll until web service is up (max 15s) instead of a fixed sleep.
+        # 注意：/api/status 受 cookie 保护，无 cookie 会 403 导致 poll 永远等满 15s，
+        # 所以轮询根路径 /（无需鉴权）来判断服务是否就绪。
         for _ in range(15):
             try:
-                urllib.request.urlopen(url + "/api/status", timeout=1)
+                urllib.request.urlopen(url + "/", timeout=1)
                 break
             except Exception:
                 time.sleep(1)
