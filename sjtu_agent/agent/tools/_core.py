@@ -14,7 +14,6 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 import urllib.parse
@@ -1620,23 +1619,6 @@ def tool_setup_shuiyuan() -> dict:
     return _setup_shuiyuan_session(cfg, username, password)
 
 
-def _normalize_config_list(value) -> list:
-    if isinstance(value, str):
-        return [value] if value.strip() else []
-    if isinstance(value, list):
-        return [str(x) for x in value if str(x).strip()]
-    return []
-
-
-def _valid_config_id(value: str, label: str) -> str:
-    cleaned = (value or "").strip()
-    if not cleaned:
-        raise ValueError(f"{label} is required")
-    if not re.fullmatch(r"[A-Za-z0-9_.-]+", cleaned):
-        raise ValueError(f"{label} may only contain letters, numbers, dot, underscore, and hyphen")
-    return cleaned
-
-
 
 def _setup_shuiyuan_session(cfg: dict, username: str, password: str) -> dict:
     """降级方案：Playwright 登录水源，保存 session cookie。"""
@@ -2288,103 +2270,6 @@ def _classify_canvas_ddls(ddls: list) -> list:
             d.setdefault("type_confidence", 0.0)
 
     return ddls
-
-
-def _prefetch_ddls_background() -> None:
-    """在独立子进程中静默预热 DDL 缓存，不阻塞主进程，不向终端输出任何内容。
-    子进程的 stdout/stderr 统一重定向到 devnull，完全不干扰主进程终端。
-    """
-    import subprocess as _sp
-    import sys as _sys
-    import os as _os
-
-    cached = _ddl_cache_get("False,False,False")
-    if cached is not None:
-        return  # 缓存仍有效，无需预热
-
-    # 用 -c 片段在子进程里静默执行拉取
-    _script = (
-        "import sys, os; sys.path.insert(0, os.path.dirname(sys.argv[0]) or '.'); "
-        "import agent as _a, ddl_checker as _dc; "
-        "_a._fetch_ddls_parallel(_dc.load_config())"
-    )
-    try:
-        _sp.Popen(
-            [_sys.executable, "-c", _script],
-            stdout=_sp.DEVNULL,
-            stderr=_sp.DEVNULL,
-            cwd=str(Path(__file__).resolve().parent),
-        )
-    except Exception:
-        pass  # 预热失败不影响主进程
-
-
-def _check_for_updates() -> None:
-    """
-    在后台线程中检查 git 远程是否有新提交。
-    若检测到更新，启动完成后打印一行提示，引导用户运行 sjtu-agent update。
-    非 git 仓库 / 无网络时静默失败，不影响任何功能。
-    """
-    import shutil as _shutil
-    import subprocess as _sub
-
-    git = _shutil.which("git")
-    if not git:
-        return
-
-    project_root = str(Path(__file__).resolve().parent)
-    try:
-        # 检查是否在 git 仓库内
-        r = _sub.run(
-            [git, "rev-parse", "--is-inside-work-tree"],
-            cwd=project_root, capture_output=True, timeout=5,
-        )
-        if r.returncode != 0:
-            return
-
-        # 静默 fetch（只更新远端引用，不改变本地分支）
-        _sub.run(
-            [git, "fetch", "--quiet", "--no-tags", "origin"],
-            cwd=project_root, capture_output=True, timeout=15,
-        )
-
-        # 比较本地 HEAD 与 origin/HEAD（或 origin/main）
-        local_hash = _sub.run(
-            [git, "rev-parse", "HEAD"],
-            cwd=project_root, capture_output=True, timeout=5,
-        ).stdout.decode().strip()
-
-        # 尝试 @{u}（跟踪分支），失败则 origin/main
-        r2 = _sub.run(
-            [git, "rev-parse", "@{u}"],
-            cwd=project_root, capture_output=True, timeout=5,
-        )
-        if r2.returncode == 0:
-            remote_hash = r2.stdout.decode().strip()
-        else:
-            r3 = _sub.run(
-                [git, "rev-parse", "origin/main"],
-                cwd=project_root, capture_output=True, timeout=5,
-            )
-            if r3.returncode != 0:
-                return
-            remote_hash = r3.stdout.decode().strip()
-
-        if local_hash and remote_hash and local_hash != remote_hash:
-            # 统计落后几个提交
-            r4 = _sub.run(
-                [git, "rev-list", "--count", f"{local_hash}..{remote_hash}"],
-                cwd=project_root, capture_output=True, timeout=5,
-            )
-            behind = r4.stdout.decode().strip() if r4.returncode == 0 else "?"
-            # 存入模块级变量，启动完成后打印
-            _UPDATE_AVAILABLE["behind"] = behind
-    except Exception:
-        pass  # 网络不通或其他异常，静默忽略
-
-
-# 用于在主线程启动完成后读取后台更新检查结果
-_UPDATE_AVAILABLE: dict = {}
 
 
 def tool_get_ddls(skip_canvas=False, skip_aihaoke=False, skip_icourse=False,

@@ -871,13 +871,6 @@ def _parse_phycai_dt(date_str: str, time_str: str) -> datetime | None:
 
 # ── Platform 4: icourse163.org ────────────────────────────────────────────────
 
-def _icourse_fill_form(page_or_frame, username: str, password: str) -> None:
-    """在登录表单（页面或 iframe）中填写账号密码并提交。"""
-    page_or_frame.locator("input[type='text'], input[type='tel'], input[placeholder*='手机'], input[placeholder*='邮箱']").first.fill(username)
-    page_or_frame.locator("input[type='password']").first.fill(password)
-    page_or_frame.locator("button.btn-login, .btn-submit, button[type='submit'], .f-btn-login").first.click()
-
-
 def _icourse_login_with_creds(cfg: dict) -> dict | None:
     """
     用 .env 中的 MOOC_USERNAME / MOOC_PASSWORD 登录 icourse163。
