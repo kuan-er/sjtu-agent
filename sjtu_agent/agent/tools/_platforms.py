@@ -306,8 +306,8 @@ def tool_setup_telegram(telegram_token: str, allowed_ids: list | None = None) ->
     if CONFIG_PATH.exists():
         try:
             cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-        except Exception:
-            pass
+        except Exception as e:
+            return {"error": f"config.json 读取失败，已中止保存以保护现有配置: {e}"}
 
     cfg["telegram_token"] = telegram_token.strip()
     if allowed_ids is not None:
@@ -358,8 +358,8 @@ def tool_setup_feishu(feishu_app_id: str = "", feishu_app_secret: str = "", allo
     if CONFIG_PATH.exists():
         try:
             cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-        except Exception:
-            pass
+        except Exception as e:
+            return {"error": f"config.json 读取失败，已中止保存以保护现有配置: {e}"}
 
     if feishu_app_id:
         cfg["feishu_app_id"] = feishu_app_id.strip()
@@ -430,8 +430,8 @@ def tool_setup_qq(
     if CONFIG_PATH.exists():
         try:
             cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-        except Exception:
-            pass
+        except Exception as e:
+            return {"error": f"config.json 读取失败，已中止保存以保护现有配置: {e}"}
 
     if qq_app_id:
         cfg["qq_app_id"] = str(qq_app_id).strip()

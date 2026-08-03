@@ -301,8 +301,8 @@ def _streamed_turn(sess: dict, user_text: str, on_progress, on_tool_result=None)
                     "role": "assistant",
                     "content": [{"type": "text", "text": fallback_text}],
                 })
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[telegram] 最终回复合成失败: {e}")
         return full_text
 
     # ── OpenAI 兼容路径 ──────────────────────────────────────────────────────
@@ -398,8 +398,8 @@ def _streamed_turn(sess: dict, user_text: str, on_progress, on_tool_result=None)
                 _emit_first_token()
         if fb_text:
             sess["messages"].append({"role": "assistant", "content": fb_text})
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[telegram] 最终回复合成失败: {e}")
 
     # 记录对话到 conversation_log（供用户画像更新使用）
     try:
@@ -1265,24 +1265,6 @@ def handle_text(msg):
 
 
 # ── 公共函数（供 remind_check.py 调用） ──────────────────────────────────────
-
-def send_reminder_via_telegram(title: str, subtitle: str, body: str) -> None:
-    """
-    向 telegram_allowed_ids 中所有用户推送提醒通知。
-    由 remind_check.py 在找到匹配提醒时调用。
-    """
-    allowed = set(int(x) for x in _load_cfg().get("telegram_allowed_ids", []))
-    if not allowed:
-        return
-    text = f"🔔 <b>{title}</b>\n<i>{subtitle}</i>"
-    if body:
-        text += f"\n{body}"
-    _bot = telebot.TeleBot(BOT_TOKEN)
-    for uid in allowed:
-        try:
-            _bot.send_message(uid, text, parse_mode="HTML")
-        except Exception as e:
-            print(f"[WARN] Telegram 推送失败 uid={uid}: {e}")
 
 
 # ── 入口 ──────────────────────────────────────────────────────────────────────

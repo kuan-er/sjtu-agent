@@ -418,8 +418,9 @@ def _collect_and_save(ctx: BrowserContext) -> None:
     if CONFIG_PATH.exists():
         try:
             cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            pass
+        except json.JSONDecodeError as e:
+            print(f"[login] config.json 解析失败，已中止保存 cookies 以保护现有配置: {e}")
+            return
 
     # 按域名归集 cookies
     platform_cookies: dict[str, dict[str, str]] = {}
