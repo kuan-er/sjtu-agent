@@ -301,8 +301,8 @@ def _streamed_turn(sess: dict, user_text: str, on_progress, on_tool_result=None)
                     "role": "assistant",
                     "content": [{"type": "text", "text": fallback_text}],
                 })
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[telegram] 最终回复合成失败: {e}")
         return full_text
 
     # ── OpenAI 兼容路径 ──────────────────────────────────────────────────────
@@ -398,8 +398,8 @@ def _streamed_turn(sess: dict, user_text: str, on_progress, on_tool_result=None)
                 _emit_first_token()
         if fb_text:
             sess["messages"].append({"role": "assistant", "content": fb_text})
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[telegram] 最终回复合成失败: {e}")
 
     # 记录对话到 conversation_log（供用户画像更新使用）
     try:

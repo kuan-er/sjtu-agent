@@ -116,12 +116,12 @@ def _get_urgent_ddls() -> list[dict]:
         all_ddl = []
         try:
             all_ddl.extend(dc2.fetch_canvas(cfg))
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[care] fetch_canvas 拉取失败: {e}")
         try:
             all_ddl.extend(dc2.fetch_aihaoke(cfg))
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[care] fetch_aihaoke 拉取失败: {e}")
         urgent = []
         for item in all_ddl:
             due = item.get("due")

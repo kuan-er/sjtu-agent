@@ -1807,8 +1807,8 @@ def tool_setup_course_community(username: str = "", password: str = "") -> dict:
                 "error": "cookie 验证失败，请手动登录选课社区",
                 "next_action": "访问 https://course.sjtu.plus 登录后告诉我「已登录」。"
             }
-    except Exception:
-        pass
+    except Exception as e:
+        return {"error": f"cookie 验证请求失败: {e}", "next_action": "请重试或手动登录"}
 
     cfg = {}
     if _CFG.exists():
