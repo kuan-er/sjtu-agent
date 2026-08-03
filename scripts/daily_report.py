@@ -25,6 +25,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from sjtu_agent.paths import CONFIG_PATH, DAILY_REPORT_LOG_PATH
+from sjtu_agent.config import cfg as _cfg
 
 import agent
 import ddl_checker as dc
@@ -33,7 +34,8 @@ import ddl_checker as dc
 
 def _send_telegram(text: str) -> None:
     """向所有 allowed_ids 分块推送 Telegram 消息。"""
-    cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    _cfg.reload_if_changed()
+    cfg = _cfg.raw()
     if not cfg.get("telegram_enabled", True):
         print("[daily_report] Telegram 推送已关闭，跳过")
         return
@@ -107,10 +109,8 @@ def _html_to_post(text: str) -> list:
 
 def _send_feishu(text: str) -> None:
     """通过飞书 API 向用户私聊推送日报（post 格式，支持 Markdown 渲染）。"""
-    try:
-        cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return
+    _cfg.reload_if_changed()
+    cfg = _cfg.raw()
     if not cfg.get("feishu_enabled", True):
         print("[daily_report] 飞书推送已关闭，跳过")
         return
@@ -177,11 +177,12 @@ _WEEKDAY_ZH = ["一", "二", "三", "四", "五", "六", "日"]
 
 def _build_care_note() -> str:
     """Build a care note from recent memories for personalisation."""
+    _cfg.reload_if_changed()
+    cfg = _cfg.raw()
+    open_id = cfg.get("feishu_open_id", "")
+    if not open_id:
+        return ""
     try:
-        cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-        open_id = cfg.get("feishu_open_id", "")
-        if not open_id:
-            return ""
         from sjtu_agent.memory import get_care_suggestions
         suggestion = get_care_suggestions(open_id)
         if suggestion:
@@ -192,11 +193,8 @@ def _build_care_note() -> str:
 
 def _load_report_preferences(report_type: str) -> dict:
     """加载日报偏好，合并通用设置和报别特定设置。"""
-    try:
-        cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-        prefs = cfg.get("report_preferences", {})
-    except Exception:
-        return {"sections": {"ddl": True, "schedule": True, "lab": True, "jwc": True, "news": True, "tips": True}, "custom_instructions": ""}
+    _cfg.reload_if_changed()
+    prefs = _cfg.get("report_preferences", {})
 
     # 默认值
     default_sections = {"ddl": True, "schedule": True, "lab": True, "jwc": True, "news": True, "tips": True}

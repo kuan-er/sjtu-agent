@@ -20,12 +20,9 @@ from pathlib import Path
 
 def _default_service_names() -> tuple[str, ...]:
     """根据 config.json 中的推送渠道开关返回默认服务列表。"""
-    try:
-        from sjtu_agent.paths import CONFIG_PATH
-        import json
-        cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8")) if CONFIG_PATH.exists() else {}
-    except Exception:
-        cfg = {}
+    from sjtu_agent.config import cfg as _cfg
+    _cfg.reload_if_changed()
+    cfg = _cfg.raw()
     names = list(available_service_names()) + ["web", "news-digest"]
     if not cfg.get("telegram_enabled", True) and "telegram-bot" in names:
         names.remove("telegram-bot")

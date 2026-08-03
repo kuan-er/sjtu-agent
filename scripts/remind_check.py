@@ -27,6 +27,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from sjtu_agent.paths import CONFIG_PATH, REMINDERS_PATH, REMIND_CHECK_LOG_PATH, REMIND_STATE_PATH
+from sjtu_agent.config import cfg as _cfg
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -101,13 +102,8 @@ def _parse_dt(s: str) -> datetime | None:
 
 
 def _load_cfg() -> dict:
-    if not CONFIG_PATH.exists():
-        return {}
-    try:
-        return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    except Exception as e:
-        _log(f"读取 config.json 失败: {e}")
-        return {}
+    _cfg.reload_if_changed()
+    return _cfg.raw()
 
 
 def _open_url(url: str) -> None:

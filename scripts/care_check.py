@@ -85,13 +85,15 @@ def _mark_sent(state: dict, care_type: str) -> None:
 
 def _send_care(message: str) -> bool:
     """通过 Telegram 推送关怀消息，返回是否发送成功。"""
+    from sjtu_agent.config import cfg as _cfg
+    _cfg.reload_if_changed()
+    cfg = _cfg.raw()
+    token = cfg.get("telegram_token", "")
+    allowed_ids = [int(x) for x in cfg.get("telegram_allowed_ids", [])]
+    if not token or not allowed_ids:
+        print("[care_check] Telegram 未配置，跳过发送", flush=True)
+        return False
     try:
-        cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-        token = cfg.get("telegram_token", "")
-        allowed_ids = [int(x) for x in cfg.get("telegram_allowed_ids", [])]
-        if not token or not allowed_ids:
-            print("[care_check] Telegram 未配置，跳过发送", flush=True)
-            return False
         import telebot
         bot = telebot.TeleBot(token)
         for uid in allowed_ids:

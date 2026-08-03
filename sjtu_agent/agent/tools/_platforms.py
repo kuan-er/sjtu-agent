@@ -4,6 +4,7 @@ import json
 import os
 
 from sjtu_agent.paths import CONFIG_PATH
+from sjtu_agent.config import cfg as _cfg
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -508,12 +509,8 @@ def tool_setup_qq(
 
 
 def _load_cfg_for_qq_users() -> dict:
-    if not CONFIG_PATH.exists():
-        return {}
-    try:
-        return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
+    _cfg.reload_if_changed()
+    return _cfg.raw()
 
 
 def _save_cfg_for_qq_users(cfg: dict) -> None:
