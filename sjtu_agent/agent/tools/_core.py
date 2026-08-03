@@ -3594,82 +3594,97 @@ def tool_submit_canvas_assignment(
     }
 
 
+def _no_args(fn):
+    """包装不接受参数的 tool_xxx：忽略传入的 kwargs，调用 fn()。
+
+    保持 run_tool 原行为（无参工具在 if/elif 里被直接调用，忽略多余 args）。
+    """
+    return lambda **kw: fn()
+
+
+# 工具名 → callable(args_dict)。无参工具用 _no_args 包裹；有特殊参数
+# 处理的特例用 lambda。普通工具直接存函数引用（run_tool 用 fn(**args) 调用）。
+_TOOL_REGISTRY = {
+    "check_setup": _no_args(tool_check_setup),
+    "save_credentials": tool_save_credentials,
+    "setup_canvas": tool_setup_canvas,
+    "login_platform": lambda **kw: tool_login_platform(kw["platform"]),
+    "get_ddls": tool_get_ddls,
+    "get_next_lab": _no_args(tool_get_next_lab),
+    "get_all": tool_get_all,
+    "download_assignments": tool_download_assignments,
+    "list_assignment_files": tool_list_assignment_files,
+    "read_assignment_file": tool_read_assignment_file,
+    "parse_local_file": tool_parse_local_file,
+    "parse_local_files": tool_parse_local_files,
+    "install_parse_backend": tool_install_parse_backend,
+    "search_campus": tool_search_campus,
+    "read_shuiyuan_topic": tool_read_shuiyuan_topic,
+    "get_schedule": tool_get_schedule,
+    "setup_shuiyuan": _no_args(tool_setup_shuiyuan),
+    "add_mcp_server": tool_add_mcp_server,
+    "add_skill": tool_add_skill,
+    "create_skill": tool_create_skill,
+    "list_skills": tool_list_skills,
+    "manage_skill": tool_manage_skill,
+    "setup_course_community": tool_setup_course_community,
+    "search_courses": tool_search_courses,
+    "get_course_detail": tool_get_course_detail,
+    "browse_mysjtu": tool_browse_mysjtu,
+    "refresh_mysjtu_catalog": _no_args(tool_refresh_mysjtu_catalog),
+    "query_grades": tool_query_grades,
+    "add_reminder": tool_add_reminder,
+    "list_reminders": _no_args(tool_list_reminders),
+    "remove_reminder": tool_remove_reminder,
+    "list_canvas_courses": tool_list_canvas_courses,
+    "get_canvas_course_announcements": tool_get_canvas_course_announcements,
+    "get_canvas_course_quizzes": tool_get_canvas_course_quizzes,
+    "get_canvas_course_updates": tool_get_canvas_course_updates,
+    "get_canvas_todo": tool_get_canvas_todo,
+    "configure_canvas_monitor": tool_configure_canvas_monitor,
+    "list_canvas_assignments": tool_list_canvas_assignments,
+    "submit_canvas_assignment": tool_submit_canvas_assignment,
+    "list_canvas_folders": tool_list_canvas_folders,
+    "list_canvas_files": tool_list_canvas_files,
+    "canvas_file_tree": tool_canvas_file_tree,
+    "download_canvas_file": tool_download_canvas_file,
+    "canvas_track_mark": tool_canvas_track_mark,
+    "canvas_track_unmark": tool_canvas_track_unmark,
+    "canvas_track_list": _no_args(tool_canvas_track_list),
+    "canvas_track_status": tool_canvas_track_status,
+    "canvas_track_diff": tool_canvas_track_diff,
+    "canvas_track_mark_course": tool_canvas_track_mark_course,
+    "read_emails": tool_read_emails,
+    "search_emails": tool_search_emails,
+    "send_email": tool_send_email,
+    "fetch_url": tool_fetch_url,
+    "execute_python": tool_execute_python,
+    "update_user_profile": tool_update_user_profile,
+    "get_user_profile": _no_args(tool_get_user_profile),
+    "update_report_preferences": tool_update_report_preferences,
+    "get_report_preferences": _no_args(tool_get_report_preferences),
+    "setup_telegram": tool_setup_telegram,
+    "setup_wechat": _no_args(tool_setup_wechat),
+    "setup_feishu": tool_setup_feishu,
+    "setup_qq": tool_setup_qq,
+    "qq_add_user": tool_qq_add_user,
+    "qq_list_users": _no_args(tool_qq_list_users),
+    "qq_remove_user": tool_qq_remove_user,
+    "get_canteen_crowd": tool_get_canteen_crowd,
+    "get_canteen_info": tool_get_canteen_info,
+    "recommend_canteen": tool_recommend_canteen,
+    "record_dining_choice": tool_record_dining_choice,
+    "get_dining_history": tool_get_dining_history,
+}
+
+
 def run_tool(name: str, args: dict) -> str:
     try:
         if name.startswith("mcp__"):
             from sjtu_agent.extensions.mcp_client import call_tool
             return call_tool(name, args or {})
-        if   name == "check_setup":         r = tool_check_setup()
-        elif name == "save_credentials":    r = tool_save_credentials(**args)
-        elif name == "setup_canvas":        r = tool_setup_canvas(**args)
-        elif name == "login_platform":      r = tool_login_platform(args["platform"])
-        elif name == "get_ddls":            r = tool_get_ddls(**args)
-        elif name == "get_next_lab":        r = tool_get_next_lab()
-        elif name == "get_all":             r = tool_get_all(**args)
-        elif name == "download_assignments":r = tool_download_assignments(**args)
-        elif name == "list_assignment_files": r = tool_list_assignment_files(**args)
-        elif name == "read_assignment_file":  r = tool_read_assignment_file(**args)
-        elif name == "parse_local_file":      r = tool_parse_local_file(**args)
-        elif name == "parse_local_files":     r = tool_parse_local_files(**args)
-        elif name == "install_parse_backend": r = tool_install_parse_backend(**args)
-        elif name == "search_campus":         r = tool_search_campus(**args)
-        elif name == "read_shuiyuan_topic":   r = tool_read_shuiyuan_topic(**args)
-        elif name == "get_schedule":          r = tool_get_schedule(**args)
-        elif name == "setup_shuiyuan":        r = tool_setup_shuiyuan()
-        elif name == "add_mcp_server":        r = tool_add_mcp_server(**args)
-        elif name == "add_skill":             r = tool_add_skill(**args)
-        elif name == "create_skill":          r = tool_create_skill(**args)
-        elif name == "list_skills":           r = tool_list_skills(**args)
-        elif name == "manage_skill":          r = tool_manage_skill(**args)
-        elif name == "setup_course_community": r = tool_setup_course_community(**args)
-        elif name == "search_courses":        r = tool_search_courses(**args)
-        elif name == "get_course_detail":     r = tool_get_course_detail(**args)
-        elif name == "browse_mysjtu":         r = tool_browse_mysjtu(**args)
-        elif name == "refresh_mysjtu_catalog": r = tool_refresh_mysjtu_catalog()
-        elif name == "query_grades":            r = tool_query_grades(**args)
-        elif name == "add_reminder":            r = tool_add_reminder(**args)
-        elif name == "list_reminders":          r = tool_list_reminders()
-        elif name == "remove_reminder":         r = tool_remove_reminder(**args)
-        elif name == "list_canvas_courses":      r = tool_list_canvas_courses(**args)
-        elif name == "get_canvas_course_announcements": r = tool_get_canvas_course_announcements(**args)
-        elif name == "get_canvas_course_quizzes": r = tool_get_canvas_course_quizzes(**args)
-        elif name == "get_canvas_course_updates": r = tool_get_canvas_course_updates(**args)
-        elif name == "get_canvas_todo":          r = tool_get_canvas_todo(**args)
-        elif name == "configure_canvas_monitor": r = tool_configure_canvas_monitor(**args)
-        elif name == "list_canvas_assignments":  r = tool_list_canvas_assignments(**args)
-        elif name == "submit_canvas_assignment": r = tool_submit_canvas_assignment(**args)
-        elif name == "list_canvas_folders":      r = tool_list_canvas_folders(**args)
-        elif name == "list_canvas_files":        r = tool_list_canvas_files(**args)
-        elif name == "canvas_file_tree":         r = tool_canvas_file_tree(**args)
-        elif name == "download_canvas_file":     r = tool_download_canvas_file(**args)
-        elif name == "canvas_track_mark":        r = tool_canvas_track_mark(**args)
-        elif name == "canvas_track_unmark":      r = tool_canvas_track_unmark(**args)
-        elif name == "canvas_track_list":        r = tool_canvas_track_list()
-        elif name == "canvas_track_status":      r = tool_canvas_track_status(**args)
-        elif name == "canvas_track_diff":        r = tool_canvas_track_diff(**args)
-        elif name == "canvas_track_mark_course": r = tool_canvas_track_mark_course(**args)
-        elif name == "read_emails":              r = tool_read_emails(**args)
-        elif name == "search_emails":            r = tool_search_emails(**args)
-        elif name == "send_email":               r = tool_send_email(**args)
-        elif name == "fetch_url":                r = tool_fetch_url(**args)
-        elif name == "execute_python":           r = tool_execute_python(**args)
-        elif name == "update_user_profile":      r = tool_update_user_profile(**args)
-        elif name == "get_user_profile":         r = tool_get_user_profile()
-        elif name == "update_report_preferences": r = tool_update_report_preferences(**args)
-        elif name == "get_report_preferences":    r = tool_get_report_preferences()
-        elif name == "setup_telegram":           r = tool_setup_telegram(**args)
-        elif name == "setup_wechat":             r = tool_setup_wechat()
-        elif name == "setup_feishu":             r = tool_setup_feishu(**args)
-        elif name == "setup_qq":                 r = tool_setup_qq(**args)
-        elif name == "qq_add_user":              r = tool_qq_add_user(**args)
-        elif name == "qq_list_users":            r = tool_qq_list_users()
-        elif name == "qq_remove_user":           r = tool_qq_remove_user(**args)
-        elif name == "get_canteen_crowd":    r = tool_get_canteen_crowd(**args)
-        elif name == "get_canteen_info":     r = tool_get_canteen_info(**args)
-        elif name == "recommend_canteen":    r = tool_recommend_canteen(**args)
-        elif name == "record_dining_choice": r = tool_record_dining_choice(**args)
-        elif name == "get_dining_history":   r = tool_get_dining_history(**args)
-        else:                               r = {"error": f"未知工具: {name}"}
+        fn = _TOOL_REGISTRY.get(name)
+        r = fn(**(args or {})) if fn else {"error": f"未知工具: {name}"}
     except Exception as e:
         r = {"error": str(e)}
     return json.dumps(r, ensure_ascii=False)
