@@ -35,6 +35,10 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from sjtu_agent.paths import CONFIG_PATH
 from sjtu_agent.config import cfg as _cfg
+from sjtu_agent.bots._core import (
+    build_date_ctx as _build_date_ctx,
+    model_supports_vision as _model_supports_vision,
+)
 
 import telebot
 import agent
@@ -84,29 +88,6 @@ _TG_CTX = (
 )
 
 
-def _build_date_ctx() -> str:
-    """生成包含当前精确时间的日期上下文（每次调用都是最新时间）。"""
-    now   = _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=8)))
-    year  = now.year
-    month = now.month
-    if month >= 9:
-        cur_xnm, cur_xqm   = year,     "1"
-        prev_xnm, prev_xqm = year - 1, "2"
-    elif month <= 6:
-        cur_xnm, cur_xqm   = year - 1, "2"
-        prev_xnm, prev_xqm = year - 1, "1"
-    else:
-        cur_xnm, cur_xqm   = year - 1, "3"
-        prev_xnm, prev_xqm = year - 1, "2"
-    return (
-        f"\n\n## 当前时间（每轮自动刷新）\n"
-        f"现在：{now.strftime('%Y年%m月%d日 %H:%M')}，星期{'一二三四五六日'[now.weekday()]}。\n"
-        f"当前学期：{cur_xnm}-{cur_xnm+1}学年第{cur_xqm}学期。\n"
-        f"「上学期」={prev_xnm}-{prev_xnm+1}学年第{prev_xqm}学期"
-        f"（query_grades: year='{prev_xnm}', semester='{prev_xqm}'）。\n"
-        f"「本学期」={cur_xnm}-{cur_xnm+1}学年第{cur_xqm}学期"
-        f"（query_grades: year='{cur_xnm}', semester='{cur_xqm}'）。"
-    )
 
 
 def _init_messages(sess: dict) -> None:
@@ -915,14 +896,6 @@ def _download_tg_file(file_id: str, filename: str) -> Path:
     return save_path
 
 
-def _model_supports_vision(model: str) -> bool:
-    """简单判断当前模型是否支持图片输入。"""
-    m = model.lower()
-    return any(kw in m for kw in [
-        "vision", "gpt-4o", "gpt-4-turbo", "claude-3", "claude-4",
-        "gemini", "qwen-vl", "qwen3vl", "glm-4v", "internvl",
-        "sonnet-4", "opus-4", "haiku-4",  # Claude 4 系列（支持下划线和连字符）
-    ])
 
 
 def _capture_turn_multimodal(sess: dict, content: list) -> str:
