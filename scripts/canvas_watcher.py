@@ -10,6 +10,7 @@ from pathlib import Path
 from sjtu_agent.canvas_client import CanvasError, make_client_from_config
 from sjtu_agent.canvas_monitor import merged_canvas_monitor_config
 from sjtu_agent.notifications import send_notification
+from sjtu_agent.logging import get_logger
 from sjtu_agent.paths import (
     CANVAS_MONITOR_STATE_PATH,
     CONFIG_PATH,
@@ -21,15 +22,11 @@ from sjtu_agent.paths import (
 CST = timezone(timedelta(hours=8))
 
 
+_logger = get_logger("canvas_watcher")
+
+
 def _log(message: str) -> None:
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
-    line = f"[{datetime.now(CST).strftime('%Y-%m-%d %H:%M:%S')}] {message}"
-    print(line)
-    try:
-        with (LOG_DIR / "canvas_watcher.log").open("a", encoding="utf-8") as f:
-            f.write(line + "\n")
-    except Exception:
-        pass
+    _logger.info(message)
 
 
 def _load_cfg() -> dict:

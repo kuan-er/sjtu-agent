@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import urllib.request
@@ -31,11 +32,21 @@ def _send_system_notification(title: str, subtitle: str, body: str) -> None:
         )
         subprocess.run(["osascript", "-e", script], check=True, capture_output=True, timeout=5)
     elif sys.platform == "win32":
-        subprocess.run(
-            ["powershell", "-Command", f"Write-Host {json.dumps(message)}"],
-            capture_output=True,
-            timeout=10,
+        # Windows 10+ 内置 PowerShell ToastNotification — 用环境变量传参，防注入
+        ps_script = (
+            "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, "
+            "ContentType = WindowsRuntime] | Out-Null; "
+            "$t = $env:SJTU_TITLE; $m = $env:SJTU_MESSAGE; "
+            "$template = [Windows.UI.Notifications.ToastNotificationManager]"
+            "::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02); "
+            '$template.GetElementsByTagName("text")[0].AppendChild($template.CreateTextNode($t)) | Out-Null; '
+            '$template.GetElementsByTagName("text")[1].AppendChild($template.CreateTextNode($m)) | Out-Null; '
+            "$toast = [Windows.UI.Notifications.ToastNotification]::new($template); "
+            "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('SJTU Agent').Show($toast)"
         )
+        env = {**os.environ, "SJTU_TITLE": title, "SJTU_MESSAGE": message}
+        subprocess.run(["powershell", "-Command", ps_script],
+                       capture_output=True, timeout=10, env=env)
     else:
         subprocess.run(["notify-send", title, message], check=True, capture_output=True, timeout=5)
 
@@ -46,47 +57,25 @@ def _send_telegram_notification(cfg: dict, title: str, subtitle: str, body: str)
     text = f"🔔 <b>{title}</b>\n<i>{subtitle}</i>"
     if body:
         text += f"\n{body}"
+    # Telegram 单条消息最大 4096 字符，超长按 4000 分块
+    chunks = [text[i:i + 4000] for i in range(0, len(text), 4000)] or [""]
     for uid in allowed_ids:
         url = f"https://api.telegram.org/bot{token}/sendMessage"
-        data = json.dumps({"chat_id": uid, "text": text, "parse_mode": "HTML"}).encode()
-        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
-        urllib.request.urlopen(req, timeout=10)
+        for chunk in chunks:
+            data = json.dumps({"chat_id": uid, "text": chunk, "parse_mode": "HTML"}).encode()
+            req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+            urllib.request.urlopen(req, timeout=10)
 
 
 def _send_feishu_notification(cfg: dict, title: str, subtitle: str, body: str) -> None:
-    import requests
-
-    app_id = cfg.get("feishu_app_id", "")
-    app_secret = cfg.get("feishu_app_secret", "")
+    # 复用 feishu_client 的缓存 tenant_access_token，避免每次手动获取
+    from sjtu_agent.feishu_client import send_text_message
     open_id = cfg.get("feishu_open_id", "")
-    token_resp = requests.post(
-        "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
-        json={"app_id": app_id, "app_secret": app_secret},
-        timeout=10,
-    )
-    token_resp.raise_for_status()
-    token_payload = token_resp.json()
-    if token_payload.get("code") != 0:
-        raise RuntimeError("飞书 tenant_access_token 获取失败")
-    tenant_token = token_payload["tenant_access_token"]
     text = f"🔔 {title}\n{subtitle}"
     if body:
         text += f"\n{body}"
-    resp = requests.post(
-        "https://open.feishu.cn/open-apis/im/v1/messages",
-        params={"receive_id_type": "open_id"},
-        headers={"Authorization": f"Bearer {tenant_token}"},
-        json={
-            "receive_id": open_id,
-            "msg_type": "text",
-            "content": json.dumps({"text": text}, ensure_ascii=False),
-        },
-        timeout=15,
-    )
-    resp.raise_for_status()
-    payload = resp.json()
-    if payload.get("code") != 0:
-        raise RuntimeError(payload.get("msg") or "飞书推送失败")
+    if not send_text_message(open_id, text):
+        raise RuntimeError("飞书推送失败")
 
 
 def _channel_configured(cfg: dict, channel: str) -> bool:

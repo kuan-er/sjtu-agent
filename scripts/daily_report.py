@@ -26,6 +26,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from sjtu_agent.paths import CONFIG_PATH, DAILY_REPORT_LOG_PATH
 from sjtu_agent.config import cfg as _cfg
+from sjtu_agent.logging import get_logger
 
 import agent
 import ddl_checker as dc
@@ -470,22 +471,11 @@ def _fallback_report(date_str, today_ddls, week_ddls, far_ddls,
 
 # ── 日志 ──────────────────────────────────────────────────────────────────────
 
-LOG_PATH = DAILY_REPORT_LOG_PATH
-MAX_LOG_BYTES = 200 * 1024  # 200 KB
+_logger = get_logger("daily_report")
 
 
 def _log(msg: str) -> None:
-    ts = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    line = f"[{ts}] {msg}\n"
-    print(line, end="")
-    try:
-        if LOG_PATH.exists() and LOG_PATH.stat().st_size > MAX_LOG_BYTES:
-            content = LOG_PATH.read_text(encoding="utf-8")
-            LOG_PATH.write_text(content[-MAX_LOG_BYTES//2:], encoding="utf-8")
-        with LOG_PATH.open("a", encoding="utf-8") as f:
-            f.write(line)
-    except Exception:
-        pass
+    _logger.info(msg)
 
 
 # ── 入口 ──────────────────────────────────────────────────────────────────────

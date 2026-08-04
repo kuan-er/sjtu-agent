@@ -86,25 +86,10 @@ def _mark_sent(state: dict, care_type: str) -> None:
 def _send_care(message: str) -> bool:
     """通过 Telegram 推送关怀消息，返回是否发送成功。"""
     from sjtu_agent.config import cfg as _cfg
+    from sjtu_agent.notifications import send_notification
     _cfg.reload_if_changed()
-    cfg = _cfg.raw()
-    token = cfg.get("telegram_token", "")
-    allowed_ids = [int(x) for x in cfg.get("telegram_allowed_ids", [])]
-    if not token or not allowed_ids:
-        print("[care_check] Telegram 未配置，跳过发送", flush=True)
-        return False
-    try:
-        import telebot
-        bot = telebot.TeleBot(token)
-        for uid in allowed_ids:
-            try:
-                bot.send_message(uid, message, parse_mode="HTML")
-            except Exception as e:
-                print(f"[care_check] 推送失败 uid={uid}: {e}", flush=True)
-        return True
-    except Exception as e:
-        print(f"[care_check] 发送关怀消息出错: {e}", flush=True)
-        return False
+    result = send_notification(_cfg.raw(), "", "", message, channels=["telegram"])
+    return bool(result["ok"])
 
 
 def _get_urgent_ddls() -> list[dict]:
