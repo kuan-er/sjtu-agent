@@ -29,12 +29,15 @@ from pathlib import Path
 import requests
 from bs4 import BeautifulSoup
 from sjtu_agent.paths import CONFIG_PATH, ENV_PATH, SCHEDULE_CACHE_PATH as _SCHEDULE_CACHE_PATH
+from sjtu_agent.logging import get_logger
 
 try:
     from playwright.sync_api import sync_playwright
     HAS_PLAYWRIGHT = True
 except ImportError:
     HAS_PLAYWRIGHT = False
+
+_logger = get_logger("ddl_checker")
 
 # ── 全局常量 ──────────────────────────────────────────────────────────────────
 
@@ -120,7 +123,7 @@ def fetch_canvas(cfg: dict, include_past: bool = False, classify: bool = False) 
     token = cfg.get("canvas_token", "").strip()
     base = cfg.get("canvas_base_url", "https://oc.sjtu.edu.cn").rstrip("/")
     if not token or token.startswith("YOUR_"):
-        print("[Canvas] ⚠ 未配置 canvas_token，跳过")
+        _logger.warning("[Canvas] ⚠ 未配置 canvas_token，跳过")
         return []
 
     session = requests.Session()
@@ -135,7 +138,7 @@ def fetch_canvas(cfg: dict, include_past: bool = False, classify: bool = False) 
             r = session.get(url, params=params, timeout=15)
             r.raise_for_status()
         except requests.RequestException as e:
-            print(f"[Canvas] 获取课程列表失败：{e}")
+            _logger.error(f"[Canvas] 获取课程列表失败：{e}")
             raise  # 让上层调用者感知错误，而非静默返回空列表
         courses.extend(r.json())
         url = r.links.get("next", {}).get("url")
@@ -158,7 +161,7 @@ def fetch_canvas(cfg: dict, include_past: bool = False, classify: bool = False) 
                 r = session.get(asgn_url, params=asgn_params, timeout=15)
                 r.raise_for_status()
             except requests.RequestException as e:
-                print(f"[Canvas] 获取 {cname} 作业失败：{e}")
+                _logger.error(f"[Canvas] 获取 {cname} 作业失败：{e}")
                 raise
             for a in r.json():
                 if a.get("workflow_state") == "deleted":
@@ -191,7 +194,7 @@ def fetch_canvas(cfg: dict, include_past: bool = False, classify: bool = False) 
                 if sub.get("workflow_state") in ("submitted", "graded") and sub.get("submitted_at"):
                     submitted_ids.add(sub["assignment_id"])
         except requests.RequestException as e:
-            print(f"[Canvas] 查询 {cname} 提交状态失败：{e}")
+            _logger.warning(f"[Canvas] 查询 {cname} 提交状态失败：{e}")
 
         for a in pending:
             entry = {
@@ -237,7 +240,7 @@ def _fetch_aihaoke_enrolled_courses(cfg: dict) -> list[dict] | None:
 
     ok, error = refresh_aihaoke_cookies(cfg)
     if not ok:
-        print(f"[aihaoke] cookies 刷新失败：{error}")
+        _logger.warning(f"[aihaoke] cookies 刷新失败：{error}")
         return None
 
     raw_cookies = cfg.get("aihaoke_cookies", {})
@@ -286,11 +289,11 @@ def _fetch_aihaoke_enrolled_courses(cfg: dict) -> list[dict] | None:
             finally:
                 browser.close()
     except Exception as e:
-        print(f"[aihaoke] 调用 listMyClass 失败：{e}")
+        _logger.warning(f"[aihaoke] 调用 listMyClass 失败：{e}")
         return None
 
     if data.get("code") == 401:
-        print("[aihaoke] listMyClass 返回 401，token 可能失效")
+        _logger.warning("[aihaoke] listMyClass 返回 401，token 可能失效")
         return None
 
     payload = data.get("data")
@@ -326,7 +329,7 @@ def _fetch_aihaoke_enrolled_courses(cfg: dict) -> list[dict] | None:
         })
 
     if not courses:
-        print(f"[aihaoke] listMyClass 返回空列表，响应：{json.dumps(data, ensure_ascii=False)[:300]}")
+        _logger.warning(f"[aihaoke] listMyClass 返回空列表，响应：{json.dumps(data, ensure_ascii=False)[:300]}")
         return None
 
     cfg["aihaoke_courses"] = courses
@@ -334,7 +337,7 @@ def _fetch_aihaoke_enrolled_courses(cfg: dict) -> list[dict] | None:
     CONFIG_PATH.write_text(
         json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    print(f"[aihaoke] ✓ 自动识别到 {len(courses)} 门课程：{[c['name'] for c in courses]}")
+    _logger.info(f"[aihaoke] ✓ 自动识别到 {len(courses)} 门课程：{[c['name'] for c in courses]}")
     return courses
 
 
@@ -387,15 +390,15 @@ def fetch_aihaoke(cfg: dict, *, force_refresh_courses: bool = False) -> list[dic
         and os.environ.get("JACCOUNT_PASSWORD", "").strip()
     )
     if not token and not has_creds:
-        print("[aihaoke] ⚠ 未配置 aihaoke_cookies[haoke-token] 且缺少 jAccount 凭据，跳过")
+        _logger.warning("[aihaoke] ⚠ 未配置 aihaoke_cookies[haoke-token] 且缺少 jAccount 凭据，跳过")
         return []
 
     # 快速验证 token（纯 requests，< 1s）；token 为空或失效都触发刷新
     if not token or not _aihaoke_token_works(token):
-        print("[aihaoke] Token 缺失或已过期，正在登录…")
+        _logger.info("[aihaoke] Token 缺失或已过期，正在登录…")
         ok, error = refresh_aihaoke_cookies(cfg)
         if not ok:
-            print(f"[aihaoke] ⚠ 登录失败：{error}")
+            _logger.warning(f"[aihaoke] ⚠ 登录失败：{error}")
             return []
         raw_cookies = cfg.get("aihaoke_cookies", {})
         token = raw_cookies.get("haoke-token", "").strip()
@@ -410,22 +413,22 @@ def fetch_aihaoke(cfg: dict, *, force_refresh_courses: bool = False) -> list[dic
     cache_fresh = _aihaoke_courses_cache_fresh(cfg)
     if force_refresh_courses or not courses or not cache_fresh:
         if force_refresh_courses:
-            print("[aihaoke] 强制刷新选修课程列表…")
+            _logger.info("[aihaoke] 强制刷新选修课程列表…")
         elif not courses:
-            print("[aihaoke] 正在自动识别选修课程列表…")
+            _logger.info("[aihaoke] 正在自动识别选修课程列表…")
         else:
-            print("[aihaoke] 课程缓存已过期，重新识别…")
+            _logger.info("[aihaoke] 课程缓存已过期，重新识别…")
         discovered = _fetch_aihaoke_enrolled_courses(cfg)
         if discovered:
             courses = discovered
         elif courses:
-            print("[aihaoke] ⚠ 自动识别失败，沿用历史缓存继续运行")
+            _logger.warning("[aihaoke] ⚠ 自动识别失败，沿用历史缓存继续运行")
         else:
-            print("[aihaoke] ⚠ 未能识别到任何已选修课程，跳过")
+            _logger.warning("[aihaoke] ⚠ 未能识别到任何已选修课程，跳过")
             return []
 
     if not courses:
-        print("[aihaoke] ⚠ 课程列表为空，跳过")
+        _logger.warning("[aihaoke] ⚠ 课程列表为空，跳过")
         return []
 
     def _fetch_one(course: dict) -> tuple[list[dict], bool]:
@@ -452,7 +455,7 @@ def fetch_aihaoke(cfg: dict, *, force_refresh_courses: bool = False) -> list[dic
                 )
                 data = resp.json()
             except Exception as e:
-                print(f"  [aihaoke] {cname} 第{page_no}页请求失败：{e}")
+                _logger.warning(f"  [aihaoke] {cname} 第{page_no}页请求失败：{e}")
                 return tasks, False
 
             if data.get("code") == 401:
@@ -491,7 +494,7 @@ def fetch_aihaoke(cfg: dict, *, force_refresh_courses: bool = False) -> list[dic
             if expired:
                 token_expired = True
     if token_expired:
-        print("[aihaoke] ⚠ Token 已过期，请运行 python login.py --aihaoke 刷新")
+        _logger.warning("[aihaoke] ⚠ Token 已过期，请运行 python login.py --aihaoke 刷新")
 
     return results
 
@@ -622,7 +625,7 @@ def _solve_captcha_phycai(img_bytes: bytes) -> str:
         if r.ok:
             code = r.json().get("result", "").strip()
             if code:
-                print(f"  [CAPTCHA] 极客协会识别：{code}")
+                _logger.info(f"  [CAPTCHA] 极客协会识别：{code}")
                 return code
     except Exception:
         pass
@@ -646,7 +649,7 @@ def _solve_captcha_phycai(img_bytes: bytes) -> str:
             )
             code = msg.content[0].text.strip()
             if code:
-                print(f"  [CAPTCHA] Claude 识别：{code}")
+                _logger.info(f"  [CAPTCHA] Claude 识别：{code}")
                 return code
     except Exception:
         pass
@@ -685,7 +688,7 @@ def _phycai_fetch_with_login(cfg: dict) -> str | None:
     if not username or not password:
         return None
 
-    print("[phycai] 正在通过 jAccount 登录…")
+    _logger.info("[phycai] 正在通过 jAccount 登录…")
     target_url = "http://www.phycai.sjtu.edu.cn/pe/student/select.aspx"
     try:
         with sync_playwright() as pw:
@@ -732,7 +735,7 @@ def _phycai_fetch_with_login(cfg: dict) -> str | None:
                     page.wait_for_timeout(700)
 
                 if not logged_in:
-                    print("[phycai] jAccount 登录失败")
+                    _logger.error("[phycai] jAccount 登录失败")
                     browser.close()
                     return None
 
@@ -757,12 +760,12 @@ def _phycai_fetch_with_login(cfg: dict) -> str | None:
                 CONFIG_PATH.write_text(
                     json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8"
                 )
-                print("[phycai] ✓ 已登录并更新 cookies")
+                _logger.info("[phycai] ✓ 已登录并更新 cookies")
 
             browser.close()
             return html
     except Exception as e:
-        print(f"[phycai] jAccount 登录出错：{e}")
+        _logger.error(f"[phycai] jAccount 登录出错：{e}")
         return None
 
 
@@ -789,7 +792,7 @@ def fetch_phycai(cfg: dict) -> dict | None:
     # 回退：用 .env 账号密码通过 jAccount 登录
     html = _phycai_fetch_with_login(cfg)
     if html is None:
-        print("[phycai] ⚠ 登录失败，跳过")
+        _logger.warning("[phycai] ⚠ 登录失败，跳过")
         return None
 
     return _parse_phycai_table(html)
@@ -801,7 +804,7 @@ def _parse_phycai_table(html: str) -> dict | None:
     # 找到包含实验数据的主表（通常是内容最多的那个）
     tables = soup.find_all("table")
     if not tables:
-        print("[phycai] ⚠ 未找到任何表格，可能 cookie 已过期")
+        _logger.warning("[phycai] ⚠ 未找到任何表格，可能 cookie 已过期")
         return None
     table = max(tables, key=lambda t: len(t.find_all("tr")))
 
@@ -889,7 +892,7 @@ def _icourse_login_with_creds(cfg: dict) -> dict | None:
     if not username or not password:
         return None
 
-    print("[icourse163] 正在用账号密码登录…")
+    _logger.info("[icourse163] 正在用账号密码登录…")
     try:
         with sync_playwright() as pw:
             browser = pw.chromium.launch(headless=True)
@@ -925,7 +928,7 @@ def _icourse_login_with_creds(cfg: dict) -> dict | None:
                         break
 
             if login_frame is None:
-                print("[icourse163] 未找到登录 iframe")
+                _logger.warning("[icourse163] 未找到登录 iframe")
                 browser.close()
                 return None
 
@@ -935,7 +938,7 @@ def _icourse_login_with_creds(cfg: dict) -> dict | None:
             ).all()
             txt_field = next((i for i in txt_inputs if i.is_visible()), None)
             if txt_field is None:
-                print("[icourse163] 未找到手机号输入框")
+                _logger.warning("[icourse163] 未找到手机号输入框")
                 browser.close()
                 return None
             txt_field.fill(username)
@@ -943,7 +946,7 @@ def _icourse_login_with_creds(cfg: dict) -> dict | None:
             pwd_inputs = login_frame.locator("input[type='password']").all()
             pwd_field = next((i for i in pwd_inputs if i.is_visible()), None)
             if pwd_field is None:
-                print("[icourse163] 未找到密码输入框")
+                _logger.warning("[icourse163] 未找到密码输入框")
                 browser.close()
                 return None
             pwd_field.fill(password)
@@ -970,18 +973,18 @@ def _icourse_login_with_creds(cfg: dict) -> dict | None:
             browser.close()
 
             if not new_cookies.get("NTESSTUDYSI"):
-                print("[icourse163] 登录失败，请确认 MOOC_USERNAME / MOOC_PASSWORD 正确")
+                _logger.error("[icourse163] 登录失败，请确认 MOOC_USERNAME / MOOC_PASSWORD 正确")
                 return None
 
             cfg["icourse_cookies"] = new_cookies
             CONFIG_PATH.write_text(
                 json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8"
             )
-            print("[icourse163] ✓ 登录成功，已更新 cookies")
+            _logger.info("[icourse163] ✓ 登录成功，已更新 cookies")
             return new_cookies
 
     except Exception as e:
-        print(f"[icourse163] 登录出错：{e}")
+        _logger.error(f"[icourse163] 登录出错：{e}")
         return None
 
 
@@ -1023,7 +1026,7 @@ def _icourse_get_my_courses(session: requests.Session) -> list[dict] | None:
                     timeout=15,
                 )
             except requests.RequestException as e:
-                print(f"[icourse163] 拉取课程列表网络错误：{e}")
+                _logger.warning(f"[icourse163] 拉取课程列表网络错误：{e}")
                 return None
             if r.status_code != 200:
                 return None
@@ -1103,26 +1106,26 @@ def fetch_icourse(cfg: dict) -> list[dict]:
             session = None  # cookies 已失效
 
     if session is None:
-        print("[icourse163] cookies 失效或未配置，正在登录…")
+        _logger.info("[icourse163] cookies 失效或未配置，正在登录…")
         new_cookies = _icourse_login_with_creds(cfg)
         if not new_cookies:
-            print("[icourse163] ⚠ 登录失败，跳过")
+            _logger.warning("[icourse163] ⚠ 登录失败，跳过")
             return []
         cookies = new_cookies
         session = make_session(cookies)
         if not _icourse_warm_up(session):
-            print("[icourse163] ⚠ 登录成功但 warm-up 仍失败，跳过")
+            _logger.warning("[icourse163] ⚠ 登录成功但 warm-up 仍失败，跳过")
             return []
 
     courses = _icourse_get_my_courses(session)
     if courses is None:
-        print("[icourse163] ⚠ 无法拉取课程列表，跳过")
+        _logger.warning("[icourse163] ⚠ 无法拉取课程列表，跳过")
         return []
     if not courses:
-        print("[icourse163] 用户未注册任何 MOOC/SPOC 课程")
+        _logger.info("[icourse163] 用户未注册任何 MOOC/SPOC 课程")
         return []
 
-    print(f"[icourse163] 已发现 {len(courses)} 门课程：{', '.join(c['name'] for c in courses)}")
+    _logger.info(f"[icourse163] 已发现 {len(courses)} 门课程：{', '.join(c['name'] for c in courses)}")
     results: list[dict] = []
     for course in courses:
         rpc_result = _icourse_rpc(
@@ -1131,7 +1134,7 @@ def fetch_icourse(cfg: dict) -> list[dict]:
             school=course["school_short_name"],
         )
         if rpc_result is None:
-            print(f"[icourse163] ⚠ {course['name']} 拉取章节失败 (term={course['term_id']})")
+            _logger.warning(f"[icourse163] ⚠ {course['name']} 拉取章节失败 (term={course['term_id']})")
             continue
         results.extend(_parse_icourse_rpc(rpc_result, course["name"]))
     return results
@@ -1406,7 +1409,7 @@ def download_canvas_assignments(
                 r = session.get(asgn_url, params=asgn_params, timeout=15)
                 r.raise_for_status()
             except Exception as e:
-                print(f"[Canvas] {cname} 获取作业列表失败：{e}")
+                _logger.warning(f"[Canvas] {cname} 获取作业列表失败：{e}")
                 break
             for a in r.json():
                 if a.get("workflow_state") == "deleted":
@@ -1546,7 +1549,7 @@ def download_aihaoke_assignments(
                 )
                 tasks = page.evaluate(_AIHAOKE_TASK_FULL_JS) or []
             except Exception as e:
-                print(f"  [aihaoke] {cname} 加载失败：{e}")
+                _logger.warning(f"  [aihaoke] {cname} 加载失败：{e}")
                 continue
 
             for t in tasks:
@@ -1696,7 +1699,7 @@ def _search_jwc(query: str, max_results: int = 8) -> list[dict]:
                 date  = (item.findtext("pubDate") or "").strip()
                 items.append({"title": title, "summary": desc[:300], "url": link, "date": date})
         except Exception as e:
-            print(f"[jwc] RSS 获取失败：{e}")
+            _logger.warning(f"[jwc] RSS 获取失败：{e}")
 
     if not items:
         return [{"error": "无法获取教务处 RSS，网络不通或地址变更"}]
@@ -1872,14 +1875,14 @@ def _dyweb_refresh_token(cfg: dict) -> str:
                         token = c["value"]
                         break
         except Exception as e:
-            print(f"[dyweb] OAuth 失败：{e}")
+            _logger.warning(f"[dyweb] OAuth 失败：{e}")
         finally:
             browser.close()
 
     if token:
         cfg["dyweb_token"] = token
         CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
-        print("[dyweb] ✓ token 已更新")
+        _logger.info("[dyweb] ✓ token 已更新")
     return token
 
 
@@ -1914,7 +1917,7 @@ def _dyweb_request(cfg: dict, method: str, path: str, **kwargs) -> dict | None:
         return None
     data = r.json()
     if isinstance(data, dict) and not data.get("success", True):
-        print(f"[dyweb] API error: {data.get('message', '')}")
+        _logger.warning(f"[dyweb] API error: {data.get('message', '')}")
         return None
     return data.get("data")
 
@@ -2019,13 +2022,13 @@ def search_campus(
         sites = ["jwc", "shuiyuan", "dyweb"]
     out: dict = {}
     if "jwc" in sites:
-        print(f"[搜索] 教务处通知：{query}…")
+        _logger.info(f"[搜索] 教务处通知：{query}…")
         out["jwc"] = _search_jwc(query, max_results)
     if "shuiyuan" in sites:
-        print(f"[搜索] 水源社区：{query}…")
+        _logger.info(f"[搜索] 水源社区：{query}…")
         out["shuiyuan"] = _search_shuiyuan(cfg, query, max_results)
     if "dyweb" in sites:
-        print(f"[搜索] 传承·交大：{query}…")
+        _logger.info(f"[搜索] 传承·交大：{query}…")
         out["dyweb"] = _search_dyweb(cfg, query, max_results)
     return out
 
@@ -2103,7 +2106,7 @@ def _get_jwxt_cookies(cfg: dict) -> dict | None:
                 return saved
         except Exception:
             pass
-        print("[jwxt] session 已过期，重新登录…")
+        _logger.info("[jwxt] session 已过期，重新登录…")
 
     if not HAS_PLAYWRIGHT:
         return None
@@ -2125,7 +2128,7 @@ def _get_jwxt_cookies(cfg: dict) -> dict | None:
                       wait_until="networkidle", timeout=20_000)
             time.sleep(2)
         except Exception as e:
-            print(f"[jwxt] 登录失败: {e}")
+            _logger.error(f"[jwxt] 登录失败: {e}")
             browser.close()
             return None
         cookies = {c["name"]: c["value"] for c in ctx.cookies()
@@ -2135,7 +2138,7 @@ def _get_jwxt_cookies(cfg: dict) -> dict | None:
     if cookies:
         cfg["jwxt_cookies"] = cookies
         CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
-        print("[jwxt] ✓ cookies 已更新")
+        _logger.info("[jwxt] ✓ cookies 已更新")
         return cookies
     return None
 
@@ -2233,9 +2236,9 @@ def fetch_schedule(cfg: dict, year: str = "", term: str = "", refresh: bool = Fa
     try:
         _SCHEDULE_CACHE_PATH.write_text(json.dumps(result, ensure_ascii=False, indent=2),
                                         encoding="utf-8")
-        print(f"[jwxt] ✓ 课表已缓存（{len(courses)} 门）")
+        _logger.info(f"[jwxt] ✓ 课表已缓存（{len(courses)} 门）")
     except Exception as e:
-        print(f"[jwxt] 缓存写入失败: {e}")
+        _logger.warning(f"[jwxt] 缓存写入失败: {e}")
 
     return result
 

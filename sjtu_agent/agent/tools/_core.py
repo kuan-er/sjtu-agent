@@ -38,8 +38,10 @@ from sjtu_agent.paths import (
 )
 from sjtu_agent.parsing import parse_file as parse_router_file
 from sjtu_agent.config import cfg as _cfg
+from sjtu_agent.logging import get_logger
 
 ROOT = PROJECT_ROOT
+_logger = get_logger("tools")
 _INTERACTIVE_CHAT_ENV = "SJTU_AGENT_INTERACTIVE_CHAT"
 _PARSE_BACKEND_INSTALL = {
     "paddleocr": {"label": "OCR", "modules": ["paddleocr"], "packages": ["paddleocr==3.6.0"]},
@@ -2119,7 +2121,7 @@ def _fetch_ddls_parallel(cfg: dict, skip_canvas=False, skip_aihaoke=False,
             try:
                 all_ddl.extend(fut.result())
             except Exception as e:
-                print(f"[DDL] {futures[fut]} 拉取失败：{e}")
+                _logger.warning("[DDL] %s 拉取失败：%s", futures[fut], e)
 
     _ddl_cache_set(cache_key, all_ddl)
     return all_ddl
@@ -2248,7 +2250,7 @@ def _classify_canvas_ddls(ddls: list) -> list:
             d["type_confidence"] = c.get("confidence", 0.0)
 
     except Exception as e:
-        print(f"[DDL classify] LLM 分类失败，全部标记为 unknown: {e}")
+        _logger.warning("[DDL classify] LLM 分类失败，全部标记为 unknown: %s", e)
         for idx, d in need_llm:
             d.setdefault("type", "unknown")
             d.setdefault("type_confidence", 0.0)
@@ -3107,15 +3109,15 @@ def _install_missing_backend_package(backend: str) -> tuple[bool, str]:
     if not packages:
         return False, f"no package configured for backend: {backend}"
     cmd = [sys.executable, "-m", "pip", "install", *packages]
-    print(f"[parse] Installing {' '.join(packages)} ...")
+    _logger.info("[parse] Installing %s ...", " ".join(packages))
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode == 0:
-        print(f"[parse] Installed {' '.join(packages)}.")
+        _logger.info("[parse] Installed %s.", " ".join(packages))
         return True, ""
     err = (proc.stderr or proc.stdout or "").strip()
     if len(err) > 800:
         err = err[-800:]
-    print(f"[parse] Install failed ({' '.join(packages)}): {err or 'unknown error'}")
+    _logger.error("[parse] Install failed (%s): %s", " ".join(packages), err or "unknown error")
     return False, err
 
 
