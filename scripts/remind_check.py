@@ -194,111 +194,14 @@ def _check_deadline_guard(state: dict, test_mode: bool = False) -> bool:
 
 
 def _send_notification(title: str, subtitle: str, body: str) -> None:
-    """同时推送系统通知 + Telegram 消息（若已配置）。支持 macOS / Windows / Linux。"""
-    # ── 跨平台系统通知 ────────────────────────────────────────────────────
-    message = f"{subtitle}\n{body}" if body else subtitle
-    try:
-        from plyer import notification as _plyer_notif  # type: ignore
-        _plyer_notif.notify(
-            title=title,
-            message=message,
-            app_name="SJTU Agent",
-            timeout=10,
-        )
-    except Exception:
-        # plyer 不可用时，降级到各平台原生方式
-        try:
-            if sys.platform == "darwin":
-                def esc(s: str) -> str:
-                    return s.replace("\\", "\\\\").replace('"', '\\"')
-                script = (
-                    f'display notification "{esc(body)}" '
-                    f'with title "{esc(title)}" '
-                    f'subtitle "{esc(subtitle)}"'
-                )
-                subprocess.run(["osascript", "-e", script],
-                               check=True, capture_output=True, timeout=5)
-            elif sys.platform == "win32":
-                # Windows 10+ 内置 PowerShell 通知 — 用环境变量传参，防注入
-                ps_script = (
-                    "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, "
-                    "ContentType = WindowsRuntime] | Out-Null; "
-                    "$t = $env:SJTU_TITLE; $m = $env:SJTU_MESSAGE; "
-                    "$template = [Windows.UI.Notifications.ToastNotificationManager]"
-                    "::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02); "
-                    '$template.GetElementsByTagName("text")[0].AppendChild($template.CreateTextNode($t)) | Out-Null; '
-                    '$template.GetElementsByTagName("text")[1].AppendChild($template.CreateTextNode($m)) | Out-Null; '
-                    "$toast = [Windows.UI.Notifications.ToastNotification]::new($template); "
-                    "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('SJTU Agent').Show($toast)"
-                )
-                env = {**os.environ, "SJTU_TITLE": title, "SJTU_MESSAGE": message}
-                subprocess.run(["powershell", "-Command", ps_script],
-                               capture_output=True, timeout=10, env=env)
-            else:
-                subprocess.run(["notify-send", title, message],
-                               check=True, capture_output=True, timeout=5)
-        except Exception as e:
-            _log(f"系统通知发送失败: {e}")
-
-    # ── Telegram 推送 ─────────────────────────────────────────────────────
-    try:
-        cfg = _load_cfg()
-        if not cfg.get("telegram_enabled", True):
-            return
-        token       = cfg.get("telegram_token", "")
-        allowed_ids = [int(x) for x in cfg.get("telegram_allowed_ids", [])]
-        if not token or not allowed_ids:
-            return
-        import urllib.request
-        text = f"🔔 <b>{title}</b>\n<i>{subtitle}</i>"
-        if body:
-            text += f"\n{body}"
-        for uid in allowed_ids:
-            url  = f"https://api.telegram.org/bot{token}/sendMessage"
-            data = json.dumps({"chat_id": uid, "text": text, "parse_mode": "HTML"}).encode()
-            req  = urllib.request.Request(url, data=data,
-                                          headers={"Content-Type": "application/json"})
-            urllib.request.urlopen(req, timeout=10)
-        _log(f"Telegram 推送成功 → {allowed_ids}")
-    except Exception as e:
-        _log(f"Telegram 推送失败: {e}")
-
-    # ── 飞书推送 ──────────────────────────────────────────────────────────
-    try:
-        cfg = _load_cfg()
-        if not cfg.get("feishu_enabled", True):
-            return
-        app_id = cfg.get("feishu_app_id", "")
-        app_secret = cfg.get("feishu_app_secret", "")
-        open_id = cfg.get("feishu_open_id", "")
-        if not app_id or not app_secret or not open_id:
-            return
-        import requests
-        r = requests.post(
-            "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
-            json={"app_id": app_id, "app_secret": app_secret}, timeout=10,
-        )
-        if r.status_code != 200 or r.json().get("code") != 0:
-            _log(f"飞书推送 token 获取失败")
-            return
-        token = r.json()["tenant_access_token"]
-        text = f"🔔 {title}\n{subtitle}"
-        if body:
-            text += f"\n{body}"
-        resp = requests.post(
-            "https://open.feishu.cn/open-apis/im/v1/messages",
-            params={"receive_id_type": "open_id"},
-            headers={"Authorization": f"Bearer {token}"},
-            json={"receive_id": open_id, "msg_type": "text",
-                  "content": json.dumps({"text": text}, ensure_ascii=False)},
-            timeout=15,
-        )
-        if resp.status_code == 200 and resp.json().get("code") == 0:
-            _log("飞书推送完成")
-        else:
-            _log(f"飞书推送失败: {resp.text[:100]}")
-    except Exception as e:
-        _log(f"飞书推送异常: {e}")
+    """同时推送系统通知 + Telegram + 飞书（若已配置）。"""
+    from sjtu_agent.notifications import send_notification
+    cfg = _load_cfg()
+    result = send_notification(cfg, title, subtitle, body)
+    if result["sent"]:
+        _log(f"通知已发送: {[s['channel'] for s in result['sent']]}")
+    if result["failed"]:
+        _log(f"通知推送失败: {result['failed']}")
 
 
 # ── 核心逻辑 ─────────────────────────────────────────────────────────────────
