@@ -43,7 +43,10 @@ from sjtu_agent.paths import CONFIG_PATH
 from sjtu_agent.config import cfg as _cfg
 from sjtu_agent.bots._core import (
     build_date_ctx as _build_date_ctx,
+    make_session,
     model_supports_vision as _model_supports_vision,
+    run_one_turn,
+    run_one_turn_multimodal,
 )
 
 import agent
@@ -133,50 +136,13 @@ def _next_msg_seq(_: str = "", baseline: int | None = None) -> int:
 
 def _get_session(user_id: str) -> dict:
     if user_id not in _sessions:
-        agent_cfg = agent.load_agent_config()
-        _sessions[user_id] = {
-            "messages": [],
-            "model_box": [agent_cfg["model"]],
-            "client_box": [agent._make_client(agent_cfg)],
-        }
+        _sessions[user_id] = make_session()
         _locks[user_id] = threading.Lock()
     return _sessions[user_id]
 
 
 def _capture_turn(sess: dict, user_text: str) -> str:
-    if not sess["messages"]:
-        sess["messages"].append({"role": "system", "content": agent.SYSTEM_PROMPT + _build_date_ctx() + _QQ_CTX})
-    else:
-        sess["messages"][0]["content"] = agent.SYSTEM_PROMPT + _build_date_ctx() + _QQ_CTX
-
-    sess["messages"].append({"role": "user", "content": user_text})
-
-    buf = io.StringIO()
-    old_stdout = sys.stdout
-    sys.stdout = buf
-    try:
-        agent._run_one_turn(
-            sess["client_box"][0],
-            sess["model_box"][0],
-            sess["messages"],
-        )
-    finally:
-        sys.stdout = old_stdout
-
-    clean = _ANSI_RE.sub("", buf.getvalue())
-    marker = "Agent: "
-    idx = clean.rfind(marker)
-    if idx == -1:
-        for m in reversed(sess["messages"]):
-            if m.get("role") == "assistant":
-                content = m.get("content", "")
-                if isinstance(content, str):
-                    return content.strip() or "(已完成)"
-                if isinstance(content, list):
-                    texts = [b.get("text", "") for b in content if b.get("type") == "text"]
-                    return "\n".join(texts).strip() or "(已完成)"
-        return "(已完成)"
-    return clean[idx + len(marker):].strip()
+    return run_one_turn(sess, user_text, _QQ_CTX)
 
 
 def _normalize_text(raw: str) -> str:
@@ -197,38 +163,7 @@ def _split_text(text: str, max_len: int = 1500) -> list[str]:
 
 
 def _capture_turn_multimodal(sess: dict, content: list) -> str:
-    if not sess["messages"]:
-        sess["messages"].append({"role": "system", "content": agent.SYSTEM_PROMPT + _build_date_ctx() + _QQ_CTX})
-    else:
-        sess["messages"][0]["content"] = agent.SYSTEM_PROMPT + _build_date_ctx() + _QQ_CTX
-    sess["messages"].append({"role": "user", "content": content})
-
-    buf = io.StringIO()
-    old_stdout = sys.stdout
-    sys.stdout = buf
-    try:
-        agent._run_one_turn(
-            sess["client_box"][0],
-            sess["model_box"][0],
-            sess["messages"],
-        )
-    finally:
-        sys.stdout = old_stdout
-
-    clean = _ANSI_RE.sub("", buf.getvalue())
-    marker = "Agent: "
-    idx = clean.rfind(marker)
-    if idx == -1:
-        for m in reversed(sess["messages"]):
-            if m.get("role") == "assistant":
-                c = m.get("content", "")
-                if isinstance(c, str):
-                    return c.strip() or "(已完成)"
-                if isinstance(c, list):
-                    texts = [b.get("text", "") for b in c if b.get("type") == "text"]
-                    return "\n".join(texts).strip() or "(已完成)"
-        return "(已完成)"
-    return clean[idx + len(marker):].strip()
+    return run_one_turn_multimodal(sess, content, _QQ_CTX)
 
 
 def _guess_suffix_from_url(url: str, default: str = ".bin") -> str:

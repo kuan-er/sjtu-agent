@@ -37,7 +37,10 @@ from sjtu_agent.paths import CONFIG_PATH
 from sjtu_agent.config import cfg as _cfg
 from sjtu_agent.bots._core import (
     build_date_ctx as _build_date_ctx,
+    make_session,
     model_supports_vision as _model_supports_vision,
+    run_one_turn,
+    run_one_turn_multimodal,
 )
 
 import telebot
@@ -68,12 +71,7 @@ _locks:    dict[int, threading.Lock] = {}
 
 def _get_session(chat_id: int) -> dict:
     if chat_id not in _sessions:
-        agent_cfg = agent.load_agent_config()
-        _sessions[chat_id] = {
-            "messages":   [],
-            "model_box":  [agent_cfg["model"]],
-            "client_box": [agent._make_client(agent_cfg)],
-        }
+        _sessions[chat_id] = make_session()
         _locks[chat_id] = threading.Lock()
     return _sessions[chat_id]
 
@@ -103,49 +101,11 @@ _ANSI_RE = re.compile(r'\x1b\[[0-9;]*[mKABCDEFGHJKST]')
 
 
 def _capture_turn(sess: dict, user_text: str, on_tool_result=None) -> str:
+    """运行一轮对话，返回 Agent 回复文本（共享 message-based 提取）。
+
+    on_tool_result 参数保留以兼容旧签名，但共享路径无需 stdout 捕获。
     """
-    运行一轮对话，捕获 stdout，提取并返回 Agent 回复文本。
-    Spinner 的 \r 控制序列和 ANSI 颜色代码会被过滤掉。
-    on_tool_result: 可选回调 (tool_name, fn_args, result_str) -> None
-    """
-    _init_messages(sess)
-    # 每轮刷新 system prompt 中的时间，避免长会话里时间过期
-    if sess["messages"] and sess["messages"][0]["role"] == "system":
-        sess["messages"][0]["content"] = agent.SYSTEM_PROMPT + _build_date_ctx() + _TG_CTX
-    sess["messages"].append({"role": "user", "content": user_text})
-
-    buf = io.StringIO()
-    old_stdout = sys.stdout
-    sys.stdout = buf
-    try:
-        agent._run_one_turn(
-            sess["client_box"][0],
-            sess["model_box"][0],
-            sess["messages"],
-        )
-    finally:
-        sys.stdout = old_stdout
-
-    raw = buf.getvalue()
-    # 去除 ANSI 转义码
-    clean = _ANSI_RE.sub("", raw)
-    # 找到最后一个 "Agent: " 标记（spinner 输出在它之前）
-    marker = "Agent: "
-    idx = clean.rfind(marker)
-    if idx == -1:
-        # 没有找到，可能全是工具调用后无文本回复
-        # 尝试从消息历史里取最后一条 assistant 消息
-        for m in reversed(sess["messages"]):
-            if m.get("role") == "assistant":
-                content = m.get("content", "")
-                if isinstance(content, str):
-                    return content.strip() or "(已完成)"
-                elif isinstance(content, list):
-                    texts = [b.get("text", "") for b in content if b.get("type") == "text"]
-                    return "\n".join(texts).strip() or "(已完成)"
-        return "(已完成)"
-
-    return clean[idx + len(marker):].strip()
+    return run_one_turn(sess, user_text, _TG_CTX)
 
 
 # ── 流式推进（带工具进度回调） ──────────────────────────────────────────────
@@ -904,37 +864,7 @@ def _capture_turn_multimodal(sess: dict, content: list) -> str:
     content 格式：OpenAI 多模态消息 content 数组，如
       [{"type": "text", "text": "..."}, {"type": "image_url", "image_url": {"url": "data:..."}}]
     """
-    _init_messages(sess)
-    if sess["messages"] and sess["messages"][0]["role"] == "system":
-        sess["messages"][0]["content"] = agent.SYSTEM_PROMPT + _build_date_ctx() + _TG_CTX
-    sess["messages"].append({"role": "user", "content": content})
-
-    buf = io.StringIO()
-    old_stdout = sys.stdout
-    sys.stdout = buf
-    try:
-        agent._run_one_turn(
-            sess["client_box"][0],
-            sess["model_box"][0],
-            sess["messages"],
-        )
-    finally:
-        sys.stdout = old_stdout
-
-    raw   = buf.getvalue()
-    clean = _ANSI_RE.sub("", raw)
-    marker = "Agent: "
-    idx = clean.rfind(marker)
-    if idx == -1:
-        for m in reversed(sess["messages"]):
-            if m.get("role") == "assistant":
-                c = m.get("content", "")
-                if isinstance(c, str):
-                    return c.strip() or "(已完成)"
-                elif isinstance(c, list):
-                    return "\n".join(b.get("text", "") for b in c if b.get("type") == "text").strip() or "(已完成)"
-        return "(已完成)"
-    return clean[idx + len(marker):].strip()
+    return run_one_turn_multimodal(sess, content, _TG_CTX)
 
 
 def _run_with_typing(chat_id: int, lock, fn):
