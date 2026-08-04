@@ -34,6 +34,9 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from sjtu_agent.paths import CONFIG_PATH, DATA_DIR, ENV_PATH, atomic_write_json, read_json_safe
+from sjtu_agent.logging import get_logger
+
+_logger = get_logger("email_watcher")
 
 _STATE_PATH = DATA_DIR / "email_watcher_state.json"
 _CHECK_INTERVAL = 60
@@ -145,7 +148,7 @@ def _check_new_emails(last_uid: int, sent_uids: set) -> list[dict]:
     """IMAP readonly 连接，拉取 UID > last_uid 且不在 sent_uids 中的新邮件。"""
     username, password = _get_creds()
     if not username or not password:
-        print("[email_watcher] 凭据未配置，跳过")
+        _logger.warning("[email_watcher] 凭据未配置，跳过")
         return []
 
     ctx = ssl.create_default_context()
@@ -154,7 +157,7 @@ def _check_new_emails(last_uid: int, sent_uids: set) -> list[dict]:
         m.login(username, password)
         m.select("INBOX", readonly=True)
     except Exception as e:
-        print(f"[email_watcher] IMAP 连接失败: {e}")
+        _logger.warning(f"[email_watcher] IMAP 连接失败: {e}")
         return []
 
     try:
@@ -194,7 +197,7 @@ def _check_new_emails(last_uid: int, sent_uids: set) -> list[dict]:
         return new_emails
 
     except Exception as e:
-        print(f"[email_watcher] 检查邮件异常: {e}")
+        _logger.warning(f"[email_watcher] 检查邮件异常: {e}")
         return []
     finally:
         try:
@@ -238,22 +241,24 @@ def run_once(last_push_time: float = 0.0) -> float:
             new_last = max(state["last_uid"], uid)
             _save_state(new_last, state["sent_uids"])
             state["last_uid"] = new_last
-        print(f"[{datetime.now(CST):%H:%M}] 新邮件 uid={uid} {em['subject'][:30]} "
-              f"推送{'OK' if ok else 'FAIL'}")
+        if ok:
+            _logger.info(f"[{datetime.now(CST):%H:%M}] 新邮件 uid={uid} {em['subject'][:30]} 推送OK")
+        else:
+            _logger.warning(f"[{datetime.now(CST):%H:%M}] 新邮件 uid={uid} {em['subject'][:30]} 推送FAIL")
 
     return last_push_time
 
 
 def run_loop() -> None:
     """持续轮询模式。"""
-    print(f"[email_watcher] 启动，间隔 {_CHECK_INTERVAL}s")
+    _logger.info(f"[email_watcher] 启动，间隔 {_CHECK_INTERVAL}s")
     _check_interval = _CHECK_INTERVAL
     last_push_time = 0.0
     while True:
         try:
             last_push_time = run_once(last_push_time)
         except Exception as e:
-            print(f"[email_watcher] 错误: {e}")
+            _logger.warning(f"[email_watcher] 错误: {e}")
         time.sleep(_check_interval)
 
 

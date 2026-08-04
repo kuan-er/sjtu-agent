@@ -56,6 +56,9 @@ from sjtu_agent.feishu.rendering import (
     build_card_content,
 )
 from sjtu_agent.feishu.conversations import FeishuConversationManager
+from sjtu_agent.logging import get_logger
+
+_logger = get_logger("feishu_bot")
 
 
 def _load_cfg() -> dict:
@@ -396,7 +399,7 @@ def _call_reply(req) -> object | None:
     try:
         return _api_client.im.v1.message.reply(req)
     except Exception as e:
-        print(f"[feishu] reply API 异常: {e}")
+        _logger.warning(f"[feishu] reply API 异常: {e}")
         return None
 
 
@@ -439,7 +442,7 @@ def _reply_text(message_id: str, text: str) -> None:
         if resp is None:
             break
         if not resp.success():
-            print(f"[feishu] post 回复失败 code={resp.code} msg={resp.msg}，降级为 text")
+            _logger.warning(f"[feishu] post 回复失败 code={resp.code} msg={resp.msg}，降级为 text")
             # 只发送剩余未成功段落为纯文本
             remaining = [c for chunk in para_chunks[idx:] for p in chunk for el in p
                          for c in (el.get("text", "") + chr(10))]
@@ -468,11 +471,11 @@ def _reply_card(message_id: str, text: str) -> None:
     if resp is None:
         return
     if not resp.success():
-        print(f"[feishu] card 回复失败 code={resp.code} msg={resp.msg}")
+        _logger.warning(f"[feishu] card 回复失败 code={resp.code} msg={resp.msg}")
         # 降级为 text（此时表格渲染为纯文本）
         _reply_raw_text(message_id, text)
     else:
-        print(f"[feishu] card 回复成功")
+        _logger.info(f"[feishu] card 回复成功")
 
 
 def _reply_raw_text(message_id: str, text: str) -> None:
@@ -494,7 +497,7 @@ def _reply_raw_text(message_id: str, text: str) -> None:
         if resp is None:
             break
         if not resp.success():
-            print(f"[feishu] 回复失败 code={resp.code} msg={resp.msg}")
+            _logger.warning(f"[feishu] 回复失败 code={resp.code} msg={resp.msg}")
             break
 
 
@@ -523,7 +526,7 @@ def _send_to_chat(chat_id: str, text: str) -> None:
         )
         resp = _api_client.im.v1.message.create(req)
         if not resp.success():
-            print(f"[feishu] 主动发送 card 失败 code={resp.code} msg={resp.msg}")
+            _logger.warning(f"[feishu] 主动发送 card 失败 code={resp.code} msg={resp.msg}")
         return
 
     # 普通内容 → post
@@ -544,7 +547,7 @@ def _send_to_chat(chat_id: str, text: str) -> None:
         )
         resp = _api_client.im.v1.message.create(req)
         if not resp.success():
-            print(f"[feishu] 主动发送失败 code={resp.code} msg={resp.msg}")
+            _logger.warning(f"[feishu] 主动发送失败 code={resp.code} msg={resp.msg}")
     else:
         # fallback text
         req = (
@@ -561,7 +564,7 @@ def _send_to_chat(chat_id: str, text: str) -> None:
         )
         resp = _api_client.im.v1.message.create(req)
         if not resp.success():
-            print(f"[feishu] 主动发送失败 code={resp.code} msg={resp.msg}")
+            _logger.warning(f"[feishu] 主动发送失败 code={resp.code} msg={resp.msg}")
 
 
 # ── 事件处理 ──────────────────────────────────────────────────────────────────
@@ -769,7 +772,7 @@ def _handle_commands(open_id: str, text: str) -> str | None:
         except Exception as e:
             import traceback
             tb = traceback.format_exc()
-            print(tb)
+            _logger.error(tb)
             return f"[eat] 查询失败：{e}\n```\n{tb[-500:]}\n```"
     if cmd == "/template":
         sub = parts[1].strip() if len(parts) > 1 else ""
@@ -839,7 +842,7 @@ def _process_hw_command(sender_open_id: str, message_id: str, text: str) -> None
     except Exception as e:
         import traceback
         traceback.print_exc()
-        print(f"[feishu] /hw 命令异常: {e}")
+        _logger.error(f"[feishu] /hw 命令异常: {e}")
         _reply_text(message_id, f"[homework] 出错：{e}")
     finally:
         _hw_in_progress.discard(sender_open_id)
@@ -853,7 +856,7 @@ def _process_news_command(sender_open_id: str, message_id: str) -> None:
     except Exception as e:
         import traceback
         traceback.print_exc()
-        print(f"[feishu] /news 命令异常: {e}")
+        _logger.error(f"[feishu] /news 命令异常: {e}")
         _reply_text(message_id, f"[news] 出错：{e}")
 
 
@@ -938,9 +941,9 @@ def _try_extract_memory(open_id: str, conv: dict) -> None:
                 "msg_count": len(conv.get("messages", [])),
                 "type": "session_summary",
             })
-            print(f"[feishu] 记忆已提取: {summary[:60]}...")
+            _logger.info(f"[feishu] 记忆已提取: {summary[:60]}...")
     except Exception as e:
-        print(f"[feishu] 记忆提取失败: {e}")
+        _logger.warning(f"[feishu] 记忆提取失败: {e}")
 
 
 def _run_fn_with_timeout(fn, timeout: float, *args):
@@ -975,7 +978,7 @@ def _process_in_thread(sender_open_id: str, message_id: str, text: str) -> None:
     try:
         conv, meta, lock = _conv_mgr.get_active(sender_open_id)
     except Exception as e:
-        print(f"[feishu] get_active 异常: {e}")
+        _logger.warning(f"[feishu] get_active 异常: {e}")
         return
     if not lock.acquire(blocking=False):
         _reply_text(message_id, "上一条消息还在处理中，请稍候…")
@@ -983,11 +986,11 @@ def _process_in_thread(sender_open_id: str, message_id: str, text: str) -> None:
     try:
         reply = _run_fn_with_timeout(_capture_turn, _CAPTURE_TIMEOUT, conv, text, sender_open_id)
     except TimeoutError:
-        print(f"[feishu] LLM 调用超时（{_CAPTURE_TIMEOUT}s），释放锁")
+        _logger.warning(f"[feishu] LLM 调用超时（{_CAPTURE_TIMEOUT}s），释放锁")
         _reply_text(message_id, "处理超时，请稍后重试")
         return
     except Exception as e:
-        print(f"[feishu] 处理出错：{e}")
+        _logger.warning(f"[feishu] 处理出错：{e}")
         _reply_text(message_id, f"出错了：{e}")
         return
     finally:
@@ -1005,7 +1008,7 @@ def _process_media_in_thread(sender_open_id: str, message_id: str, msg_type: str
     try:
         conv, meta, lock = _conv_mgr.get_active(sender_open_id)
     except Exception as e:
-        print(f"[feishu] get_active 异常: {e}")
+        _logger.warning(f"[feishu] get_active 异常: {e}")
         return
     if not lock.acquire(blocking=False):
         _reply_text(message_id, "上一条消息还在处理中，请稍候…")
@@ -1072,10 +1075,10 @@ def _process_media_in_thread(sender_open_id: str, message_id: str, msg_type: str
     try:
         _run_fn_with_timeout(_do_media_process, _CAPTURE_TIMEOUT)
     except TimeoutError:
-        print(f"[feishu] 媒体处理超时（{_CAPTURE_TIMEOUT}s），释放锁")
+        _logger.warning(f"[feishu] 媒体处理超时（{_CAPTURE_TIMEOUT}s），释放锁")
         _reply_text(message_id, "处理超时，请稍后重试")
     except Exception as e:
-        print(f"[feishu] 媒体处理出错：{e}")
+        _logger.warning(f"[feishu] 媒体处理出错：{e}")
         _reply_text(message_id, f"附件处理失败：{e}")
     finally:
         _conv_mgr.save()
@@ -1100,15 +1103,15 @@ def _handle_message(data: P2ImMessageReceiveV1) -> None:
 
         # ── 去重：飞书可能因 ack 超时重发同一事件 ──────────────────────
         if _is_duplicate(message_id):
-            print(f"[feishu] 跳过重复消息 message_id={message_id}")
+            _logger.info(f"[feishu] 跳过重复消息 message_id={message_id}")
             return
 
         # ── 忽略积压的旧消息（Bot 断连期间飞书积累的事件，重启后被重放）──
         _MAX_MSG_AGE_SEC = 300  # 5 min — covers bot restart warmup (health check ~30s)
         create_time_ms = int(getattr(msg, "create_time", 0) or 0)
         if create_time_ms and time.time() - create_time_ms / 1000 > _MAX_MSG_AGE_SEC:
-            print(f"[feishu] 跳过过期消息 message_id={message_id} "
-                  f"age={time.time() - create_time_ms / 1000:.0f}s")
+            _logger.info(f"[feishu] 跳过过期消息 message_id={message_id} "
+                         f"age={time.time() - create_time_ms / 1000:.0f}s")
             return
 
         media_supported = msg_type in {"image", "file", "audio", "media"}
@@ -1119,7 +1122,7 @@ def _handle_message(data: P2ImMessageReceiveV1) -> None:
                 return
             # 内容去重：防止飞书用不同 message_id 重发同一事件
             if _is_duplicate_content(sender_open_id, text):
-                print(f"[feishu] 跳过重复内容: {text[:40]!r}")
+                _logger.info(f"[feishu] 跳过重复内容: {text[:40]!r}")
                 return
         elif not media_supported:
             _reply_text(message_id, f"(暂不支持的消息类型: {msg_type}，目前支持文本、图片、文件、音频、视频)")
@@ -1134,18 +1137,18 @@ def _handle_message(data: P2ImMessageReceiveV1) -> None:
                 if now - last < _COOLDOWN_SEC:
                     return  # 冷却期内，跳过重复
                 _recent_updates_cooldown[sender_open_id] = now
-            print(f"[feishu] 拦截近期更新: {text[:40]!r}")
+            _logger.info(f"[feishu] 拦截近期更新: {text[:40]!r}")
             _reply_text(message_id, _RECENT_UPDATES_TEXT)
             return
 
         # 过滤"清空聊天记录"/撤回消息产生的系统通知
         if text in {"此消息已删除", "该消息已被撤回"}:
-            print(f"[feishu] 跳过已删除/撤回的系统消息 message_id={message_id}")
+            _logger.info(f"[feishu] 跳过已删除/撤回的系统消息 message_id={message_id}")
             return
 
         # 白名单检查（所有命令和对话均需校验）
         if ALLOWED_OPEN_IDS and sender_open_id not in ALLOWED_OPEN_IDS:
-            print(f"[feishu] [!] 未授权 open_id：{sender_open_id}")
+            _logger.info(f"[feishu] [!] 未授权 open_id：{sender_open_id}")
             _reply_text(message_id, "你不在该机器人的允许列表中。\n"
                         f"请把这个 open_id 加入 config.json 的 feishu_allowed_open_ids:\n"
                         f"{sender_open_id}")
@@ -1154,7 +1157,7 @@ def _handle_message(data: P2ImMessageReceiveV1) -> None:
         # ── 多对话命令拦截 ──────────────────────────────────────────
         # /hw 系列是重命令（网络 I/O + LLM），放到后台线程避免阻塞 event loop
         if t.lower().startswith("/hw"):
-            print(f"[feishu] 命令（后台执行）: {text[:40]!r}")
+            _logger.info(f"[feishu] 命令（后台执行）: {text[:40]!r}")
             # 在主线程中提前保存 /hw do 上下文，避免后台线程延迟导致丢失
             parts = text.strip().split(maxsplit=2)
             if len(parts) >= 3 and parts[1].lower() in ("do", "past"):
@@ -1184,19 +1187,19 @@ def _handle_message(data: P2ImMessageReceiveV1) -> None:
 
         # /news 也是重命令（网络 I/O + LLM 排序），后台执行
         if t.lower().startswith("/news"):
-            print(f"[feishu] 命令（后台执行）: {text[:40]!r}")
+            _logger.info(f"[feishu] 命令（后台执行）: {text[:40]!r}")
             _reply_text(message_id, "[news] 正在生成校园新闻摘要，请稍候…")
             _EXECUTOR.submit(_process_news_command, sender_open_id, message_id)
             return
 
         cmd_result = _handle_commands(sender_open_id, text)
         if cmd_result is not None:
-            print(f"[feishu] 命令: {text[:40]!r}")
+            _logger.info(f"[feishu] 命令: {text[:40]!r}")
             _reply_text(message_id, cmd_result)
             return
 
-        print(f"[feishu] 收到消息 from open_id={sender_open_id[:12]}… "
-              f"chat_type={chat_type} text={text[:60]!r}")
+        _logger.info(f"[feishu] 收到消息 from open_id={sender_open_id[:12]}… "
+                     f"chat_type={chat_type} text={text[:60]!r}")
 
         if WHOAMI_MODE:
             _reply_text(
@@ -1207,29 +1210,29 @@ def _handle_message(data: P2ImMessageReceiveV1) -> None:
             return
 
         if ALLOWED_OPEN_IDS and sender_open_id not in ALLOWED_OPEN_IDS:
-            print(f"[feishu] [!] 未授权 open_id：{sender_open_id}")
+            _logger.info(f"[feishu] [!] 未授权 open_id：{sender_open_id}")
             _reply_text(message_id, "你不在该机器人的允许列表中。\n"
                         f"请把这个 open_id 加入 config.json 的 feishu_allowed_open_ids:\n"
                         f"{sender_open_id}")
             return
 
         if not ALLOWED_OPEN_IDS:
-            print(f"[feishu] [i] 白名单为空，已允许所有人；建议把此 open_id 加入白名单："
-                  f"{sender_open_id}")
+            _logger.info(f"[feishu] [i] 白名单为空，已允许所有人；建议把此 open_id 加入白名单："
+                         f"{sender_open_id}")
 
         # ── 保存 open_id 供 daily_report 推送使用 ──────────────────────
         if sender_open_id:
             try:
                 cfg_data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
             except Exception as e:
-                print(f"[feishu] 跳过 open_id 持久化：config.json 读取失败: {e}")
+                _logger.info(f"[feishu] 跳过 open_id 持久化：config.json 读取失败: {e}")
                 cfg_data = None
             if cfg_data is not None and cfg_data.get("feishu_open_id") != sender_open_id:
                 try:
                     cfg_data["feishu_open_id"] = sender_open_id
                     CONFIG_PATH.write_text(json.dumps(cfg_data, ensure_ascii=False, indent=2), encoding="utf-8")
                 except Exception as e:
-                    print(f"[feishu] open_id 写入失败: {e}")
+                    _logger.info(f"[feishu] open_id 写入失败: {e}")
 
         # ── 提交到后台线程，立即返回 ──
         if msg_type == "text":
@@ -1238,7 +1241,7 @@ def _handle_message(data: P2ImMessageReceiveV1) -> None:
             _EXECUTOR.submit(_process_media_in_thread, sender_open_id, message_id, msg_type, msg.content)
 
     except Exception as e:
-        print(f"[feishu] handler 异常：{e}")
+        _logger.warning(f"[feishu] handler 异常：{e}")
 
 
 # ── 心跳与健壮性 ────────────────────────────────────────────────────────────

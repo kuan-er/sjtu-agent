@@ -43,9 +43,14 @@ from sjtu_agent.bots._core import (
     run_one_turn_multimodal,
 )
 
+from sjtu_agent.logging import get_logger
+
 import telebot
 import agent
 import ddl_checker as dc
+
+
+_logger = get_logger("telegram_bot")
 
 # ── 配置加载 ──────────────────────────────────────────────────────────────────
 
@@ -58,7 +63,7 @@ BOT_TOKEN   = cfg.get("telegram_token", "")
 ALLOWED_IDS = set(int(x) for x in cfg.get("telegram_allowed_ids", []))
 
 if not BOT_TOKEN:
-    print("❌ config.json 中未设置 telegram_token，请先运行 setup_config.py")
+    _logger.error("❌ config.json 中未设置 telegram_token，请先运行 setup_config.py")
     sys.exit(1)
 
 bot = telebot.TeleBot(BOT_TOKEN)
@@ -245,7 +250,7 @@ def _streamed_turn(sess: dict, user_text: str, on_progress, on_tool_result=None)
                     "content": [{"type": "text", "text": fallback_text}],
                 })
         except Exception as e:
-            print(f"[telegram] 最终回复合成失败: {e}")
+            _logger.warning(f"[telegram] 最终回复合成失败: {e}")
         return full_text
 
     # ── OpenAI 兼容路径 ──────────────────────────────────────────────────────
@@ -342,7 +347,7 @@ def _streamed_turn(sess: dict, user_text: str, on_progress, on_tool_result=None)
         if fb_text:
             sess["messages"].append({"role": "assistant", "content": fb_text})
     except Exception as e:
-        print(f"[telegram] 最终回复合成失败: {e}")
+        _logger.warning(f"[telegram] 最终回复合成失败: {e}")
 
     # 记录对话到 conversation_log（供用户画像更新使用）
     try:
@@ -1188,10 +1193,10 @@ def _wait_for_network(max_wait: int = 120, interval: int = 5) -> "telebot.types.
         except Exception as e:
             remaining = deadline - _time.monotonic()
             if remaining <= 0:
-                print(f"❌ 网络等待超时（{max_wait}s），最后一次错误：{e}")
+                _logger.error(f"❌ 网络等待超时（{max_wait}s），最后一次错误：{e}")
                 raise
             wait = min(interval, remaining)
-            print(f"[WARN] 第 {attempt} 次连接失败（网络未就绪？），{wait:.0f}s 后重试：{e}")
+            _logger.warning(f"[WARN] 第 {attempt} 次连接失败（网络未就绪？），{wait:.0f}s 后重试：{e}")
             _time.sleep(wait)
 
 
@@ -1217,7 +1222,7 @@ if __name__ == "__main__":
             try:
                 bot.send_message(_uid, startup_text, parse_mode="HTML")
             except Exception as _e:
-                print(f"[WARN] 上线通知发送失败 uid={_uid}: {_e}")
+                _logger.warning(f"[WARN] 上线通知发送失败 uid={_uid}: {_e}")
 
     # 向 Telegram 服务器注册命令列表，用户输入 / 时会弹出自动补全菜单
     from telebot.types import BotCommand

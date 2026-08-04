@@ -17,6 +17,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from sjtu_agent.logging import get_logger
+
+_logger = get_logger("aihot_push")
+
 CST = timezone(timedelta(hours=8))
 _API_BASE = "https://aihot.virxact.com/api/public"
 _UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 sjtu-agent/0.2"
@@ -43,10 +47,10 @@ def _fetch_items(mode: str = "selected", hours: int = 24) -> list[dict]:
         with urllib.request.urlopen(req, timeout=30) as resp:
             data = json.loads(resp.read().decode())
     except urllib.error.HTTPError as e:
-        print(f"[aihot] API HTTP {e.code}: {e.reason}")
+        _logger.warning(f"[aihot] API HTTP {e.code}: {e.reason}")
         return []
     except Exception as e:
-        print(f"[aihot] API 请求失败: {e}")
+        _logger.warning(f"[aihot] API 请求失败: {e}")
         return []
 
     return data.get("items", []) if isinstance(data, dict) else []
@@ -145,16 +149,16 @@ def _html_to_post(text: str) -> list:
 def main() -> None:
     test_mode = "--test" in sys.argv
 
-    print("[aihot] 正在获取 AI 资讯…")
+    _logger.info("[aihot] 正在获取 AI 资讯…")
     items = _fetch_items()
     if not items:
-        print("[aihot] 未获取到 AI 资讯")
+        _logger.warning("[aihot] 未获取到 AI 资讯")
         return
 
     md = _build_markdown(items)
     if test_mode:
         _safe_print(md)
-        print(f"\n[aihot] 测试模式，未推送。共 {len(items)} 条。")
+        _logger.info(f"[aihot] 测试模式，未推送。共 {len(items)} 条。")
         return
 
     post_paras = _html_to_post(md)
@@ -166,13 +170,13 @@ def main() -> None:
     open_id = _cfg.get("feishu_open_id", "")
 
     if not open_id:
-        print("[aihot] 未配置 feishu_open_id，跳过推送。请先在飞书 Bot 中发一条消息以记录 open_id。")
+        _logger.warning("[aihot] 未配置 feishu_open_id，跳过推送。请先在飞书 Bot 中发一条消息以记录 open_id。")
         return
 
     if send_post_message(open_id, post_paras):
-        print(f"[aihot] 推送完成，共 {len(items)} 条")
+        _logger.info(f"[aihot] 推送完成，共 {len(items)} 条")
     else:
-        print("[aihot] 推送失败")
+        _logger.warning("[aihot] 推送失败")
 
 
 if __name__ == "__main__":

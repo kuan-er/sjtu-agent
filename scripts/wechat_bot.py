@@ -35,7 +35,6 @@ import base64
 import io
 import atexit
 import json
-import logging
 import os
 import random
 import re
@@ -63,10 +62,12 @@ from sjtu_agent.bots._core import (
     run_one_turn_multimodal,
 )
 
+from sjtu_agent.logging import get_logger
+
 import agent
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-logger = logging.getLogger("wechat_bot")
+
+_logger = get_logger("wechat_bot")
 
 # ── ilink 接口常量 ─────────────────────────────────────────────────────────────
 
@@ -167,15 +168,15 @@ def do_login() -> tuple[str, str, str]:
     """
     print("\n正在获取微信登录二维码…")
     resp = httpx.get(f"{ILINK_BASE}/ilink/bot/get_bot_qrcode?bot_type=3", timeout=15)
-    print(f"[debug] get_bot_qrcode HTTP {resp.status_code}")
-    print(f"[debug] get_bot_qrcode headers: {dict(resp.headers)}")
-    print(f"[debug] get_bot_qrcode body: {resp.text}")
+    _logger.debug(f"[debug] get_bot_qrcode HTTP {resp.status_code}")
+    _logger.debug(f"[debug] get_bot_qrcode headers: {dict(resp.headers)}")
+    _logger.debug(f"[debug] get_bot_qrcode body: {resp.text}")
     resp.raise_for_status()
     data = resp.json()
     qrcode_key = data["qrcode"]
     qrcode_url = data["qrcode_img_content"]
-    print(f"[debug] qrcode key: {qrcode_key}")
-    print(f"[debug] qrcode url: {qrcode_url}")
+    _logger.debug(f"[debug] qrcode key: {qrcode_key}")
+    _logger.debug(f"[debug] qrcode url: {qrcode_url}")
 
     # 在终端打印 ASCII 二维码
     qr = qrcode.QRCode(border=1)
@@ -199,21 +200,21 @@ def do_login() -> tuple[str, str, str]:
             try:
                 status = status_resp.json()
             except Exception:
-                print(f"[debug] poll #{poll_count} HTTP {status_resp.status_code} non-JSON body: {status_resp.text!r}")
+                _logger.debug(f"[debug] poll #{poll_count} HTTP {status_resp.status_code} non-JSON body: {status_resp.text!r}")
                 time.sleep(2)
                 continue
         except httpx.ReadTimeout:
             # 正常行为，继续轮询
             continue
         except Exception as e:
-            logger.warning(f"轮询扫码状态出错（继续重试）：{e}")
+            _logger.warning(f"轮询扫码状态出错（继续重试）：{e}")
             time.sleep(2)
             continue
 
         s = status.get("status", "")
         # 只在状态变化或异常时打印完整 body，避免刷屏
         if s != last_status or s not in ("waiting", "scaned"):
-            print(f"[debug] poll #{poll_count} HTTP {status_resp.status_code} status={s!r} full body: {status}")
+            _logger.debug(f"[debug] poll #{poll_count} HTTP {status_resp.status_code} status={s!r} full body: {status}")
             last_status = s
 
         if s == "scaned":
@@ -504,9 +505,9 @@ def handle_message(client: ILinkClient, msg: dict) -> None:
     )
 
     if text:
-        logger.info(f"收到消息 from={from_user[:8]}…：{text[:50]}")
+        _logger.info(f"收到消息 from={from_user[:8]}…：{text[:50]}")
     else:
-        logger.info(f"收到媒体消息 from={from_user[:8]}…：{(media or {}).get('type', 'unknown')}")
+        _logger.info(f"收到媒体消息 from={from_user[:8]}…：{(media or {}).get('type', 'unknown')}")
 
     # 发送"正在输入"状态
     client.send_typing(ctx_token)
@@ -588,7 +589,7 @@ def handle_message(client: ILinkClient, msg: dict) -> None:
             # 微信消息长度限制约 4096，超出则分段发送
             _send_chunks(client, reply, from_user, ctx_token)
         except Exception as e:
-            logger.error(f"处理消息时出错：{e}", exc_info=True)
+            _logger.error(f"处理消息时出错：{e}", exc_info=True)
             try:
                 client.send(f"❌ 出错了：{e}", to_user_id=from_user, context_token=ctx_token)
             except Exception:
@@ -610,7 +611,7 @@ def _send_chunks(client: ILinkClient, text: str, to_user: str, ctx_token: str,
 
 def run_bot(client: ILinkClient) -> None:
     """主消息循环：长轮询接收消息并处理。"""
-    logger.info("✅ 微信 bot 已启动，等待消息…")
+    _logger.info("✅ 微信 bot 已启动，等待消息…")
     cfg = _load_cfg()
     to_user = cfg.get("wechat_to_user_id", "")
     ctx_token = cfg.get("wechat_context_token", "")
@@ -644,7 +645,7 @@ def run_bot(client: ILinkClient) -> None:
         except Exception as e:
             consecutive_errors += 1
             wait = min(5 * consecutive_errors, 60)
-            logger.warning(f"getupdates 出错（{consecutive_errors}次），{wait}s 后重试：{e}")
+            _logger.warning(f"getupdates 出错（{consecutive_errors}次），{wait}s 后重试：{e}")
             time.sleep(wait)
 
 
@@ -705,7 +706,7 @@ def send_reminder_via_wechat(title: str, subtitle: str, body: str) -> None:
             text += f"\n{body}"
         bot.push(text)
     except Exception as e:
-        logger.warning(f"微信推送失败：{e}")
+        _logger.warning(f"微信推送失败：{e}")
 
 
 # ── 入口 ──────────────────────────────────────────────────────────────────────

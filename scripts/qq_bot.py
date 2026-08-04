@@ -49,9 +49,14 @@ from sjtu_agent.bots._core import (
     run_one_turn_multimodal,
 )
 
+from sjtu_agent.logging import get_logger
+
 import agent
 import botpy
 from botpy.message import Message, DirectMessage
+
+
+_logger = get_logger("qq_bot")
 
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[mKABCDEFGHJKST]")
@@ -71,7 +76,7 @@ APP_ID = str(cfg.get("qq_app_id", "")).strip()
 APP_SECRET = str(cfg.get("qq_app_secret", "")).strip()
 
 if not APP_ID or not APP_SECRET:
-    print("❌ config.json missing qq_app_id / qq_app_secret")
+    _logger.error("❌ config.json missing qq_app_id / qq_app_secret")
     sys.exit(1)
 
 
@@ -316,7 +321,7 @@ class QQAgentClient(botpy.Client):
     async def on_ready(self):
         me = getattr(getattr(self, "robot", None), "username", "")
         me_id = getattr(getattr(self, "robot", None), "id", "")
-        print(f"[qq] gateway ready: username={me or '-'} id={me_id or '-'}")
+        _logger.info(f"[qq] gateway ready: username={me or '-'} id={me_id or '-'}")
 
     async def _reply_once(self, message, content: str) -> None:
         msg_id = str(getattr(message, "id", "") or "")
@@ -429,7 +434,7 @@ class QQAgentClient(botpy.Client):
         await self._reply_chunks(message, reply)
 
     async def on_at_message_create(self, message: Message):
-        print("[qq] recv at_message_create")
+        _logger.info("[qq] recv at_message_create")
         user_id = str(getattr(getattr(message, "author", None), "id", "") or "")
         text = _normalize_text(getattr(message, "content", ""))
         await self._process(message, user_id, text)
@@ -438,18 +443,18 @@ class QQAgentClient(botpy.Client):
         # In OpenClaw/public-messages mode, C2C events are the canonical path.
         # Handling both direct_message_create and c2c_message_create can cause
         # mixed user-id sources and duplicate/conflicting replies.
-        print("[qq] recv direct_message_create (ignored; use c2c path)")
+        _logger.info("[qq] recv direct_message_create (ignored; use c2c path)")
         return
 
     async def on_group_at_message_create(self, message):  # botpy newer versions
-        print("[qq] recv group_at_message_create")
+        _logger.info("[qq] recv group_at_message_create")
         author = getattr(message, "author", None)
         user_id = str(getattr(author, "member_openid", "") or "")
         text = _normalize_text(getattr(message, "content", ""))
         await self._process(message, user_id or "group_user", text)
 
     async def on_c2c_message_create(self, message):  # botpy newer versions
-        print("[qq] recv c2c_message_create")
+        _logger.info("[qq] recv c2c_message_create")
         author = getattr(message, "author", None)
         user_id = str(getattr(author, "user_openid", "") or "")
         text = _normalize_text(getattr(message, "content", ""))
@@ -510,12 +515,12 @@ def main() -> None:
     intents = _build_intents()
     client = QQAgentClient(intents=intents)
     print(f"✅ QQ Bot starting with appid={APP_ID}")
-    print(f"[qq] intents: {_describe_intents(intents)}")
+    _logger.info(f"[qq] intents: {_describe_intents(intents)}")
     _, allowed_ids = _runtime_policy()
     if not allowed_ids:
-        print("[i] qq_allowed_user_ids is empty: allowing all users.")
+        _logger.info("[i] qq_allowed_user_ids is empty: allowing all users.")
     else:
-        print(f"[i] qq_allowed_user_ids count={len(allowed_ids)}")
+        _logger.info(f"[i] qq_allowed_user_ids count={len(allowed_ids)}")
     client.run(appid=APP_ID, secret=APP_SECRET)
 
 

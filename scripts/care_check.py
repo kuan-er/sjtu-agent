@@ -28,6 +28,10 @@ from sjtu_agent.paths import (
 from dotenv import load_dotenv
 load_dotenv(ENV_PATH)
 
+from sjtu_agent.logging import get_logger
+
+_logger = get_logger("care_check")
+
 import ddl_checker as dc
 
 # CST 时区，避免 datetime.now() 受系统时区/DST 影响导致冷却期错乱
@@ -60,7 +64,7 @@ def _save_care_state(state: dict) -> None:
         atomic_write_json(CARE_STATE_PATH, state)
     except Exception as e:
         # 写入失败保留旧状态，下次冷却期判断仍用旧时间戳；好过把状态丢空
-        print(f"[care_check] 状态写入失败（保留旧状态）: {e}", flush=True)
+        _logger.warning(f"[care_check] 状态写入失败（保留旧状态）: {e}")
 
 
 def _can_send(state: dict, care_type: str) -> bool:
@@ -104,11 +108,11 @@ def _get_urgent_ddls() -> list[dict]:
         try:
             all_ddl.extend(dc2.fetch_canvas(cfg))
         except Exception as e:
-            print(f"[care] fetch_canvas 拉取失败: {e}")
+            _logger.warning(f"[care] fetch_canvas 拉取失败: {e}")
         try:
             all_ddl.extend(dc2.fetch_aihaoke(cfg))
         except Exception as e:
-            print(f"[care] fetch_aihaoke 拉取失败: {e}")
+            _logger.warning(f"[care] fetch_aihaoke 拉取失败: {e}")
         urgent = []
         for item in all_ddl:
             due = item.get("due")
@@ -122,7 +126,7 @@ def _get_urgent_ddls() -> list[dict]:
                 })
         return sorted(urgent, key=lambda x: x["hours_left"])
     except Exception as e:
-        print(f"[care_check] 获取 DDL 出错: {e}", flush=True)
+        _logger.warning(f"[care_check] 获取 DDL 出错: {e}")
         return []
 
 
@@ -212,12 +216,12 @@ def run_care_check() -> None:
         for msg in messages_to_send:
             sent = _send_care(msg)
             if sent:
-                print(f"[care_check] 已发送关怀消息: {msg[:30]}…", flush=True)
+                _logger.info(f"[care_check] 已发送关怀消息: {msg[:30]}…")
         for ct in care_types_sent:
             _mark_sent(state, ct)
         _save_care_state(state)
     else:
-        print(f"[care_check] {now.strftime('%H:%M')} 暂无需要发送的关怀消息", flush=True)
+        _logger.info(f"[care_check] {now.strftime('%H:%M')} 暂无需要发送的关怀消息")
 
 
 if __name__ == "__main__":
