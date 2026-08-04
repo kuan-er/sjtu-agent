@@ -28,6 +28,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from sjtu_agent.paths import CONFIG_PATH, REMINDERS_PATH, REMIND_CHECK_LOG_PATH, REMIND_STATE_PATH
 from sjtu_agent.config import cfg as _cfg
+from sjtu_agent.logging import get_logger
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -46,19 +47,11 @@ CST = timezone(timedelta(hours=8))
 
 # ── 工具函数 ─────────────────────────────────────────────────────────────────
 
+_logger = get_logger("remind_check")
+
+
 def _log(msg: str) -> None:
-    ts = datetime.now(CST).strftime("%Y-%m-%d %H:%M:%S")
-    line = f"[{ts}] {msg}"
-    print(line)
-    try:
-        with open(LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(line + "\n")
-        # 限制日志大小：超过 200KB 截断到最后 100KB
-        if LOG_PATH.stat().st_size > 200 * 1024:
-            content = LOG_PATH.read_bytes()
-            LOG_PATH.write_bytes(content[-100 * 1024:])
-    except Exception:
-        pass
+    _logger.info(msg)
 
 
 def _load_reminders() -> list[dict]:
