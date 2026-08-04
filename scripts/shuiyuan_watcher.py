@@ -33,6 +33,9 @@ from sjtu_agent.paths import (
     atomic_write_json,
     read_json_safe,
 )
+from sjtu_agent.logging import get_logger
+
+_logger = get_logger("shuiyuan_watcher")
 
 CST = timezone(timedelta(hours=8))
 STATE_FILE = DATA_DIR / ".shuiyuan_watcher_state.json"
@@ -104,9 +107,8 @@ def _ts() -> str:
 def main():
     cfg = _load_cfg()
     if not cfg["cookie"] or not cfg["telegram_token"] or not cfg["telegram_chat_id"]:
-        print(
-            "[shuiyuan_watcher] 缺少配置：请在 config.json 设置 shuiyuan_watcher.cookie / telegram_token / telegram_allowed_ids",
-            flush=True,
+        _logger.warning(
+            "[shuiyuan_watcher] 缺少配置：请在 config.json 设置 shuiyuan_watcher.cookie / telegram_token / telegram_allowed_ids"
         )
         return
 
@@ -115,7 +117,7 @@ def main():
     interval = cfg["check_interval"]
 
     state = load_state()
-    print(f"[{_ts()}] 开始监控（topic={topic_id}），当前 {state['posts_count']} 楼", flush=True)
+    _logger.info(f"[{_ts()}] 开始监控（topic={topic_id}），当前 {state['posts_count']} 楼")
 
     while True:
         try:
@@ -138,14 +140,13 @@ def main():
                 save_state(new_state)
                 state = new_state
                 if send_telegram(msg, cfg["telegram_token"], cfg["telegram_chat_id"]):
-                    print(
-                        f"[{_ts()}] 通知已发送！第{info['last_post_number']}楼 by {info['last_post_username']}",
-                        flush=True,
+                    _logger.info(
+                        f"[{_ts()}] 通知已发送！第{info['last_post_number']}楼 by {info['last_post_username']}"
                     )
             else:
-                print(f"[{_ts()}] 无新回复，当前 {state['posts_count']} 楼", flush=True)
+                _logger.info(f"[{_ts()}] 无新回复，当前 {state['posts_count']} 楼")
         except Exception as e:
-            print(f"[{_ts()}] 出错: {e}", flush=True)
+            _logger.warning(f"[{_ts()}] 出错: {e}")
         time.sleep(interval)
 
 if __name__ == "__main__":

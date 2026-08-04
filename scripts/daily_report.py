@@ -38,12 +38,12 @@ def _send_telegram(text: str) -> None:
     _cfg.reload_if_changed()
     cfg = _cfg.raw()
     if not cfg.get("telegram_enabled", True):
-        print("[daily_report] Telegram 推送已关闭，跳过")
+        _logger.info("[daily_report] Telegram 推送已关闭，跳过")
         return
     token = cfg.get("telegram_token", "")
     allowed_ids = cfg.get("telegram_allowed_ids", [])
     if not token or not allowed_ids:
-        print("[daily_report] Telegram 未配置，跳过推送")
+        _logger.warning("[daily_report] Telegram 未配置，跳过推送")
         return
 
     import urllib.request
@@ -64,7 +64,7 @@ def _send_telegram(text: str) -> None:
             try:
                 urllib.request.urlopen(req, timeout=15)
             except Exception as e:
-                print(f"[daily_report] Telegram 推送失败 uid={uid}: {e}")
+                _logger.warning(f"[daily_report] Telegram 推送失败 uid={uid}: {e}")
 
 
 def _html_to_post(text: str) -> list:
@@ -113,11 +113,11 @@ def _send_feishu(text: str) -> None:
     _cfg.reload_if_changed()
     cfg = _cfg.raw()
     if not cfg.get("feishu_enabled", True):
-        print("[daily_report] 飞书推送已关闭，跳过")
+        _logger.info("[daily_report] 飞书推送已关闭，跳过")
         return
     open_id = cfg.get("feishu_open_id", "")
     if not open_id:
-        print("[daily_report] 飞书未配置（feishu_open_id 缺失），跳过推送")
+        _logger.warning("[daily_report] 飞书未配置（feishu_open_id 缺失），跳过推送")
         return
 
     # 把 HTML 转为飞书 post 段落格式
@@ -125,9 +125,9 @@ def _send_feishu(text: str) -> None:
 
     from sjtu_agent.feishu_client import send_post_message
     if send_post_message(open_id, post_paras):
-        print("[daily_report] 飞书推送完成")
+        _logger.info("[daily_report] 飞书推送完成")
     else:
-        print("[daily_report] 飞书推送失败")
+        _logger.warning("[daily_report] 飞书推送失败")
 
 
 # ── 数据收集 ──────────────────────────────────────────────────────────────────
@@ -140,7 +140,7 @@ def _get_news() -> str:
         md_digest, _ = agg.run(hours=24, top_k=4)
         return md_digest or ""
     except Exception as e:
-        print(f"[daily_report] 新闻获取失败: {e}")
+        _logger.warning(f"[daily_report] 新闻获取失败: {e}")
         return ""
 
 
@@ -165,7 +165,7 @@ def _collect_data(report_type: str = "evening") -> dict:
             try:
                 results[key] = fut.result()
             except Exception as e:
-                print(f"[daily_report] {key} 获取失败: {e}")
+                _logger.warning(f"[daily_report] {key} 获取失败: {e}")
                 results[key] = None
 
     return results
@@ -224,7 +224,7 @@ def build_report(report_type: str = "evening") -> str:
     else:
         label = "晚间学习日报"
 
-    print("[daily_report] 正在收集数据…")
+    _logger.info("[daily_report] 正在收集数据…")
     data = _collect_data(report_type)
 
     # --- 拆解 DDL ---
@@ -408,7 +408,7 @@ def build_report(report_type: str = "evening") -> str:
 {data_ctx}
 {_build_care_note()}"""
 
-    print("[daily_report] 正在生成汇报…")
+    _logger.info("[daily_report] 正在生成汇报…")
     try:
         agent_cfg = agent.load_agent_config()
         client = agent._make_client(agent_cfg)
@@ -440,7 +440,7 @@ def build_report(report_type: str = "evening") -> str:
         return text or "(报告生成失败，请重试)"
 
     except Exception as e:
-        print(f"[daily_report] AI 生成失败，降级为纯文本模式: {e}")
+        _logger.warning(f"[daily_report] AI 生成失败，降级为纯文本模式: {e}")
         fallback_schedule_label = "明日课程" if report_type == "evening" else "今日课程"
         return _fallback_report(date_str, today_ddls, week_ddls, far_ddls,
                                 _fmt_schedule(schedule_raw), _fmt_lab(lab_raw), _fmt_jwc(jwc_raw),

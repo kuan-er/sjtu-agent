@@ -20,7 +20,11 @@ sys.path.insert(0, str(ROOT))
 
 from dotenv import load_dotenv
 from sjtu_agent.paths import ENV_PATH
+from sjtu_agent.logging import get_logger
+
 load_dotenv(ENV_PATH)
+
+_logger = get_logger("news_digest")
 
 
 def main():
@@ -48,9 +52,9 @@ def main():
             if cfg.get("api_key") and cfg.get("model"):
                 llm_client = _make_client(cfg)
                 model = cfg["model"]
-                print(f"[news] LLM 已就绪：{model}", flush=True)
+                _logger.info(f"[news] LLM 已就绪：{model}")
         except Exception as e:
-            print(f"[news] LLM 初始化失败，降级到关键词排序：{e}", flush=True)
+            _logger.warning(f"[news] LLM 初始化失败，降级到关键词排序：{e}")
 
     from sjtu_agent.news_aggregator import NewsAggregator
     aggregator = NewsAggregator(llm_client=llm_client, model=model)
@@ -63,23 +67,23 @@ def main():
     if not args.dry_run:
         ok = aggregator.send_via_telegram(html_digest)
         if ok:
-            print("[news] ✅ Telegram 推送成功", flush=True)
+            _logger.info("[news] ✅ Telegram 推送成功")
         else:
-            print("[news] ⚠ Telegram 推送失败或未配置", flush=True)
+            _logger.warning("[news] ⚠ Telegram 推送失败或未配置")
 
         ok_wx = aggregator.send_via_wechat(md_digest)
         if ok_wx:
-            print("[news] ✅ 微信推送成功", flush=True)
+            _logger.info("[news] ✅ 微信推送成功")
         else:
-            print("[news] ⚠ 微信推送失败或未配置", flush=True)
+            _logger.warning("[news] ⚠ 微信推送失败或未配置")
 
         ok_fs = aggregator.send_via_feishu(feishu_paras)
         if ok_fs:
-            print("[news] ✅ 飞书推送成功", flush=True)
+            _logger.info("[news] ✅ 飞书推送成功")
         else:
-            print("[news] ⚠ 飞书推送失败或未配置", flush=True)
+            _logger.warning("[news] ⚠ 飞书推送失败或未配置")
     else:
-        print("[news] --dry-run 模式，跳过推送", flush=True)
+        _logger.info("[news] --dry-run 模式，跳过推送")
 
 
 def _test_source(source_name: str):

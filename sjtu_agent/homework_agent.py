@@ -17,8 +17,11 @@ from pathlib import Path
 
 from sjtu_agent.paths import ASSIGNMENTS_DIR
 from sjtu_agent.config import cfg as _cfg
+from sjtu_agent.logging import get_logger
 
 import agent
+
+_logger = get_logger("homework_agent")
 
 
 def _get_feishu_config() -> dict | None:
@@ -213,10 +216,10 @@ def _fetch_pending(include_past: bool = False) -> list[dict]:
         CST = timezone(timedelta(hours=8))
         now = datetime.now(CST)
         past = [d for d in ddls if d.get("due") and hasattr(d["due"], "timestamp") and d["due"] < now]
-        print(f"[homework] Canvas 共 {len(ddls)} 个作业，{len(past)} 个历史")
+        _logger.info(f"[homework] Canvas 共 {len(ddls)} 个作业，{len(past)} 个历史")
         return past
     pending = [d for d in ddls if not d.get("submitted")]
-    print(f"[homework] Canvas 共 {len(ddls)} 个作业，{len(pending)} 个未提交")
+    _logger.info(f"[homework] Canvas 共 {len(ddls)} 个作业，{len(pending)} 个未提交")
     return pending
 
 
@@ -254,7 +257,7 @@ def _claude_code_solve(hw_dir: Path, course: str, aname: str, content: str,
                         brief: bool = False, answer_mode: bool = False) -> str:
     """使用本地 Claude Code CLI 解题。answer_mode=True 输出完整答案。"""
     if not _CLAUDE_BIN or not Path(_CLAUDE_BIN).exists():
-        print("[homework] Claude Code 不可用，回退到 API 调用")
+        _logger.warning("[homework] Claude Code 不可用，回退到 API 调用")
         return solve_homework(course, aname, content, brief=brief)
 
     import subprocess
@@ -328,14 +331,14 @@ def _claude_code_solve(hw_dir: Path, course: str, aname: str, content: str,
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait(timeout=10)
-            print("[homework] Claude Code 超时（已终止进程），回退 API")
+            _logger.warning("[homework] Claude Code 超时（已终止进程），回退 API")
             return solve_homework(course, aname, content, brief=brief)
 
         output = stdout.strip()
         if proc.returncode != 0 and not output:
-            print(f"[homework] Claude Code 失败 ({proc.returncode}), 回退 API")
+            _logger.warning(f"[homework] Claude Code 失败 ({proc.returncode}), 回退 API")
             if stderr:
-                print(f"  stderr: {stderr[:200]}")
+                _logger.warning(f"  stderr: {stderr[:200]}")
             return solve_homework(course, aname, content, brief=brief)
 
         # 提取 SUMMARY 作为飞书回复
@@ -351,7 +354,7 @@ def _claude_code_solve(hw_dir: Path, course: str, aname: str, content: str,
                 proc.kill()
             except Exception:
                 pass
-        print(f"[homework] Claude Code 异常: {e}, 回退 API")
+        _logger.warning(f"[homework] Claude Code 异常: {e}, 回退 API")
         return solve_homework(course, aname, content, brief=brief)
 
 
@@ -382,7 +385,7 @@ def _download_and_analyze_one(d: dict, idx: int, brief: bool = False,
             include_past=True,  # 允许下载历史作业
         )
     except Exception as e:
-        print(f"[homework] 下载失败 {course}/{aname}: {e}")
+        _logger.warning(f"[homework] 下载失败 {course}/{aname}: {e}")
 
     content = read_assignment_content(hw_dir)
     if "[无可读文件]" in content:
@@ -406,7 +409,7 @@ def _download_and_analyze_one(d: dict, idx: int, brief: bool = False,
             try: old.unlink()
             except Exception: pass
 
-    print(f"[homework] 解题: {course} - {aname}")
+    _logger.info(f"[homework] 解题: {course} - {aname}")
     feishu_reply = _claude_code_solve(hw_dir, course, aname, content, brief=brief, answer_mode=answer_mode)
 
     # 生成解答文件（从 Claude Code 写入的 _解答.md 读取完整内容）
@@ -415,9 +418,9 @@ def _download_and_analyze_one(d: dict, idx: int, brief: bool = False,
     title = f"{course} — {aname}"
     try:
         files = generate_solution_files(title, full_solution, hw_dir, answer_mode=answer_mode)
-        print(f"[homework] 已生成 {len(files)} 个文件: {files}")
+        _logger.info(f"[homework] 已生成 {len(files)} 个文件: {files}")
     except Exception as e:
-        print(f"[homework] 文件生成失败: {e}")
+        _logger.warning(f"[homework] 文件生成失败: {e}")
 
     # 收集下载文件信息
     file_info = ""
@@ -468,7 +471,7 @@ def run_homework_check(due_within_days: int = 0, specific_idx: int | None = None
     pending = _fetch_pending(include_past=include_past)
     if due_within_days > 0:
         pending = _filter_by_due(pending, due_within_days)
-        print(f"[homework] 过滤后 {len(pending)} 个 {due_within_days} 天内到期")
+        _logger.info(f"[homework] 过滤后 {len(pending)} 个 {due_within_days} 天内到期")
 
     if not pending:
         label = f"{due_within_days} 天内" if due_within_days > 0 else ""
@@ -495,7 +498,7 @@ def run_homework_check_and_push(due_within_days: int = 3,
     result = run_homework_check(due_within_days, specific_idx)
     cfg = _get_feishu_config()
     if not cfg:
-        print("[homework] 飞书未配置，仅打印：\n" + result)
+        _logger.warning("[homework] 飞书未配置，仅打印：\n" + result)
         return
 
     import requests
@@ -506,7 +509,7 @@ def run_homework_check_and_push(due_within_days: int = 3,
             timeout=10,
         )
         if r.status_code != 200 or r.json().get("code") != 0:
-            print(f"[homework] 飞书 token 获取失败")
+            _logger.warning("[homework] 飞书 token 获取失败")
             return
         token = r.json()["tenant_access_token"]
 
@@ -524,8 +527,8 @@ def run_homework_check_and_push(due_within_days: int = 3,
                 timeout=15,
             )
             if resp.status_code != 200 or resp.json().get("code") != 0:
-                print(f"[homework] 推送失败: {resp.text[:100]}")
+                _logger.warning(f"[homework] 推送失败: {resp.text[:100]}")
                 return
-        print("[homework] 飞书推送完成")
+        _logger.info("[homework] 飞书推送完成")
     except Exception as e:
-        print(f"[homework] 推送异常: {e}")
+        _logger.warning(f"[homework] 推送异常: {e}")
