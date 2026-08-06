@@ -8,7 +8,7 @@ from pathlib import Path
 
 from sjtu_agent import __version__
 from sjtu_agent.paths import describe_runtime_paths
-from sjtu_agent.scheduler import available_service_names, current_platform_name, install_daemons
+from sjtu_agent.scheduler import available_service_names, current_platform_name, daemon_status, install_daemons, uninstall_daemons
 from sjtu_agent.setup_wizard import register_setup_parser
 from sjtu_agent.terminal_ui import print_json
 
@@ -105,6 +105,22 @@ def _cmd_update(args: argparse.Namespace) -> int:
         print("   请确认项目是通过 git clone 安装的。")
         return 1
 
+    # ── 1.5 检测已安装的后台服务 ───────────────────────────────────────────
+    # 后台 daemon 在 git pull + reinstall 后仍引用旧模块路径，会导致
+    # ModuleNotFoundError（issue #113）。检测到后，在更新前停止、更新后重启。
+    _installed_daemons: list[tuple[str, list[str]]] = []  # [(backend, [names])]
+    for _backend in ("taskschd", "psmux"):
+        try:
+            _st = daemon_status(backend=_backend)
+            _names = [
+                s["name"] for s in (_st.get("services") or [])
+                if isinstance(s, dict) and s.get("installed")
+            ]
+            if _names:
+                _installed_daemons.append((_backend, _names))
+        except Exception:
+            pass
+
     # ── 1. 显示待更新内容 ──────────────────────────────────────────────────
     if not args.skip_git:
         # 获取当前 HEAD 和远端 HEAD 的差异
@@ -162,6 +178,13 @@ def _cmd_update(args: argparse.Namespace) -> int:
                                 print(f"  • {line}")
 
     # ── 2. git pull ────────────────────────────────────────────────────────
+    # 确认要更新后，先停后台服务（避免更新后旧模块引用报错）
+    for _backend, _names in _installed_daemons:
+        print(f"[i] 更新前停止后台服务（{_backend}）: {', '.join(_names)}")
+        try:
+            uninstall_daemons(service_names=tuple(_names), backend=_backend)
+        except Exception as e:
+            print(f"[!] 停止后台服务失败（可忽略）: {e}")
     if not args.skip_git:
         print("\n正在拉取最新代码…")
         # 先尝试 fast-forward（最简单，无冲突）
@@ -217,6 +240,15 @@ def _cmd_update(args: argparse.Namespace) -> int:
                 print(f"已刷新 .pth 文件：{pth_path}")
         except Exception as _e:
             print(f"（写 .pth 失败，非致命：{_e}）")
+
+    # ── 5.5 重启后台服务 ──────────────────────────────────────────────────
+    if _installed_daemons:
+        for _backend, _names in _installed_daemons:
+            print(f"[i] 更新后重启后台服务（{_backend}）: {', '.join(_names)}")
+            try:
+                install_daemons(service_names=tuple(_names), backend=_backend)
+            except Exception as e:
+                print(f"[!] 重启后台服务失败: {e}")
 
     # ── 6. 打印新版本 ────────────────────────────────────────────────────
     try:
