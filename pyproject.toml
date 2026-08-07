@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sjtu-agent"
-version = "0.7.7"
+version = "0.8.0"
 description = "Deployable SJTU campus agent with CLI, multi-platform bots (Feishu/Telegram/WeChat/QQ), and MCP server."
 readme = "README.md"
 requires-python = ">=3.10"
