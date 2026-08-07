@@ -147,6 +147,23 @@ def _cli_agent_updates(args: argparse.Namespace) -> dict[str, str]:
     }
 
 
+def _cli_vision_updates(args: argparse.Namespace) -> dict[str, str | bool]:
+    """收集 --vision-* CLI 参数。
+
+    只有当某个 --vision-* 参数实际传入时才在返回 dict 中出现对应键，
+    enabled 键仅在显式传 --vision-enabled / --no-vision-enabled 时出现
+    （parser 里两者默认 None），避免把默认值误存进配置。
+    """
+    updates: dict[str, str | bool] = {
+        "base_url": args.vision_base_url or "",
+        "api_key": args.vision_api_key or "",
+        "model": args.vision_model or "",
+    }
+    if getattr(args, "vision_enabled", None) is not None:
+        updates["enabled"] = bool(args.vision_enabled)
+    return updates
+
+
 def _test_llm_connection(base_url: str, api_key: str, model: str) -> tuple[bool, str]:
     """
     发一条极短的请求验证 LLM API 是否可用。
@@ -219,8 +236,12 @@ def _apply_vision_config_updates(updates: dict) -> dict | None:
     current = agent.load_agent_config()
     vm = dict(current.get("vision_model") or {})
     for key in ("enabled", "base_url", "api_key", "model"):
-        if updates.get(key):
-            vm[key] = updates[key]
+        val = updates.get(key)
+        # enabled 显式传 False（--no-vision-enabled）也要保存，不能用真值判断
+        if key == "enabled" and val is not None:
+            vm[key] = bool(val)
+        elif val:
+            vm[key] = val
     if not vm:
         return None
     vm.setdefault("enabled", True)
@@ -525,6 +546,11 @@ def _run_automatic_setup(args: argparse.Namespace) -> int:
     else:
         agent_status = _agent_config_status()
         _print_check("LLM config", bool(agent_status["configured"]), str(agent_status.get("model") or AGENT_CONFIG_PATH))
+
+    vision_updates = _cli_vision_updates(args)
+    if any(vision_updates.values()) or vision_updates.get("enabled") is not None:
+        _apply_vision_config_updates(vision_updates)
+        print("Saved vision model config")
 
     _print_header("Credentials")
     status = _doctor_status()
@@ -1156,6 +1182,11 @@ class SetupConversation:
         if initial_agent_save:
             self.say(f"我已经先保存了命令行里的模型配置：{initial_agent_save['model']} @ {initial_agent_save['base_url']}。")
 
+        initial_vision_updates = _cli_vision_updates(self.args)
+        if any(initial_vision_updates.values()) or initial_vision_updates.get("enabled") is not None:
+            _apply_vision_config_updates(initial_vision_updates)
+            self.say("我已经先保存了命令行里的视觉模型配置。")
+
         initial_updates = _cli_credential_updates(self.args)
         initial_save = _apply_credential_updates(initial_updates)
         if initial_save:
@@ -1254,4 +1285,21 @@ def register_setup_parser(subparsers: argparse._SubParsersAction[argparse.Argume
     parser.add_argument("--llm-base-url", default="", help="LLM API base URL to save")
     parser.add_argument("--llm-api-key", default="", help="LLM API key to save")
     parser.add_argument("--llm-model", default="", help="LLM model name to save")
+    parser.add_argument("--vision-base-url", default="", help="视觉模型 base URL to save")
+    parser.add_argument("--vision-api-key", default="", help="视觉模型 API key to save")
+    parser.add_argument("--vision-model", default="", help="视觉模型名称 to save")
+    parser.add_argument(
+        "--vision-enabled",
+        dest="vision_enabled",
+        action="store_true",
+        default=None,
+        help="启用视觉模型",
+    )
+    parser.add_argument(
+        "--no-vision-enabled",
+        dest="vision_enabled",
+        action="store_false",
+        default=None,
+        help="停用视觉模型",
+    )
     parser.set_defaults(func=run_setup_wizard)
