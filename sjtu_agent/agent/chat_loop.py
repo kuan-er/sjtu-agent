@@ -333,7 +333,8 @@ def chat_loop(client, model: str):
         f"「本学年」= {_cur_xnm}学年"
         f"（query_grades: year='{_cur_xnm}', semester=''）。"
     )
-    messages = [{"role": "system", "content": SYSTEM_PROMPT + _date_ctx}]
+    from sjtu_agent.bots._core import build_profile_ctx  # 局部导入避免循环依赖
+    messages = [{"role": "system", "content": SYSTEM_PROMPT + _date_ctx + build_profile_ctx()}]
     model_box  = [model]   # 用列表包裹使内部可修改
     client_box = [client]  # 同理，切换模型时可替换 client
 
@@ -433,7 +434,8 @@ def chat_loop(client, model: str):
             model_box[0] = updated["model"]
             # 切换协议时重置对话，避免消息格式冲突
             messages.clear()
-            messages.append({"role": "system", "content": SYSTEM_PROMPT})
+            from sjtu_agent.bots._core import build_profile_ctx  # 局部导入避免循环依赖
+            messages.append({"role": "system", "content": SYSTEM_PROMPT + build_profile_ctx()})
             proto = "Anthropic" if _is_anthropic_model(updated["model"]) else "OpenAI"
             print(f"  已切换到: {updated['model']}  [协议: {proto}]（已保存，对话已重置）\n")
             continue
