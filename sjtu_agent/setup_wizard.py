@@ -147,6 +147,23 @@ def _cli_agent_updates(args: argparse.Namespace) -> dict[str, str]:
     }
 
 
+def _cli_vision_updates(args: argparse.Namespace) -> dict[str, str | bool]:
+    """收集 --vision-* CLI 参数。
+
+    只有当某个 --vision-* 参数实际传入时才在返回 dict 中出现对应键，
+    enabled 键仅在显式传 --vision-enabled / --no-vision-enabled 时出现
+    （parser 里两者默认 None），避免把默认值误存进配置。
+    """
+    updates: dict[str, str | bool] = {
+        "base_url": args.vision_base_url or "",
+        "api_key": args.vision_api_key or "",
+        "model": args.vision_model or "",
+    }
+    if getattr(args, "vision_enabled", None) is not None:
+        updates["enabled"] = bool(args.vision_enabled)
+    return updates
+
+
 def _test_llm_connection(base_url: str, api_key: str, model: str) -> tuple[bool, str]:
     """
     发一条极短的请求验证 LLM API 是否可用。
@@ -201,8 +218,38 @@ def _apply_agent_config_updates(updates: dict[str, str]) -> dict[str, str] | Non
         "api_key": updates["api_key"] or current.get("api_key") or "",
         "model": updates["model"] or current.get("model") or "deepseek-chat",
     }
+    # 保留已保存的 vision_model（主模型更新不清掉视觉模型）
+    if isinstance(current.get("vision_model"), dict):
+        saved["vision_model"] = current["vision_model"]
     AGENT_CONFIG_PATH.write_text(json.dumps(saved, indent=2, ensure_ascii=False), encoding="utf-8")
     return saved
+
+
+def _apply_vision_config_updates(updates: dict) -> dict | None:
+    """保存/更新 vision_model 块到 agent_config.json。
+
+    updates: {"enabled": bool, "base_url": str, "api_key": str, "model": str}
+    api_key 仅在本地文件，绝不打印。
+    """
+    import agent
+
+    current = agent.load_agent_config()
+    vm = dict(current.get("vision_model") or {})
+    for key in ("enabled", "base_url", "api_key", "model"):
+        val = updates.get(key)
+        # enabled 显式传 False（--no-vision-enabled）也要保存，不能用真值判断
+        if key == "enabled" and val is not None:
+            vm[key] = bool(val)
+        elif val:
+            vm[key] = val
+    if not vm:
+        return None
+    vm.setdefault("enabled", True)
+    vm.setdefault("model", "qwen-vl-max")
+    saved = dict(current)
+    saved["vision_model"] = vm
+    AGENT_CONFIG_PATH.write_text(json.dumps(saved, indent=2, ensure_ascii=False), encoding="utf-8")
+    return vm
 
 
 def _read_secret(prompt: str) -> str:
@@ -500,6 +547,11 @@ def _run_automatic_setup(args: argparse.Namespace) -> int:
         agent_status = _agent_config_status()
         _print_check("LLM config", bool(agent_status["configured"]), str(agent_status.get("model") or AGENT_CONFIG_PATH))
 
+    vision_updates = _cli_vision_updates(args)
+    if any(vision_updates.values()) or vision_updates.get("enabled") is not None:
+        _apply_vision_config_updates(vision_updates)
+        print("Saved vision model config")
+
     _print_header("Credentials")
     status = _doctor_status()
     updates = _collect_credential_updates(args, status)
@@ -776,7 +828,57 @@ class SetupConversation:
             self.say(f"✅ 连接测试通过，已将 API Key 保存到 .env（ZHIYUAN_API_KEY）。")
             self.say(f"默认模型：{model}，Base URL：{base_url}。")
             self.say("现在你已经具备完整 agent 对话能力了；这个 setup 也会继续帮你把校园平台配置补齐。")
+
+            # 主模型配置成功后，可选配置视觉模型（识图能力）
+            if not self._configure_vision_model(status):
+                return self.quit_setup()
             return True
+
+    def _configure_vision_model(self, status: dict) -> bool:
+        """可选步骤：配置独立视觉模型（用于识图，如 qwen-vl-max）。
+
+        返回 True 表示正常结束（已保存或已跳过）；返回 False 表示用户选择退出 setup。
+        """
+        self.say("\n接下来是可选的「视觉模型」配置。")
+        self.say("如果你的主模型（如 deepseek）不支持识图，可以单独配一个视觉模型（如 qwen-vl-max），"
+                 "飞书收到图片时优先用它识图。不想配可以回复 skip。")
+        while True:
+            raw = self.prompt()
+            intent = self.handle_common(raw, "vision", status)
+            if intent == "handled":
+                continue
+            if intent == "quit":
+                return False
+            if intent == "skip":
+                self.say("好的，跳过视觉模型配置（识图将走 OCR 兜底）。")
+                return True
+            if intent in {"yes", "empty"}:
+                break
+            self.say("配置视觉模型请输入 y，或回复 skip 跳过。")
+            continue
+
+        self.say("视觉模型 Base URL（直接回车使用默认 https://dashscope.aliyuncs.com/compatible-mode/v1）：")
+        base_url = self.prompt().strip() or "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        self.say("视觉模型名称（直接回车使用默认 qwen-vl-max）：")
+        model = self.prompt().strip() or "qwen-vl-max"
+        api_key = _read_secret("视觉模型 API Key（输入不回显）: ").strip()
+        if not api_key:
+            self.say("没有收到 API Key，跳过视觉模型配置。")
+            return True
+
+        self.say("正在测试视觉模型连接，请稍候…")
+        ok, err = _test_llm_connection(base_url, api_key, model)
+        if not ok:
+            self.say(f"视觉模型连接测试失败：{err}（不会保存 key）")
+            self.say("你可以稍后重新运行 setup 配置，或手动编辑 agent_config.json 的 vision_model。")
+            return True
+
+        saved = _apply_vision_config_updates({
+            "enabled": True, "base_url": base_url, "api_key": api_key, "model": model,
+        })
+        if saved:
+            self.say(f"✅ 视觉模型已保存：{saved.get('model')}（enabled=true）")
+        return True
 
     def handle_playwright(self, status: dict) -> bool:
         self.say("我发现 Playwright Chromium 还没准备好。自动登录、cookie 刷新和水源授权都依赖它。")
@@ -1080,6 +1182,11 @@ class SetupConversation:
         if initial_agent_save:
             self.say(f"我已经先保存了命令行里的模型配置：{initial_agent_save['model']} @ {initial_agent_save['base_url']}。")
 
+        initial_vision_updates = _cli_vision_updates(self.args)
+        if any(initial_vision_updates.values()) or initial_vision_updates.get("enabled") is not None:
+            _apply_vision_config_updates(initial_vision_updates)
+            self.say("我已经先保存了命令行里的视觉模型配置。")
+
         initial_updates = _cli_credential_updates(self.args)
         initial_save = _apply_credential_updates(initial_updates)
         if initial_save:
@@ -1178,4 +1285,21 @@ def register_setup_parser(subparsers: argparse._SubParsersAction[argparse.Argume
     parser.add_argument("--llm-base-url", default="", help="LLM API base URL to save")
     parser.add_argument("--llm-api-key", default="", help="LLM API key to save")
     parser.add_argument("--llm-model", default="", help="LLM model name to save")
+    parser.add_argument("--vision-base-url", default="", help="视觉模型 base URL to save")
+    parser.add_argument("--vision-api-key", default="", help="视觉模型 API key to save")
+    parser.add_argument("--vision-model", default="", help="视觉模型名称 to save")
+    parser.add_argument(
+        "--vision-enabled",
+        dest="vision_enabled",
+        action="store_true",
+        default=None,
+        help="启用视觉模型",
+    )
+    parser.add_argument(
+        "--no-vision-enabled",
+        dest="vision_enabled",
+        action="store_false",
+        default=None,
+        help="停用视觉模型",
+    )
     parser.set_defaults(func=run_setup_wizard)

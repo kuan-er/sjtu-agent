@@ -1046,14 +1046,22 @@ def _process_media_in_thread(sender_open_id: str, message_id: str, msg_type: str
                 reply = _capture_turn_multimodal(conv, content, sender_open_id)
                 _reply_text(message_id, reply)
                 return
-            else:
-                _reply_text(message_id,
-                    f"当前后端模型（{model}）不支持识图功能，无法直接理解图片内容。\n\n"
-                    "建议：\n"
-                    "- 用文字描述图片中的内容，Bot 会尽力帮你分析\n"
-                    "- 在 Web 配置页切换到支持视觉的模型（如 gpt-4o、claude-4-sonnet、qwen-vl-max）\n"
-                    "- 安装 OCR 解析后端：`sjtu-agent install-parse-backends --backend pdf_ocr`")
-                return
+            # 模型不支持视觉 → 不 return，落到下方 OCR 解析路径。
+            # 之前这里直接 return 提示"不支持识图"，导致即使安装了 OCR
+            # 后端（paddleocr/whisper）也从不尝试解析图片（issue #113 #2）。
+            # 现在非视觉模型走 _build_parser_context 的 OCR 提取。
+
+            # 主模型不支持视觉 → 优先用独立视觉模型识图
+            img_bytes = local_path.read_bytes()
+            from sjtu_agent.vision import load_vision_config, analyze_image
+            if load_vision_config() is not None:
+                try:
+                    desc = analyze_image(img_bytes, "请描述这张图片并提取其中的文字。")
+                    _reply_text(message_id, f"🖼️ [视觉模型识图]\n{desc}")
+                    return
+                except Exception as e:
+                    _logger.warning(f"[feishu] 视觉模型识图失败，回退 OCR: {e}")
+            # 视觉模型不可用/失败 → 落到下方 OCR 解析路径
 
         parser_media_type = "audio" if msg_type == "audio" else ("image" if msg_type == "image" else "file")
         parsed_ctx, parse_err = _build_parser_context(local_path, media_type=parser_media_type)
