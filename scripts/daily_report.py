@@ -108,12 +108,32 @@ def _html_to_post(text: str) -> list:
     return paragraphs
 
 
+def _feishu_bot_running() -> bool:
+    """飞书 bot 是否在运行（心跳文件新鲜度判断，复用启动器同一 >90s 超时规则）。"""
+    try:
+        from sjtu_agent.paths import DATA_DIR
+        hb_file = DATA_DIR / "feishu_heartbeat.json"
+        if not hb_file.exists():
+            return False
+        data = json.loads(hb_file.read_text(encoding="utf-8"))
+        last = data.get("last_heartbeat", "")
+        if not last:
+            return False
+        last_dt = dt.datetime.fromisoformat(last)
+        return (dt.datetime.now() - last_dt).total_seconds() <= 90
+    except Exception:
+        return False
+
+
 def _send_feishu(text: str) -> None:
     """通过飞书 API 向用户私聊推送日报（post 格式，支持 Markdown 渲染）。"""
     _cfg.reload_if_changed()
     cfg = _cfg.raw()
     if not cfg.get("feishu_enabled", True):
         _logger.info("[daily_report] 飞书推送已关闭，跳过")
+        return
+    if not _feishu_bot_running():
+        _logger.info("[daily_report] 飞书 bot 未在运行（心跳超时），跳过飞书推送")
         return
     open_id = cfg.get("feishu_open_id", "")
     if not open_id:
@@ -212,8 +232,38 @@ def _load_report_preferences(report_type: str) -> dict:
     return {"sections": sections, "custom_instructions": custom}
 
 
-def build_report(report_type: str = "evening") -> str:
-    """收集数据 → 调用 AI 生成中文汇报 → 返回 HTML 格式字符串。"""
+def _is_quiet_day(all_ddls: list, schedule_raw, news_raw: str) -> bool:
+    """安静日：无 DDL + 无课 + 无校园动态。此时跳过整次报告，避免模板噪音。"""
+    has_ddl = any(not d.get("expired") for d in all_ddls)
+    courses = schedule_raw.get("courses") if isinstance(schedule_raw, dict) else None
+    has_courses = bool(courses)
+    has_news = bool(news_raw and news_raw.strip())
+    return not has_ddl and not has_courses and not has_news
+
+
+def _section_has_content(key: str, all_ddls: list, schedule_raw, lab_raw,
+                         jwc_raw, news_raw: str) -> bool:
+    """某个 section 是否有实际内容（用于从报告中去掉空模块，不写"暂无"）。"""
+    if key == "ddl":
+        return any(not d.get("expired") for d in all_ddls)
+    if key == "schedule":
+        courses = schedule_raw.get("courses") if isinstance(schedule_raw, dict) else None
+        return bool(courses)
+    if key == "lab":
+        return bool(lab_raw and isinstance(lab_raw, dict) and lab_raw.get("name"))
+    if key == "jwc":
+        items = jwc_raw.get("results", []) if isinstance(jwc_raw, dict) else []
+        return bool(items)
+    if key == "news":
+        return bool(news_raw and news_raw.strip())
+    return True  # tips 等始终保留
+
+
+def build_report(report_type: str = "evening") -> str | None:
+    """收集数据 → 调用 AI 生成中文汇报 → 返回 HTML 格式字符串。
+
+    安静日（无 DDL/课表/新闻）时返回 None，调用方跳过推送。
+    """
     now = dt.datetime.now(dc.CST)
     date_str = f"{now.strftime('%Y年%m月%d日')}（星期{_WEEKDAY_ZH[now.weekday()]}）"
     hour = now.hour
@@ -237,6 +287,11 @@ def build_report(report_type: str = "evening") -> str:
     lab_raw      = data.get("lab")
     jwc_raw      = data.get("jwc")
     news_raw     = data.get("news", "") or ""
+
+    # 安静日：无 DDL + 无课 + 无新闻 → 跳过整次报告（省 LLM + 免模板噪音）
+    if _is_quiet_day(all_ddls, schedule_raw, news_raw):
+        _logger.info("[daily_report] 安静日（无 DDL/课表/新闻），跳过本次报告")
+        return None
 
     # 午报：过滤掉上午已结束的课程（第 1-4 节，11:40 前结束）
     noon_has_remaining = True
@@ -380,13 +435,17 @@ def build_report(report_type: str = "evening") -> str:
 
     _THINK_RE = __import__("re").compile(r"<think>.*?</think>", __import__("re").DOTALL)
 
-    # 构建启用的 section 列表
+    # 构建启用的 section 列表：用户偏好的 + 实际有内容的（去掉空模块，不写"暂无"）
     section_order = ["ddl", "schedule", "lab", "jwc", "news", "tips"]
-    enabled_list = [section_templates[k] for k in section_order if enabled_sections.get(k, True)]
+    enabled_list = [
+        section_templates[k] for k in section_order
+        if enabled_sections.get(k, True)
+        and _section_has_content(k, all_ddls, schedule_raw, lab_raw, jwc_raw, news_raw)
+    ]
 
     if not enabled_list:
-        # 用户把所有模块都关了
-        enabled_list = ["请告知用户当前日报所有模块均已隐藏，建议至少开启一个模块。"]
+        # 用户把所有模块都关了，或全部无内容
+        enabled_list = ["请告知用户当前日报所有模块均已隐藏或暂无内容，建议至少开启一个模块。"]
 
     # 构建提示词
     extra_line = f"\n额外要求：{custom_instructions}" if custom_instructions else ""
@@ -491,6 +550,9 @@ if __name__ == "__main__":
     _log(f"=== {args.type} 汇报开始 ===")
     try:
         report = build_report(report_type=args.type)
+        if report is None:
+            _log("安静日（无 DDL/课表/新闻），跳过推送")
+            sys.exit(0)
         if args.test:
             print("\n" + "="*60)
             try:

@@ -732,7 +732,10 @@ def cmd_report(msg):
         try:
             import daily_report
             report = daily_report.build_report()
-            _send_chunks(chat_id, report, parse_mode="HTML")
+            if report:
+                _send_chunks(chat_id, report, parse_mode="HTML")
+            else:
+                bot.send_message(chat_id, "📊 安静日：今天无课、无 DDL、无校园动态，暂无日报～")
         except Exception as e:
             bot.send_message(chat_id, f"❌ 生成日报出错：{e}")
         finally:
