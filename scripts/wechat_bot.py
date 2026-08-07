@@ -56,6 +56,7 @@ from sjtu_agent.paths import CONFIG_PATH
 from sjtu_agent.config import cfg as _cfg
 from sjtu_agent.bots._core import (
     build_date_ctx as _build_date_ctx,
+    log_turn as _log_turn,
     make_session,
     model_supports_vision as _model_supports_vision,
     run_one_turn,
@@ -273,8 +274,10 @@ def _init_messages(sess: dict) -> None:
 
 
 def _capture_turn(sess: dict, user_text: str) -> str:
-    """运行一轮对话，返回 Agent 回复文本。"""
-    return run_one_turn(sess, user_text)
+    """运行一轮对话，返回 Agent 回复文本，并记录到用户画像。"""
+    reply = run_one_turn(sess, user_text)
+    _log_turn(user_text, reply)
+    return reply
 
 
 def _capture_turn_multimodal(sess: dict, content: list) -> str:

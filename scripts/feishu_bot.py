@@ -38,6 +38,7 @@ from sjtu_agent.config import cfg as _cfg
 from sjtu_agent.bots._core import (
     build_date_ctx,
     model_supports_vision as _model_supports_vision,
+    log_turn,
 )
 
 import lark_oapi as lark
@@ -1012,6 +1013,8 @@ def _process_in_thread(sender_open_id: str, message_id: str, text: str) -> None:
         _conv_mgr.save()
         lock.release()
     _reply_text(message_id, reply)
+    # 记录到用户画像（conversation_log + 关键词），失败静默
+    log_turn(text, reply)
     # 记忆提取不阻塞锁 — 在发送回复后异步进行
     try:
         _try_extract_memory(sender_open_id, conv)
@@ -1094,6 +1097,7 @@ def _process_media_in_thread(sender_open_id: str, message_id: str, msg_type: str
         user_text += "\n\n请根据已提取内容回答；若信息不足，再向用户追问。"
         reply = _capture_turn(conv, user_text, sender_open_id)
         _reply_text(message_id, reply)
+        log_turn(user_text, reply)
 
     try:
         _run_fn_with_timeout(_do_media_process, _CAPTURE_TIMEOUT)

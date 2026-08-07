@@ -150,6 +150,18 @@ def refresh_system_prompt(sess: dict, platform_ctx: str = "",
         sess["messages"][0]["content"] = base
 
 
+def log_turn(user_text, reply) -> None:
+    """记录一轮对话到用户画像（conversation_log + 关键词）。失败静默，不影响主流程。
+
+    telegram 直接调用 profile.log_conversation，feishu/wechat/qq 走这里统一接入。
+    """
+    try:
+        from sjtu_agent.news_aggregator.profile import log_conversation
+        log_conversation(user_text or "", reply or "")
+    except Exception:
+        pass
+
+
 def extract_assistant_reply(sess: dict) -> str:
     """从消息历史取最后一条 assistant 文本（飞书已验证的可靠方式）。
 
