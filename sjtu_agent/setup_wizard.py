@@ -802,7 +802,57 @@ class SetupConversation:
             self.say(f"✅ 连接测试通过，已将 API Key 保存到 .env（ZHIYUAN_API_KEY）。")
             self.say(f"默认模型：{model}，Base URL：{base_url}。")
             self.say("现在你已经具备完整 agent 对话能力了；这个 setup 也会继续帮你把校园平台配置补齐。")
+
+            # 主模型配置成功后，可选配置视觉模型（识图能力）
+            if not self._configure_vision_model(status):
+                return self.quit_setup()
             return True
+
+    def _configure_vision_model(self, status: dict) -> bool:
+        """可选步骤：配置独立视觉模型（用于识图，如 qwen-vl-max）。
+
+        返回 True 表示正常结束（已保存或已跳过）；返回 False 表示用户选择退出 setup。
+        """
+        self.say("\n接下来是可选的「视觉模型」配置。")
+        self.say("如果你的主模型（如 deepseek）不支持识图，可以单独配一个视觉模型（如 qwen-vl-max），"
+                 "飞书收到图片时优先用它识图。不想配可以回复 skip。")
+        while True:
+            raw = self.prompt()
+            intent = self.handle_common(raw, "vision", status)
+            if intent == "handled":
+                continue
+            if intent == "quit":
+                return False
+            if intent == "skip":
+                self.say("好的，跳过视觉模型配置（识图将走 OCR 兜底）。")
+                return True
+            if intent in {"yes", "empty"}:
+                break
+            self.say("配置视觉模型请输入 y，或回复 skip 跳过。")
+            continue
+
+        self.say("视觉模型 Base URL（直接回车使用默认 https://dashscope.aliyuncs.com/compatible-mode/v1）：")
+        base_url = self.prompt().strip() or "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        self.say("视觉模型名称（直接回车使用默认 qwen-vl-max）：")
+        model = self.prompt().strip() or "qwen-vl-max"
+        api_key = _read_secret("视觉模型 API Key（输入不回显）: ").strip()
+        if not api_key:
+            self.say("没有收到 API Key，跳过视觉模型配置。")
+            return True
+
+        self.say("正在测试视觉模型连接，请稍候…")
+        ok, err = _test_llm_connection(base_url, api_key, model)
+        if not ok:
+            self.say(f"视觉模型连接测试失败：{err}（不会保存 key）")
+            self.say("你可以稍后重新运行 setup 配置，或手动编辑 agent_config.json 的 vision_model。")
+            return True
+
+        saved = _apply_vision_config_updates({
+            "enabled": True, "base_url": base_url, "api_key": api_key, "model": model,
+        })
+        if saved:
+            self.say(f"✅ 视觉模型已保存：{saved.get('model')}（enabled=true）")
+        return True
 
     def handle_playwright(self, status: dict) -> bool:
         self.say("我发现 Playwright Chromium 还没准备好。自动登录、cookie 刷新和水源授权都依赖它。")
