@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SJTU Agent · 交大校园智能助手</title>
-    <meta name="description" content="一个面向交大学生的 AI 校园助手，统一管理 DDL、课表、成绩查询、校园门户和 Telegram 推送。">
+    <meta name="description" content="一个面向交大学生的 AI 校园助手，统一管理 DDL、课表、成绩查询、校园新闻、食堂推荐，通过飞书 / Telegram / 微信 / QQ 对话使用。">
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -37,10 +37,10 @@
         <div class="hero-copy">
             <div class="eyebrow-badge">
                 <span class="eyebrow-dot"></span>
-                <span>Open Source · SJTU Agent</span>
+                <span>v0.8.0 · Open Source</span>
             </div>
             <h1>让 AI 处理<br><span class="gradient-text">交大那些繁琐的事</span></h1>
-            <p class="hero-lead">DDL 管理、课表、成绩、校园门户、Telegram 推送——一个对话入口搞定。</p>
+            <p class="hero-lead">DDL、课表、成绩、校园新闻、食堂推荐——飞书 / Telegram / 微信 / QQ，一个对话入口搞定。</p>
             <div class="hero-actions">
                 <a class="primary-button" href="#abilities">
                     <span>探索功能</span>
@@ -55,7 +55,7 @@
 
         <div class="hero-visual">
             <!-- 手机模拟 -->
-            <div class="phone-frame" role="img" aria-label="Telegram Bot 对话演示">
+            <div class="phone-frame" role="img" aria-label="飞书 Bot 对话演示">
                 <div class="phone-notch" aria-hidden="true"></div>
                 <div class="tg-screen">
                     <div class="tg-topbar">
@@ -130,7 +130,7 @@
                 <p>接入平台</p>
             </div>
             <div class="stat-item">
-                <span class="stat-number" data-target="20">0</span><span class="stat-suffix">+</span>
+                <span class="stat-number" data-target="30">0</span><span class="stat-suffix">+</span>
                 <p>内置工具</p>
             </div>
             <div class="stat-item">
@@ -226,6 +226,82 @@
 
             <div class="feature-card" tabindex="0">
                 <div class="feature-card-header">
+                    <span class="feature-icon">📰</span>
+                    <span class="feature-tag feature-tag-new">New</span>
+                </div>
+                <h3>校园新闻聚合</h3>
+                <p>聚合教务处、水源社区、交大新闻网、Canvas 四个源，两阶段 AI 排序，按你的兴趣个性化推荐。`/news` 即时获取，每天 10:00 定时推送。</p>
+                <div class="feature-demo">
+                    <div class="demo-bar">
+                        <span class="demo-dots" aria-hidden="true"></span>
+                        <span class="demo-label">问答演示</span>
+                    </div>
+                    <div class="demo-chat">
+                        <p class="demo-user">今天有什么校园新闻？</p>
+                        <p class="demo-agent">已为你精选 3 条：教务处选课通知、水源实验室招募、图书馆新规——基于你最近的关注方向排序。</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="feature-card" tabindex="0">
+                <div class="feature-card-header">
+                    <span class="feature-icon">🍜</span>
+                    <span class="feature-tag feature-tag-new">New</span>
+                </div>
+                <h3>食堂推荐</h3>
+                <p>结合 campuslife 实时拥挤度和你学到的口味偏好，推荐今天去哪吃。`/eat` 一键推荐，越用越懂你。</p>
+                <div class="feature-demo">
+                    <div class="demo-bar">
+                        <span class="demo-dots" aria-hidden="true"></span>
+                        <span class="demo-label">问答演示</span>
+                    </div>
+                    <div class="demo-chat">
+                        <p class="demo-user">中午去哪吃？</p>
+                        <p class="demo-agent">推荐「第三餐饮大楼」：现在不挤（约 20%），有你常点的米线档口。😋</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="feature-card" tabindex="0">
+                <div class="feature-card-header">
+                    <span class="feature-icon">🖼️</span>
+                    <span class="feature-tag feature-tag-new">New</span>
+                </div>
+                <h3>多模态识图</h3>
+                <p>主模型不支持视觉？独立视觉模型 + OCR 兜底，发图片就能识别。支持语音转文字、PDF 解析。</p>
+                <div class="feature-demo">
+                    <div class="demo-bar">
+                        <span class="demo-dots" aria-hidden="true"></span>
+                        <span class="demo-label">问答演示</span>
+                    </div>
+                    <div class="demo-chat">
+                        <p class="demo-user">帮我看看这张电路图。</p>
+                        <p class="demo-agent">已识别：这是 3 个与非门组成的电路，标注了输入输出，要我帮你分析真值表吗？</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="feature-card" tabindex="0">
+                <div class="feature-card-header">
+                    <span class="feature-icon">🔌</span>
+                    <span class="feature-tag feature-tag-new">New</span>
+                </div>
+                <h3>MCP 扩展</h3>
+                <p>加载外部 MCP Server 作为额外工具，或让 Agent 创建 prompt-only 技能，能力无限扩展。</p>
+                <div class="feature-demo">
+                    <div class="demo-bar">
+                        <span class="demo-dots" aria-hidden="true"></span>
+                        <span class="demo-label">问答演示</span>
+                    </div>
+                    <div class="demo-chat">
+                        <p class="demo-user">加一个查论文的 MCP 服务。</p>
+                        <p class="demo-agent">已接入 `arxiv-search`，现在可以帮你按关键词检索最新论文了。</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="feature-card" tabindex="0">
+                <div class="feature-card-header">
                     <span class="feature-icon">✉️</span>
                 </div>
                 <h3>交大邮箱</h3>
@@ -248,7 +324,7 @@
                     <span class="feature-tag feature-tag-new">New</span>
                 </div>
                 <h3>用户画像 & 主动关怀</h3>
-                <p>Agent 会在对话中积累你的信息——情绪状态、作息、近期事件。在合适的时机，主动通过 Telegram 推送关怀消息。</p>
+                <p>Agent 会在对话中积累你的信息——情绪状态、作息、近期事件。在合适的时机，主动通过飞书 / Telegram 推送关怀消息。</p>
                 <div class="care-times">
                     <div class="care-time-item">
                         <span class="care-time">08:10</span>
@@ -272,7 +348,7 @@
         <div class="scene-wrapper">
             <div class="scene-copy">
                 <div class="section-label">真实场景</div>
-                <h2 class="section-title">这是它每天在<span class="gradient-text"> Telegram </span>里出现的样子</h2>
+                <h2 class="section-title">这是它每天在<span class="gradient-text"> 飞书 </span>里出现的样子</h2>
                 <p class="section-desc">不是宣传词，也不是假数据。每晚自动汇总 DDL、课程、实验安排，最后直接告诉你今晚先做什么。</p>
                 <ul class="scene-points">
                     <li>
@@ -291,7 +367,7 @@
             </div>
 
             <div class="phone-stage">
-                <div class="phone-frame-lg" role="img" aria-label="Telegram 学习日报示例">
+                <div class="phone-frame-lg" role="img" aria-label="飞书 学习日报示例">
                     <div class="phone-notch" aria-hidden="true"></div>
                     <div class="tg-screen">
                         <div class="tg-topbar">
@@ -377,7 +453,7 @@
                         <span class="step-num">3</span>
                         <div>
                             <strong>开始对话</strong>
-                            <p>配置完成，直接对话即可。可选配置 Telegram Bot 实现随时随地访问。</p>
+                            <p>配置完成，直接对话即可。可选配置飞书 / Telegram / 微信 / QQ Bot，随时随地访问。</p>
                         </div>
                     </li>
                 </ol>
@@ -387,8 +463,8 @@
                 <div class="panel-label">每日推送内容</div>
                 <div class="workflow-panel-inner">
                     <div class="panel-icon-row">📲</div>
-                    <h3>Telegram 每日日报</h3>
-                    <p>晚上自动汇总当日 DDL、课程、实验安排和今晚建议，临近截止时发送紧急提醒。</p>
+                    <h3>每日学习日报</h3>
+                    <p>早上 / 中午 / 晚上自动推送：DDL、课表、实验、教务通知和行动建议。安静日自动跳过，不打扰。</p>
                     <div class="report-tags">
                         <span class="report-tag">📋 作业 DDL</span>
                         <span class="report-tag">📅 今日课程</span>
@@ -447,10 +523,10 @@
                 </details>
                 <details class="faq-item">
                     <summary>
-                        <span>如果我只想用 Telegram，不想开终端？</span>
+                        <span>如果我只想用飞书 / Telegram，不想开终端？</span>
                         <span class="faq-chevron" aria-hidden="true">›</span>
                     </summary>
-                    <p>已提供 Telegram Bot 接入，适合把日常对话和提醒都放到熟悉的聊天界面里。配置后会在后台自动运行。</p>
+                    <p>已提供飞书 / Telegram / 微信 / QQ Bot 接入，把日常对话和提醒放到熟悉的聊天界面里。配置后会在后台自动运行。</p>
                 </details>
             </div>
             <div class="faq-col">
@@ -459,14 +535,14 @@
                         <span>需要我一直开着电脑吗？</span>
                         <span class="faq-chevron" aria-hidden="true">›</span>
                     </summary>
-                    <p>不需要。macOS 通过 <strong>launchd</strong>、Windows 通过 <strong>Task Scheduler（schtasks）</strong>、Linux 通过 <strong>systemd</strong> 实现开机自启。安装脚本会自动识别当前平台并注册对应任务，Telegram Bot 和每日日报无需保持终端开启。</p>
+                    <p>不需要。macOS 通过 <strong>launchd</strong>、Windows 通过 <strong>Task Scheduler（schtasks）</strong>、Linux 通过 <strong>systemd</strong> 实现开机自启。安装脚本会自动识别当前平台并注册对应任务，飞书 / Telegram 等 Bot 和每日日报无需保持终端开启。</p>
                 </details>
                 <details class="faq-item">
                     <summary>
                         <span>它支持哪些大模型？</span>
                         <span class="faq-chevron" aria-hidden="true">›</span>
                     </summary>
-                    <p>支持任何 OpenAI 兼容接口（DeepSeek、学校超算集群等），也支持 Anthropic Claude 系列。</p>
+                    <p>支持任何 OpenAI 兼容接口（DeepSeek、学校超算集群等），也支持 Anthropic Claude 系列。主模型不支持视觉时，可单独配置视觉模型识图（如 qwen-vl-max），OCR 兜底。</p>
                 </details>
                 <details class="faq-item">
                     <summary>
