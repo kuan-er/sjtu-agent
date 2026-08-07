@@ -136,7 +136,7 @@ New code should go into `sjtu_agent/`, not these root or script files.
 
 ### Refactoring status
 
-Refactoring status (as of v0.7.7):
+Refactoring status (as of v0.8.0):
 - **Done**: Phase 2.1 (agent.py split into `sjtu_agent/agent/`), tools.py split into `agent/tools/` subpackage (7 domain-specific submodules + `_report_prefs.py`, `_core.py` ~3700 lines)
 - **Partial**: Phase 1 (ConfigStore) — 类已实现 + 测试，纯读取点已迁移（20 处）；受保护的读写路径（setup/save + P0 凭据保护）保留直接文件操作。`run_tool` 已注册表化（`_TOOL_REGISTRY`）
 - **Not done**: Phase 2.2 (BotRunner base class to deduplicate telegram/wechat ~65% shared code), Phase 3 (Notifier abstraction, BasePlatform for DDL scrapers), Phase 4 (unified logging)
