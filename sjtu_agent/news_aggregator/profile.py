@@ -47,6 +47,52 @@ _INTEREST_TAGS = [
     "心理健康", "运动健身",
 ]
 
+# 时效性：时间敏感的画像字段及其过期窗口（秒）。
+# 稳定字段（姓名/专业/课程/偏好等）不在表内，恒视为有效。
+TIME_SENSITIVE_EXPIRY_SECONDS = {
+    "care_notes": 48 * 3600,            # 2 天
+    "mood": 3 * 24 * 3600,              # 3 天
+    "stress_level": 3 * 24 * 3600,      # 3 天
+    "recent_events": 7 * 24 * 3600,     # 7 天
+    "persona_summary": 30 * 24 * 3600,  # 30 天
+}
+
+
+def _field_timestamp(data: dict, field: str) -> str | None:
+    """字段写入时间：优先 _timestamps[field]，回退 last_updated/updated_at。"""
+    ts = data.get("_timestamps")
+    if isinstance(ts, dict) and ts.get(field):
+        return ts[field]
+    return data.get("last_updated") or data.get("updated_at") or None
+
+
+def _field_age_seconds(data: dict, field: str, now=None) -> float | None:
+    stamp = _field_timestamp(data, field)
+    if not stamp:
+        return None
+    try:
+        dt0 = datetime.fromisoformat(stamp)
+        if dt0.tzinfo is None:
+            dt0 = dt0.replace(tzinfo=CST)
+        if now is None:
+            now = datetime.now(CST)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=CST)
+        return (now - dt0).total_seconds()
+    except Exception:
+        return None
+
+
+def _is_fresh(data: dict, field: str) -> bool:
+    """时效字段是否未过期；稳定字段恒 fresh；无时间戳的旧画像保守显示。"""
+    window = TIME_SENSITIVE_EXPIRY_SECONDS.get(field)
+    if window is None:
+        return True
+    age = _field_age_seconds(data, field)
+    if age is None:
+        return True
+    return age <= window
+
 
 class UserProfile:
     """用户画像，线程安全读写。"""
@@ -145,6 +191,11 @@ class UserProfile:
         if not conversations and not data.get("keywords"):
             return  # 没有足够数据，跳过
 
+        # 剔除过期的时效性字段，避免把旧事实烘进新画像
+        for field in TIME_SENSITIVE_EXPIRY_SECONDS:
+            if not _is_fresh(data, field):
+                data.pop(field, None)
+
         # 衰减旧 interests（防止画像僵化）
         interests = data.get("interests", {})
         for k in list(interests.keys()):
@@ -162,6 +213,7 @@ class UserProfile:
                     data["interests"] = interests
                     if new_profile.get("persona_summary"):
                         data["persona_summary"] = new_profile["persona_summary"]
+                        data.setdefault("_timestamps", {})["persona_summary"] = datetime.now(CST).isoformat()
             except Exception as e:
                 print(f"[profile] LLM 深度更新失败：{e}", flush=True)
         else:
@@ -221,7 +273,10 @@ class UserProfile:
         top_kw = sorted(keywords.items(), key=lambda x: x[1], reverse=True)[:20]
         kw_text = ", ".join(f"{k}({v})" for k, v in top_kw)
 
+        now_str = datetime.now(CST).strftime("%Y年%m月%d日")
         prompt = f"""分析以下用户与 AI 助手的对话历史，输出用户画像 JSON。
+
+今天是 {now_str}。对话历史可能包含已过期的具体日期/学期/状态断言（例如"下周考试""下周期末"早已过去，"小学期"可能已结束）。persona_summary 中不要写入这类会过期的时间性断言；确需提及时请用「截至某时」表述，并避免与当前日期冲突。
 
 ## 高频关键词（词频）
 {kw_text}

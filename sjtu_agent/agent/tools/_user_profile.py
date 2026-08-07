@@ -99,7 +99,12 @@ def tool_update_user_profile(updates: dict, reason: str = "") -> dict:
         return base
 
     profile = deep_merge(profile, updates)
-    profile["last_updated"] = _dt.datetime.now().isoformat()
+    now = _dt.datetime.now().isoformat()
+    # 记录每个字段的写入时间，供时效性过滤（_is_fresh）判断过期
+    ts = profile.setdefault("_timestamps", {})
+    for k in updates.keys():
+        ts[k] = now
+    profile["last_updated"] = now
 
     USER_PROFILE_PATH.parent.mkdir(parents=True, exist_ok=True)
     USER_PROFILE_PATH.write_text(

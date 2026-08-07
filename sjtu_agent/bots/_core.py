@@ -47,7 +47,10 @@ def build_profile_ctx() -> str:
     """读取 user_profile.json，返回画像上下文（追加到 system prompt）。
 
     仅挑选可展示的结构化字段（persona_summary / 基本信息 / 关注话题 /
-    关怀提醒），避免暴露原始关键词与时间戳。文件缺失或为空返回 ""。
+    关怀提醒），避免暴露原始关键词。时效性：时间敏感字段（情绪/压力/近期
+    事件/关怀提醒/persona）按过期窗口过滤，过期不注入，并标注记录时间，
+    提示 LLM 与当前时间矛盾时以当前为准（issue：bot 念旧账）。
+    文件缺失或为空返回 ""。
     """
     from sjtu_agent.paths import USER_PROFILE_PATH
     try:
@@ -60,28 +63,59 @@ def build_profile_ctx() -> str:
     except Exception:
         return ""
 
-    lines = ["\n\n## 用户画像（开机自动读取，供个性化参考）"]
+    from sjtu_agent.news_aggregator.profile import _is_fresh
 
-    persona = (data.get("persona_summary") or "").strip()
+    # 只保留未过期的时效字段
+    persona  = (data.get("persona_summary") or "").strip() if _is_fresh(data, "persona_summary") else ""
+    stress   = data.get("stress_level") if _is_fresh(data, "stress_level") else None
+    mood     = data.get("mood") if _is_fresh(data, "mood") else None
+    events   = data.get("recent_events") if _is_fresh(data, "recent_events") else None
+    care     = data.get("care_notes") if _is_fresh(data, "care_notes") else None
+
+    # 稳定字段（长期有效，不设过期）
+    stable = {
+        k: data.get(k)
+        for k in ("name", "major", "grade", "courses", "hobbies",
+                  "preferred_canteens", "preferred_cuisines", "dietary_restrictions")
+        if data.get(k)
+    }
+
+    if not persona and not stable and not care and not events:
+        return ""
+
+    # 记录时间标注 + 防误导提示
+    last_updated = data.get("last_updated") or ""
+    date_note = ""
+    if last_updated:
+        try:
+            date_note = "，记录于 " + _dt.datetime.fromisoformat(last_updated).strftime("%Y-%m-%d")
+        except Exception:
+            pass
+    lines = [
+        f"\n\n## 用户画像{date_note}（可能过时，与当前时间/学期矛盾时以当前为准）"
+    ]
+
     if persona:
         lines.append(persona)
 
     struct = []
+    for key, label in [("name", "姓名"), ("major", "专业"), ("grade", "年级")]:
+        if stable.get(key):
+            struct.append(f"{label}: {stable[key]}")
+    if stress:
+        struct.append(f"近期压力: {stress}")
+    if mood:
+        struct.append(f"情绪: {mood}")
     for key, label in [
-        ("name", "姓名"), ("major", "专业"), ("grade", "年级"),
-        ("stress_level", "近期压力"), ("mood", "情绪"),
-    ]:
-        v = data.get(key)
-        if v:
-            struct.append(f"{label}: {v}")
-    for key, label in [
-        ("courses", "课程"), ("hobbies", "兴趣"), ("recent_events", "近期事件"),
+        ("courses", "课程"), ("hobbies", "兴趣"),
         ("preferred_canteens", "偏好食堂"), ("preferred_cuisines", "偏好菜系"),
         ("dietary_restrictions", "饮食限制"),
     ]:
-        v = data.get(key)
+        v = stable.get(key)
         if isinstance(v, list) and v:
             struct.append(f"{label}: {'、'.join(str(x) for x in v[:8])}")
+    if events and isinstance(events, list) and events:
+        struct.append(f"近期事件: {'、'.join(str(x) for x in events[:5])}")
     if struct:
         lines.append("；".join(struct))
 
@@ -94,8 +128,7 @@ def build_profile_ctx() -> str:
         if top:
             lines.append("关注话题：" + "、".join(k for k, _ in top))
 
-    care = data.get("care_notes")
-    if isinstance(care, list) and care:
+    if care and isinstance(care, list) and care:
         lines.append("关怀提醒：" + "；".join(str(x) for x in care[:3]))
 
     return "\n".join(lines) if len(lines) > 1 else ""
