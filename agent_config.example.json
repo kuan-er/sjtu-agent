@@ -1,0 +1,15 @@
+{
+  "_comment": "大模型配置。复制为 agent_config.json（已在 .gitignore 中）。若 .env 已配置 ZHIYUAN_API_KEY 则无需此文件；setup 向导 / Web UI 也会生成此文件。",
+  "provider": "zhiyuan",
+  "base_url": "https://models.sjtu.edu.cn/api/v1",
+  "api_key": "YOUR_LLM_API_KEY",
+  "model": "deepseek-chat",
+
+  "_vision_comment": "可选（v0.7.7）：主模型不支持视觉输入时，用独立视觉模型识图，OCR 兜底。API Key 仅存本地，输入时不回显、不打印。",
+  "vision_model": {
+    "enabled": false,
+    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "api_key": "YOUR_VISION_API_KEY",
+    "model": "qwen-vl-max"
+  }
+}

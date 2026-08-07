@@ -43,9 +43,43 @@
     "dirs": []
   },
 
+  "_feishu_comment": "飞书 Bot 凭据（https://open.feishu.cn 创建企业自建应用）",
+  "feishu_app_id": "",
+  "feishu_app_secret": "",
+  "feishu_allowed_open_ids": [],
+  "feishu_enabled": true,
+
+  "_telegram_comment": "Telegram Bot（https://t.me/BotFather 获取 token）",
+  "telegram_token": "",
+  "telegram_allowed_ids": [],
+  "telegram_enabled": true,
+
+  "_wechat_comment": "微信 ilink Bot：token / user_id 首次扫码或收消息后自动保存，无需手动填写",
+  "wechat_enabled": true,
+
   "_qq_comment": "QQ 官方机器人凭据（https://bot.q.qq.com）",
   "qq_app_id": "",
   "qq_app_secret": "",
   "qq_allowed_user_ids": [],
-  "qq_enabled": true
+  "qq_enabled": true,
+
+  "_canvas_monitor_comment": "可选：Canvas 课程监控。course_ids 优先于 course_filters，都为空则监控全部活跃课程",
+  "canvas_monitor": {
+    "enabled": false,
+    "course_ids": [],
+    "course_filters": [],
+    "include_announcements": true,
+    "include_quizzes": true,
+    "include_assignments": false,
+    "interval_seconds": 300,
+    "notify_channels": ["system", "telegram", "feishu"],
+    "baseline_on_first_run": true
+  },
+
+  "_report_preferences_comment": "可选：日报定制。对话中说「晚上别推作业提醒」会自动修改，一般无需手写",
+  "report_preferences": {
+    "sections": { "ddl": true, "schedule": true, "lab": true, "jwc": true, "news": true, "tips": true },
+    "custom_instructions": "",
+    "per_type": { "morning": {}, "noon": {}, "evening": {} }
+  }
 }

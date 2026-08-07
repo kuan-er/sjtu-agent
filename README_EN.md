@@ -108,7 +108,7 @@ If your main model does not support vision input (e.g. `deepseek-chat`), you can
    }
    ```
 
-> The vision model is used only for image recognition (one-shot calls) and does not participate in conversation history. The API key is stored locally and is neither echoed nor printed.
+> The vision model is used only for image recognition (one-shot calls) and does not participate in conversation history. The API key is stored locally and is neither echoed nor printed. See [agent_config.example.json](agent_config.example.json) for a full template.
 
 ---
 

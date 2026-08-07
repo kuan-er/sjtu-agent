@@ -73,7 +73,7 @@ ZHIYUAN_API_KEY=你的APIKey
    }
    ```
 
-> 视觉模型仅用于识图（一次性调用），不参与对话历史。API Key 仅存本地，输入时不回显、不打印。
+> 视觉模型仅用于识图（一次性调用），不参与对话历史。API Key 仅存本地，输入时不回显、不打印。完整配置模板见 [agent_config.example.json](agent_config.example.json)。
 
 ---
 
@@ -252,7 +252,7 @@ sjtu-agent install-parse-backends --backend whisper
 
 - `config.json` — 平台 Token、Cookie、Bot 凭据
 - `.env` — jAccount 账号密码、致远一号 API Key
-- `agent_config.json` — 大模型配置（已有 `ZHIYUAN_API_KEY` 则不需要）
+- `agent_config.json` — 大模型配置（已有 `ZHIYUAN_API_KEY` 则不需要；模板见 [agent_config.example.json](agent_config.example.json)）
 
 ### 安全说明
 
