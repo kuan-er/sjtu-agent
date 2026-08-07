@@ -33,12 +33,32 @@ import ddl_checker as dc
 
 # ── Telegram 推送 ─────────────────────────────────────────────────────────────
 
+def _telegram_bot_running() -> bool:
+    """Telegram bot 是否在运行（心跳文件新鲜度，与飞书同一 >90s 超时规则）。"""
+    try:
+        from sjtu_agent.paths import DATA_DIR
+        hb_file = DATA_DIR / "telegram_heartbeat.json"
+        if not hb_file.exists():
+            return False
+        data = json.loads(hb_file.read_text(encoding="utf-8"))
+        last = data.get("last_heartbeat", "")
+        if not last:
+            return False
+        last_dt = dt.datetime.fromisoformat(last)
+        return (dt.datetime.now() - last_dt).total_seconds() <= 90
+    except Exception:
+        return False
+
+
 def _send_telegram(text: str) -> None:
     """向所有 allowed_ids 分块推送 Telegram 消息。"""
     _cfg.reload_if_changed()
     cfg = _cfg.raw()
     if not cfg.get("telegram_enabled", True):
         _logger.info("[daily_report] Telegram 推送已关闭，跳过")
+        return
+    if not _telegram_bot_running():
+        _logger.info("[daily_report] Telegram bot 未在运行（心跳超时），跳过推送")
         return
     token = cfg.get("telegram_token", "")
     allowed_ids = cfg.get("telegram_allowed_ids", [])
