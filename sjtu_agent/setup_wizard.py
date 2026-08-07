@@ -739,6 +739,14 @@ class SetupConversation:
     def next_step(self, status: dict, chromium_status: dict[str, object]) -> str | None:
         if not status["agent"]["configured"] and "agent" not in self.skipped_steps:
             return "agent"
+        # 可选：视觉模型未配置时提示（即使主模型已配置也会走到这里）
+        if "vision" not in self.skipped_steps:
+            try:
+                from sjtu_agent.vision import load_vision_config
+                if load_vision_config() is None:
+                    return "vision"
+            except Exception:
+                pass
         if not chromium_status["ok"] and not self.args.skip_playwright_install and "playwright" not in self.skipped_steps:
             return "playwright"
         if not self.args.skip_credential_prompts and not status["jaccount"]["has_credentials"] and "jaccount" not in self.skipped_steps:
@@ -828,15 +836,12 @@ class SetupConversation:
             self.say(f"✅ 连接测试通过，已将 API Key 保存到 .env（ZHIYUAN_API_KEY）。")
             self.say(f"默认模型：{model}，Base URL：{base_url}。")
             self.say("现在你已经具备完整 agent 对话能力了；这个 setup 也会继续帮你把校园平台配置补齐。")
-
-            # 主模型配置成功后，可选配置视觉模型（识图能力）
-            if not self._configure_vision_model(status):
-                return self.quit_setup()
             return True
 
-    def _configure_vision_model(self, status: dict) -> bool:
-        """可选步骤：配置独立视觉模型（用于识图，如 qwen-vl-max）。
+    def handle_vision(self, status: dict) -> bool:
+        """可选 setup 步骤：配置独立视觉模型（用于识图，如 qwen-vl-max）。
 
+        无论主模型是否已配置都会走到这里（next_step 检测 vision_model 未配置）。
         返回 True 表示正常结束（已保存或已跳过）；返回 False 表示用户选择退出 setup。
         """
         self.say("\n接下来是可选的「视觉模型」配置。")
@@ -850,6 +855,7 @@ class SetupConversation:
             if intent == "quit":
                 return False
             if intent == "skip":
+                self.skipped_steps.add("vision")
                 self.say("好的，跳过视觉模型配置（识图将走 OCR 兜底）。")
                 return True
             if intent in {"yes", "empty"}:

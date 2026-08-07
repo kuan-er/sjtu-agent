@@ -48,6 +48,33 @@ ZHIYUAN_API_KEY=你的APIKey
 
 默认模型 `deepseek-chat`（DeepSeek V3.2）。也可用 DeepSeek 官方、OpenAI 等其他兼容接口，在 Web 配置页选「自定义」填入即可。
 
+### 配置视觉模型（可选，用于识图）
+
+如果你的主模型不支持视觉输入（如 `deepseek-chat`），可单独配置一个视觉模型（如 `qwen-vl-max`），飞书收到图片时优先用它识图，OCR 兜底。**三种配置方式任选其一**：
+
+1. **交互式**：运行 `sjtu-agent setup`，配完主模型后按提示配置视觉模型（API Key 输入**不回显**）。
+
+2. **命令行**：
+   ```bash
+   sjtu-agent setup \
+     --vision-base-url https://dashscope.aliyuncs.com/compatible-mode/v1 \
+     --vision-api-key 你的视觉模型Key \
+     --vision-model qwen-vl-max \
+     --vision-enabled
+   ```
+
+3. **手动编辑** `agent_config.json`：
+   ```json
+   "vision_model": {
+     "enabled": true,
+     "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+     "api_key": "你的视觉模型Key",
+     "model": "qwen-vl-max"
+   }
+   ```
+
+> 视觉模型仅用于识图（一次性调用），不参与对话历史。API Key 仅存本地，输入时不回显、不打印。
+
 ---
 
 ## 功能
