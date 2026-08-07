@@ -43,6 +43,64 @@ def build_date_ctx() -> str:
     )
 
 
+def build_profile_ctx() -> str:
+    """读取 user_profile.json，返回画像上下文（追加到 system prompt）。
+
+    仅挑选可展示的结构化字段（persona_summary / 基本信息 / 关注话题 /
+    关怀提醒），避免暴露原始关键词与时间戳。文件缺失或为空返回 ""。
+    """
+    from sjtu_agent.paths import USER_PROFILE_PATH
+    try:
+        if not USER_PROFILE_PATH.exists():
+            return ""
+        import json as _json
+        data = _json.loads(USER_PROFILE_PATH.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return ""
+    except Exception:
+        return ""
+
+    lines = ["\n\n## 用户画像（开机自动读取，供个性化参考）"]
+
+    persona = (data.get("persona_summary") or "").strip()
+    if persona:
+        lines.append(persona)
+
+    struct = []
+    for key, label in [
+        ("name", "姓名"), ("major", "专业"), ("grade", "年级"),
+        ("stress_level", "近期压力"), ("mood", "情绪"),
+    ]:
+        v = data.get(key)
+        if v:
+            struct.append(f"{label}: {v}")
+    for key, label in [
+        ("courses", "课程"), ("hobbies", "兴趣"), ("recent_events", "近期事件"),
+        ("preferred_canteens", "偏好食堂"), ("preferred_cuisines", "偏好菜系"),
+        ("dietary_restrictions", "饮食限制"),
+    ]:
+        v = data.get(key)
+        if isinstance(v, list) and v:
+            struct.append(f"{label}: {'、'.join(str(x) for x in v[:8])}")
+    if struct:
+        lines.append("；".join(struct))
+
+    interests = data.get("interests")
+    if isinstance(interests, dict) and interests:
+        top = sorted(
+            ((k, v) for k, v in interests.items() if v > 0.05),
+            key=lambda kv: kv[1], reverse=True,
+        )[:5]
+        if top:
+            lines.append("关注话题：" + "、".join(k for k, _ in top))
+
+    care = data.get("care_notes")
+    if isinstance(care, list) and care:
+        lines.append("关怀提醒：" + "；".join(str(x) for x in care[:3]))
+
+    return "\n".join(lines) if len(lines) > 1 else ""
+
+
 def model_supports_vision(model: str) -> bool:
     """关键词判断模型是否支持图片输入。对 None 安全（统一各 bot 的防御写法）。"""
     m = (model or "").lower()
@@ -54,8 +112,13 @@ def model_supports_vision(model: str) -> bool:
 
 
 def make_session(agent_cfg: dict | None = None) -> dict:
-    """标准 session dict: {messages, model_box, client_box}。"""
+    """标准 session dict: {messages, model_box, client_box}。
+
+    首次会话时后台触发一次画像深度分析（issue #113 #4），不阻塞回复。
+    """
     from sjtu_agent.agent import _make_client, load_agent_config
+    from sjtu_agent.news_aggregator.profile import ensure_profile_analyzed_async
+    ensure_profile_analyzed_async()
     cfg = agent_cfg or load_agent_config()
     return {
         "messages": [],
@@ -70,7 +133,7 @@ def init_messages(sess: dict, platform_ctx: str = "") -> None:
         return
     sess["messages"].append({
         "role": "system",
-        "content": SYSTEM_PROMPT + build_date_ctx() + platform_ctx,
+        "content": SYSTEM_PROMPT + build_date_ctx() + platform_ctx + build_profile_ctx(),
     })
 
 
@@ -81,7 +144,7 @@ def refresh_system_prompt(sess: dict, platform_ctx: str = "",
     extra_suffix_fn(user_text) -> str 是飞书记忆注入的钩子。
     """
     if sess["messages"] and sess["messages"][0]["role"] == "system":
-        base = SYSTEM_PROMPT + build_date_ctx() + platform_ctx
+        base = SYSTEM_PROMPT + build_date_ctx() + platform_ctx + build_profile_ctx()
         if extra_suffix_fn:
             base += extra_suffix_fn(user_text)
         sess["messages"][0]["content"] = base

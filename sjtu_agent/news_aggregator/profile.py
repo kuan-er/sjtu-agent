@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import threading
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
@@ -62,6 +63,7 @@ class UserProfile:
             "blocked_categories": [],
             "persona_summary": "",
             "conversation_count": 0,
+            "last_analyzed_count": 0,
             "last_topics": [],
         }
 
@@ -120,8 +122,19 @@ class UserProfile:
         self.save(data)
 
     # ------------------------------------------------------------------
-    # 深度更新：每天 23:00 调用
+    # 深度更新：开机 / 会话触发（LLM 重生成 interests + persona）
     # ------------------------------------------------------------------
+
+    def needs_deep_update(self) -> bool:
+        """画像是否需要进行 LLM 深度分析。
+
+        首次（无 persona_summary）或有新对话（conversation_count 增长）
+        时返回 True，供开机自动分析判断。
+        """
+        data = self.load()
+        if not data.get("persona_summary"):
+            return True
+        return data.get("conversation_count", 0) > data.get("last_analyzed_count", 0)
 
     def deep_update(self, llm_client=None, model: str = "") -> None:
         """用 LLM 重新生成 interests + persona_summary。"""
@@ -290,6 +303,48 @@ class UserProfile:
         new_data = self._default()
         new_data["blocked_categories"] = blocked
         self.save(new_data)
+
+
+# ------------------------------------------------------------------
+# 开机自动分析（issue #113 #4）：bot 首次会话时后台触发画像深度分析
+# ------------------------------------------------------------------
+
+_analysis_started = False
+_analysis_lock = threading.Lock()
+
+
+def ensure_profile_analyzed_async() -> None:
+    """后台触发一次画像深度分析（LLM 重生成 interests + persona_summary）。
+
+    进程内最多执行一次；无新数据或分析已启动时直接返回。非阻塞——分析在
+    daemon 线程中运行，不延迟首次回复。供 bot 首次会话（make_session /
+    feishu _init_messages）调用。
+    """
+    global _analysis_started
+    with _analysis_lock:
+        if _analysis_started:
+            return
+        _analysis_started = True
+
+    profile = UserProfile()
+    if not profile.needs_deep_update():
+        return
+
+    def _run() -> None:
+        try:
+            import agent
+            cfg = agent.load_agent_config()
+            client = agent._make_client(cfg) if cfg.get("api_key") else None
+            profile.deep_update(llm_client=client, model=cfg.get("model", ""))
+            # 标记已分析，避免下次启动重复跑
+            data = profile.load()
+            data["last_analyzed_count"] = data.get("conversation_count", 0)
+            profile.save(data)
+            print("[profile] 画像深度分析完成", flush=True)
+        except Exception as e:
+            print(f"[profile] 画像深度分析失败：{e}", flush=True)
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 def log_conversation(user_text: str, agent_reply: str) -> None:

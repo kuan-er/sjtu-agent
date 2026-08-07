@@ -191,12 +191,27 @@ def _inject_memory_ctx(open_id: str, user_msg: str) -> str:
         return ""
 
 
+def _inject_profile_ctx() -> str:
+    """注入用户画像上下文（开机自动读取，issue #113 #4）。失败返回 ''。"""
+    try:
+        from sjtu_agent.bots._core import build_profile_ctx
+        return build_profile_ctx()
+    except Exception:
+        return ""
+
+
 def _init_messages(sess: dict) -> None:
     if sess["messages"]:
         return
+    # 首次会话后台触发画像深度分析（进程内一次，不阻塞）
+    try:
+        from sjtu_agent.news_aggregator.profile import ensure_profile_analyzed_async
+        ensure_profile_analyzed_async()
+    except Exception:
+        pass
     sess["messages"].append({
         "role": "system",
-        "content": agent.SYSTEM_PROMPT + _build_date_ctx() + _FS_CTX,
+        "content": agent.SYSTEM_PROMPT + _build_date_ctx() + _FS_CTX + _inject_profile_ctx(),
     })
 
 
@@ -217,7 +232,7 @@ def _capture_turn(sess: dict, user_text: str, open_id: str = "") -> str:
     """Run one agent turn, return the assistant reply text."""
     _init_messages(sess)
     if sess["messages"] and sess["messages"][0]["role"] == "system":
-        base = agent.SYSTEM_PROMPT + _build_date_ctx() + _FS_CTX
+        base = agent.SYSTEM_PROMPT + _build_date_ctx() + _FS_CTX + _inject_profile_ctx()
         if open_id:
             base += _inject_memory_ctx(open_id, user_text)
         sess["messages"][0]["content"] = base
@@ -279,7 +294,7 @@ def _is_duplicate_content(sender_id: str, text: str) -> bool:
 def _capture_turn_multimodal(sess: dict, content: list, open_id: str = "") -> str:
     _init_messages(sess)
     if sess["messages"] and sess["messages"][0]["role"] == "system":
-        base = agent.SYSTEM_PROMPT + _build_date_ctx() + _FS_CTX
+        base = agent.SYSTEM_PROMPT + _build_date_ctx() + _FS_CTX + _inject_profile_ctx()
         if open_id:
             base += _inject_memory_ctx(open_id, "")
         sess["messages"][0]["content"] = base
