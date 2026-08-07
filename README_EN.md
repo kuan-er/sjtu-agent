@@ -2,7 +2,7 @@
 
 [![Test](https://github.com/kuan-er/sjtu-agent/actions/workflows/test.yml/badge.svg)](https://github.com/kuan-er/sjtu-agent/actions/workflows/test.yml)
 
-A campus assistant for Shanghai Jiao Tong University students, offering terminal chat, Telegram / Feishu (Lark) / WeChat / QQ bots, reminder daemon, MCP server, and more.
+A campus assistant for Shanghai Jiao Tong University students, offering terminal chat, Telegram / Feishu (Lark) / WeChat / QQ bots, DDL aggregation, daily reports, campus news, canteen recommendations, and an MCP server.
 
 中文文档: [README.md](README.md)
 
@@ -82,6 +82,33 @@ Available models:
 **How to apply:** Go to [zhiyuan.sjtu.edu.cn](https://zhiyuan.sjtu.edu.cn), log in with jAccount, create a key under "API Management".
 
 For DeepSeek official or other OpenAI-compatible backends, select "Custom" in the web config page and fill in your API key, Base URL, and model name.
+
+## Vision Model (Optional, for Image Recognition)
+
+If your main model does not support vision input (e.g. `deepseek-chat`), you can configure a separate vision model (e.g. `qwen-vl-max`). When Feishu receives an image, the vision model recognizes it first, with OCR as a fallback. **Choose any one of three configuration methods:**
+
+1. **Interactive**: run `sjtu-agent setup`. After configuring the main model, follow the prompts to configure the vision model (API key input is **not echoed**).
+
+2. **Command line**:
+   ```bash
+   sjtu-agent setup \
+     --vision-base-url https://dashscope.aliyuncs.com/compatible-mode/v1 \
+     --vision-api-key your-vision-api-key \
+     --vision-model qwen-vl-max \
+     --vision-enabled
+   ```
+
+3. **Manual edit** `agent_config.json`:
+   ```json
+   "vision_model": {
+     "enabled": true,
+     "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+     "api_key": "your-vision-api-key",
+     "model": "qwen-vl-max"
+   }
+   ```
+
+> The vision model is used only for image recognition (one-shot calls) and does not participate in conversation history. The API key is stored locally and is neither echoed nor printed.
 
 ---
 
@@ -323,9 +350,19 @@ Reply "给我答案" (give me the answer) after `/hw do` for the complete soluti
 
 | Command | Description |
 |---|---|
-| `/aihot` | Get today's curated AI news |
 | `/template` | List available templates |
 | `/template bachelor-thesis` | Apply SJTU thesis template |
+
+**Campus News & Dining**
+
+| Command | Description |
+|---|---|
+| `/news` | Get the campus news digest |
+| `/news_block <category>` | Block a news category |
+| `/news_reset` | Reset the news profile |
+| `/eat` | Canteen recommendation (Minghang campus) |
+| `/eat 徐汇` | Canteen recommendation (Xuhui campus) |
+| `/eat 张江` | Canteen recommendation (Zhangjiang campus) |
 
 ## Using the QQ Bot
 
@@ -405,6 +442,48 @@ python scripts/aihot_push.py --test # preview only
 
 Inspired by [KKKKhazix/khazix-skills](https://github.com/KKKKhazix/khazix-skills) `ai-hot` (MIT).
 
+## Campus News
+
+Intelligent news aggregation — collects from four sources (jwc 教务处, 水源 community, SJTU News Network, Canvas) and ranks in two stages (keyword pre-filter + LLM ranking), personalizing recommendations from a learned user profile. The Feishu Bot `/news` command fetches on demand; a scheduled push sends a digest every day at 10:00.
+
+```text
+/news                         # campus news digest
+/news_block <category>        # block a news category
+/news_reset                   # reset the news profile
+```
+
+```bash
+sjtu-agent news-digest --dry-run   # preview
+sjtu-agent news-digest --no-llm    # keyword-only ranking
+sjtu-agent install-daemons         # register the daily news-digest task
+```
+
+## Canteen Recommendation
+
+Combines the real-time crowding API at campuslife.sjtu.edu.cn with learned dining preferences to recommend the best place to eat. Supports fuzzy name matching (e.g. 「三餐」「哈乐」).
+
+```text
+/eat                    # Minghang campus recommendation
+/eat 徐汇               # Xuhui campus recommendation
+/eat 张江               # Zhangjiang campus recommendation
+```
+
+After eating, tell the bot "我去 XX 吃了" and it records your preference — future recommendations get more accurate.
+
+## Daily Reports
+
+Automatically generates a morning briefing (today's schedule + DDLs), a noon briefing (afternoon classes), and an evening report (tomorrow's schedule + AI study suggestions), pushed via Feishu / Telegram. Report modules can be toggled in natural conversation (e.g. "晚上别推送作业提醒").
+
+```bash
+sjtu-agent daily-report --test            # preview
+sjtu-agent daily-report --type morning    # morning report
+sjtu-agent install-daemons                # install scheduled push
+```
+
+## Memory
+
+The Feishu Bot uses ChromaDB for cross-conversation semantic memory. After each conversation it extracts key facts (courses, exams, study preferences) and, in later conversations, retrieves relevant memories to inject into context. No configuration needed — auto-initialized on first use.
+
 ## Configuration
 
 Three key runtime files:
@@ -412,6 +491,10 @@ Three key runtime files:
 - `config.json`: platform tokens, cookies, Telegram config
 - `.env`: jAccount/MOOC credentials and Zhiyuan API key
 - `agent_config.json`: LLM provider, Base URL, model name (unnecessary if `ZHIYUAN_API_KEY` is set in `.env`)
+
+### Security Note
+
+Credentials (API keys, passwords, tokens) are stored in plaintext in local files. The Web UI requires a `?token=xxx` access token (printed to the terminal on first launch). The `execute_python` tool strips sensitive environment variables while running. Keep the runtime data directory private (macOS/Linux set it to `0o600` automatically).
 
 For Canvas, `sjtu-agent setup` tries to create and save an API token automatically when Playwright and jAccount credentials are available. If that fails, it opens `https://oc.sjtu.edu.cn/profile/settings` and falls back to manual confirmation.
 
@@ -474,6 +557,14 @@ Runtime files are stored in platform-specific user data directories, not the rep
 - Windows: `%APPDATA%/sjtu-agent`
 
 Legacy files in the repo root are auto-migrated on first import.
+
+## Robustness
+
+The Feishu Bot self-checks credentials, ChromaDB, and Agent API connectivity on startup; writes a heartbeat file every 30s for the launcher to monitor (no heartbeat for >90s → unresponsive); and cleans up thread pools and temp files on exit.
+
+## Version
+
+Current version: **v0.7.7**. Release history: [Releases](https://github.com/kuan-er/sjtu-agent/releases).
 
 ## Release Notes
 

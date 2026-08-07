@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project summary
 
-SJTU Agent is a deployable campus assistant for Shanghai Jiao Tong University. It provides an LLM-powered CLI chat interface, multi-platform bots (Telegram, Feishu/Lark, WeChat), DDL aggregation across four campus platforms, daily reports, reminder daemons, a news aggregator, a homework agent (Canvas + Claude Code), a web config UI, and an MCP server for AI agent integration.
+SJTU Agent is a deployable campus assistant for Shanghai Jiao Tong University. It provides an LLM-powered CLI chat interface, multi-platform bots (Telegram, Feishu/Lark, WeChat, QQ), DDL aggregation across four campus platforms, daily reports, reminder daemons, a news aggregator, a homework agent (Canvas + Claude Code), a web config UI, and an MCP server for AI agent integration.
 
 ## Setup & development
 
@@ -27,6 +27,7 @@ sjtu-agent web           # open web config UI at localhost:7860
 sjtu-agent telegram-bot  # start Telegram bot daemon
 sjtu-agent feishu-bot    # start Feishu bot daemon
 sjtu-agent wechat-bot    # start WeChat bot daemon
+sjtu-agent qq-bot        # start QQ bot daemon
 sjtu-agent ddl           # run DDL check once
 sjtu-agent daily-report  # generate and send daily report
 sjtu-agent remind-check  # run reminder daemon once
@@ -45,7 +46,7 @@ pytest tests/test_config.py     # run a single test file
 pytest -k "test_function_name"  # run tests matching a pattern
 ```
 
-Tests live in `tests/`, discovered via `pytest.ini`. Configuration is minimal — no coverage or CI workflow is configured yet.
+Tests live in `tests/`, discovered via `pytest.ini`. Configuration is minimal — coverage is not configured yet. A CI workflow runs the suite on GitHub (`.github/workflows/test.yml`, 310 tests).
 
 ## Environment variables
 
@@ -70,6 +71,12 @@ sjtu_agent/
   setup_wizard.py     # interactive first-run configuration (large, ~54KB)
   terminal_ui.py      # Rich-powered terminal helpers
   homework_agent.py   # Canvas homework fetching + Claude Code analysis
+  vision.py           # dual-model vision — standalone vision model for image recognition
+  logging.py          # unified logging (RotatingFileHandler + stdout mirror)
+  notifications.py    # cross-platform notifications (Telegram/Feishu/Windows Toast)
+
+  bots/               # shared bot session core, reused by all 4 bots
+    _core.py          # build_date_ctx / make_session / run_one_turn(+multimodal) / extract_assistant_reply
 
   agent/              # LLM chat engine (refactored from root-level agent.py in 2026-05)
     __init__.py       # re-exports all public symbols
@@ -108,7 +115,7 @@ sjtu_agent/
 
 **Agent tool system** (`agent/tools/`): Each tool is a `tool_xxx` function + a `TOOLS` dict entry. The `run_tool(name, args)` function dispatches by name. Tools are split by domain across submodules (`_reminders.py`, `_email.py`, `_mcp_skills.py`, `_platforms.py`, etc.), with the tightly-coupled kernel remaining in `_core.py` (~3700 lines).
 
-**Bot architecture**: All three bots (Telegram, Feishu, WeChat) share the same `agent/chat_loop.py` engine. Each bot adds its own platform-specific message handling layer. A `BaseBotRunner` abstraction is planned (`docs/REFACTOR_PLAN.md` §2.2) but not yet implemented.
+**Bot architecture**: All four bots (Telegram, Feishu, WeChat, QQ) share the same `agent/chat_loop.py` engine. Each bot adds its own platform-specific message handling layer. A shared session core lives in `sjtu_agent/bots/_core.py`; a full `BaseBotRunner` abstraction (transport/media/commands) is still planned but deferred.
 
 ### Root-level layout
 
@@ -129,8 +136,8 @@ New code should go into `sjtu_agent/`, not these root or script files.
 
 ### Refactoring status
 
-Per `docs/REFACTOR_PLAN.md`:
+Refactoring status (as of v0.7.7):
 - **Done**: Phase 2.1 (agent.py split into `sjtu_agent/agent/`), tools.py split into `agent/tools/` subpackage (7 domain-specific submodules + `_report_prefs.py`, `_core.py` ~3700 lines)
 - **Partial**: Phase 1 (ConfigStore) — 类已实现 + 测试，纯读取点已迁移（20 处）；受保护的读写路径（setup/save + P0 凭据保护）保留直接文件操作。`run_tool` 已注册表化（`_TOOL_REGISTRY`）
 - **Not done**: Phase 2.2 (BotRunner base class to deduplicate telegram/wechat ~65% shared code), Phase 3 (Notifier abstraction, BasePlatform for DDL scrapers), Phase 4 (unified logging)
-- CI workflow exists (`.github/workflows/test.yml`, 299 tests) but coverage is thin
+- CI workflow exists (`.github/workflows/test.yml`, 310 tests) but coverage is thin
