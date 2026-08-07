@@ -90,3 +90,31 @@ def test_section_has_content_news_and_tips():
     assert daily_report._section_has_content("news", [], None, None, None, "") is False
     # tips 始终保留
     assert daily_report._section_has_content("tips", [], None, None, None, "") is True
+
+
+# ── _telegram_bot_running ───────────────────────────────────────────────────
+
+def _write_tg_heartbeat(monkeypatch, tmp_path, last_heartbeat: str | None):
+    hb = tmp_path / "telegram_heartbeat.json"
+    if last_heartbeat is None:
+        hb.write_text(json.dumps({"status": "stopped", "last_heartbeat": ""}), encoding="utf-8")
+    else:
+        hb.write_text(json.dumps({"status": "running", "last_heartbeat": last_heartbeat}), encoding="utf-8")
+    monkeypatch.setattr(paths, "DATA_DIR", tmp_path)
+
+
+def test_telegram_bot_running_fresh(monkeypatch, tmp_path):
+    fresh = (dt.datetime.now() - dt.timedelta(seconds=10)).isoformat()
+    _write_tg_heartbeat(monkeypatch, tmp_path, fresh)
+    assert daily_report._telegram_bot_running() is True
+
+
+def test_telegram_bot_running_stale(monkeypatch, tmp_path):
+    stale = (dt.datetime.now() - dt.timedelta(seconds=120)).isoformat()
+    _write_tg_heartbeat(monkeypatch, tmp_path, stale)
+    assert daily_report._telegram_bot_running() is False
+
+
+def test_telegram_bot_running_missing_file(monkeypatch, tmp_path):
+    monkeypatch.setattr(paths, "DATA_DIR", tmp_path)
+    assert daily_report._telegram_bot_running() is False

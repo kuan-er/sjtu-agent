@@ -1203,6 +1203,27 @@ def _wait_for_network(max_wait: int = 120, interval: int = 5) -> "telebot.types.
             _time.sleep(wait)
 
 
+def _heartbeat_worker(interval: float = 30) -> None:
+    """后台线程：每 interval 秒写一次心跳，供 daily_report 判断 bot 运行状态。"""
+    import atexit as _atexit
+    from sjtu_agent.paths import DATA_DIR
+    hb_file = DATA_DIR / "telegram_heartbeat.json"
+    _atexit.register(lambda: hb_file.write_text(
+        json.dumps({"status": "stopped", "last_heartbeat": ""}, ensure_ascii=False),
+        encoding="utf-8",
+    ) if hb_file.parent.exists() else None)
+    while True:
+        try:
+            hb_file.parent.mkdir(parents=True, exist_ok=True)
+            hb_file.write_text(json.dumps({
+                "status": "running",
+                "last_heartbeat": _dt.datetime.now().isoformat(),
+            }, ensure_ascii=False), encoding="utf-8")
+        except Exception:
+            pass
+        _dt.time.sleep(interval)
+
+
 if __name__ == "__main__":
     if "--test" in sys.argv:
         me = bot.get_me()
@@ -1241,4 +1262,8 @@ if __name__ == "__main__":
     ])
     print("   已注册 8 条命令")
     print(f"   等待消息… （Ctrl+C 停止）")
+
+    # ── 启动心跳线程（供 daily_report 判断 bot 运行状态）─────────────────
+    threading.Thread(target=_heartbeat_worker, daemon=True, name="tg-hb").start()
+
     bot.infinity_polling(timeout=30, long_polling_timeout=30)

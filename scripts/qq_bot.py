@@ -43,6 +43,7 @@ from sjtu_agent.paths import CONFIG_PATH
 from sjtu_agent.config import cfg as _cfg
 from sjtu_agent.bots._core import (
     build_date_ctx as _build_date_ctx,
+    log_turn as _log_turn,
     make_session,
     model_supports_vision as _model_supports_vision,
     run_one_turn,
@@ -432,6 +433,8 @@ class QQAgentClient(botpy.Client):
             lock.release()
 
         await self._reply_chunks(message, reply)
+        # 记录到用户画像（conversation_log + 关键词），失败静默
+        _log_turn(text, reply)
 
     async def on_at_message_create(self, message: Message):
         _logger.info("[qq] recv at_message_create")
