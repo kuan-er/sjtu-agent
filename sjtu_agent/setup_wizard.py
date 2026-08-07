@@ -201,8 +201,34 @@ def _apply_agent_config_updates(updates: dict[str, str]) -> dict[str, str] | Non
         "api_key": updates["api_key"] or current.get("api_key") or "",
         "model": updates["model"] or current.get("model") or "deepseek-chat",
     }
+    # 保留已保存的 vision_model（主模型更新不清掉视觉模型）
+    if isinstance(current.get("vision_model"), dict):
+        saved["vision_model"] = current["vision_model"]
     AGENT_CONFIG_PATH.write_text(json.dumps(saved, indent=2, ensure_ascii=False), encoding="utf-8")
     return saved
+
+
+def _apply_vision_config_updates(updates: dict) -> dict | None:
+    """保存/更新 vision_model 块到 agent_config.json。
+
+    updates: {"enabled": bool, "base_url": str, "api_key": str, "model": str}
+    api_key 仅在本地文件，绝不打印。
+    """
+    import agent
+
+    current = agent.load_agent_config()
+    vm = dict(current.get("vision_model") or {})
+    for key in ("enabled", "base_url", "api_key", "model"):
+        if updates.get(key):
+            vm[key] = updates[key]
+    if not vm:
+        return None
+    vm.setdefault("enabled", True)
+    vm.setdefault("model", "qwen-vl-max")
+    saved = dict(current)
+    saved["vision_model"] = vm
+    AGENT_CONFIG_PATH.write_text(json.dumps(saved, indent=2, ensure_ascii=False), encoding="utf-8")
+    return vm
 
 
 def _read_secret(prompt: str) -> str:
