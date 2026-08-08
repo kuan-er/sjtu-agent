@@ -3692,13 +3692,94 @@ _TOOL_REGISTRY = {
 }
 
 
+# ── 工具 schema 校验（Harness）─────────────────────────────────────────────
+
+# 从 TOOLS 构建 name → parameters schema 的查找表（含 MCP 外的内置工具）
+_TOOL_SCHEMAS: dict[str, dict] = {}
+for _t in TOOLS:
+    _fn = _t.get("function", {})
+    if _fn.get("name"):
+        _TOOL_SCHEMAS[_fn["name"]] = _fn.get("parameters") or {}
+
+
+def _coerce_args(name: str, args: dict | None) -> tuple[dict | None, str | None]:
+    """按工具 schema 校验必填 + 规约参数类型。返回 (coerced_args, error)。
+
+    - 无 schema（如 mcp__* 外部工具）→ 原样放行
+    - 缺必填 → 明确报错（替代晦涩的 TypeError 崩溃）
+    - 已知参数按类型规约（"true"→True, "3"→3），规约失败 → 报错
+    - 未知参数保留透传（schema 可能不全，不拦截）
+    """
+    schema = _TOOL_SCHEMAS.get(name)
+    if not schema:
+        return args or {}, None
+    properties = schema.get("properties") or {}
+    required = schema.get("required") or []
+
+    coerced = dict(args or {})
+    for key, spec in properties.items():
+        if key not in coerced:
+            continue
+        val = coerced[key]
+        t = spec.get("type")
+        try:
+            if t == "integer":
+                coerced[key] = int(val)
+            elif t == "number":
+                coerced[key] = float(val)
+            elif t == "boolean":
+                coerced[key] = val if isinstance(val, bool) else str(val).lower() in ("true", "1", "yes")
+            elif t == "array" and not isinstance(val, list):
+                coerced[key] = [val]
+            elif t == "object" and not isinstance(val, dict):
+                coerced[key] = {}
+        except (TypeError, ValueError):
+            return None, f"参数 {key} 类型错误：期望 {t}，实际 {val!r}"
+
+    for req in required:
+        if req not in coerced:
+            return None, f"缺少必填参数: {req}"
+    return coerced, None
+
+
+_SENSITIVE_ARG_KEYS = ("token", "secret", "password", "api_key", "app_secret")
+
+
+def _log_tool_call(name: str, args: dict | None, elapsed: float, result) -> None:
+    """记录一次工具调用（可观测）：名称 / 参数（脱敏）/ 耗时 / 结果长度。"""
+    try:
+        safe_args = {}
+        for k, v in (args or {}).items():
+            kl = k.lower()
+            if any(s in kl for s in _SENSITIVE_ARG_KEYS):
+                safe_args[k] = "***"
+            elif isinstance(v, (str, int, float, bool)):
+                safe_args[k] = v
+            else:
+                safe_args[k] = type(v).__name__
+        r_len = len(str(result)) if result else 0
+        _logger.info("[tool] %s args=%s %.3fs result_len=%d", name, safe_args, elapsed, r_len)
+    except Exception:
+        pass
+
+
 def run_tool(name: str, args: dict) -> str:
     try:
         if name.startswith("mcp__"):
             from sjtu_agent.extensions.mcp_client import call_tool
             return call_tool(name, args or {})
         fn = _TOOL_REGISTRY.get(name)
-        r = fn(**(args or {})) if fn else {"error": f"未知工具: {name}"}
+        if not fn:
+            return json.dumps({"error": f"未知工具: {name}"}, ensure_ascii=False)
+        coerced, err = _coerce_args(name, args)
+        if err:
+            return json.dumps({"error": err}, ensure_ascii=False)
+        import time as _time
+        _t0 = _time.monotonic()
+        r = fn(**coerced)
+        _elapsed = _time.monotonic() - _t0
+        # 调用日志（可观测）：工具名 / 参数 / 耗时 / 结果长度
+        _log_tool_call(name, args, _elapsed, r)
     except Exception as e:
         r = {"error": str(e)}
     return json.dumps(r, ensure_ascii=False)
