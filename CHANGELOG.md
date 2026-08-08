@@ -2,6 +2,12 @@
 
 本文件记录各版本的用户可见变化。Agent 通过 `get_recent_updates` 读取（问「最近更新了什么」时），不写入 system prompt。
 
+## v0.10.0 (2026-08-09)
+- ⚡ **uv 迁移**：install 脚本换 uv，安装时间从分钟级降到 ~30 秒（数量级提升）
+- 📦 **依赖按需拆分**：移除死依赖（browser-use / langchain-openai）；语义记忆（chromadb）改为可选 extra `[memory]`
+- 🧭 **setup 向导打磨**：必填/可选分组、完成清单、确定性 y/N 决策
+- 🔧 Python 版本要求 3.10 → 3.11（browser-use 依赖约束）
+
 ## v0.9.0 (2026-08-08)
 - 🏗 **Agent 核心架构升级**（Prompt/Context/Harness/Loop 四层工程）：
   - ⚡ 稳定 system 前缀：动态时间/记忆移出前缀 → 用户消息，命中 DeepSeek 前缀缓存（成本大降）
