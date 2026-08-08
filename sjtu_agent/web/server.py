@@ -408,6 +408,10 @@ def _stream_chat_anthropic(client, model, _agent, max_rounds, _sse):
     """Anthropic Messages API 流式 + tool_use 循环。"""
     global _chat_history
 
+    # 上下文质量管理（web 独立流式不经过 runner._run_one_turn）
+    from sjtu_agent.agent.context import trim_session
+    trim_session(_chat_history)
+
     system_msg = ""
     for m in _chat_history:
         if m["role"] == "system":
@@ -516,6 +520,9 @@ def _stream_chat_openai(client, model, _agent, max_rounds, _sse):
     """OpenAI Chat Completions 流式 + tool_calls 循环。"""
     global _chat_history
 
+    # 上下文质量管理（与 runner._run_one_turn 同钩子，web 独立流式不经过它）
+    from sjtu_agent.agent.context import trim_session
+    trim_session(_chat_history)
     messages = list(_chat_history)
 
     for _round in range(max_rounds):
