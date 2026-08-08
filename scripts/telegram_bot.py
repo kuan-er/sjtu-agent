@@ -37,6 +37,7 @@ from sjtu_agent.paths import CONFIG_PATH
 from sjtu_agent.config import cfg as _cfg
 from sjtu_agent.bots._core import (
     build_date_ctx as _build_date_ctx,
+    build_profile_ctx as _build_profile_ctx,
     make_session,
     model_supports_vision as _model_supports_vision,
     run_one_turn,
@@ -94,10 +95,10 @@ _TG_CTX = (
 
 
 def _init_messages(sess: dict) -> None:
-    """首次对话时注入 system prompt；后续每轮由 _capture_turn 刷新时间。"""
+    """首次对话时注入 system prompt（稳定前缀：不含时间，时间每轮进用户消息）。"""
     if sess["messages"]:
         return
-    sess["messages"].append({"role": "system", "content": agent.SYSTEM_PROMPT + _build_date_ctx() + _TG_CTX})
+    sess["messages"].append({"role": "system", "content": agent.build_system_prompt() + _TG_CTX + _build_profile_ctx()})
 
 
 # ── 输出捕获 ──────────────────────────────────────────────────────────────────
@@ -129,9 +130,7 @@ def _streamed_turn(sess: dict, user_text: str, on_progress, on_tool_result=None)
     import json as _json
 
     _init_messages(sess)
-    if sess["messages"] and sess["messages"][0]["role"] == "system":
-        sess["messages"][0]["content"] = agent.SYSTEM_PROMPT + _build_date_ctx() + _TG_CTX
-    sess["messages"].append({"role": "user", "content": user_text})
+    sess["messages"].append({"role": "user", "content": _build_date_ctx() + "\n\n" + user_text})
 
     client = sess["client_box"][0]
     model = sess["model_box"][0]

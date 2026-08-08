@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 
 from sjtu_agent.paths import AGENT_CONFIG_PATH, ENV_PATH, DDL_CACHE_PATH
 from sjtu_agent.terminal_ui import print_markdown_message, print_rule
-from sjtu_agent.agent.prompts import SYSTEM_PROMPT
+from sjtu_agent.agent.prompts import build_system_prompt
 from sjtu_agent.agent.runner import _make_client, _run_one_turn, _is_anthropic_model, Spinner
 from sjtu_agent.agent.tools import TOOLS, run_tool, _fetch_ddls_parallel, _ddl_cache_get, tool_check_setup, _load_reminders
 
@@ -300,9 +300,11 @@ def setup_agent_config() -> dict:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def chat_loop(client, model: str):
+def _build_date_ctx() -> str:
+    """当前时间 + 学期上下文（每次调用刷新，注入到用户消息而非 system 前缀，
+    保持 system prompt 稳定 → DeepSeek 前缀缓存命中）。"""
     import datetime as _dt
-    _now = _dt.datetime.now()
+    _now = _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=8)))
     _year = _now.year
     _month = _now.month
     # 判断当前学期：9-1月=第1学期(秋), 2-6月=第2学期(春), 7-8月=第3学期(夏)
@@ -321,8 +323,7 @@ def chat_loop(client, model: str):
         _cur_xqm = "3"
         _prev_xnm = _year - 1
         _prev_xqm = "2"
-
-    _date_ctx = (
+    return (
         f"\n\n## 当前时间（自动注入，每次对话刷新）\n"
         f"现在：{_now.strftime('%Y年%m月%d日 %H:%M')}，星期{'一二三四五六日'[_now.weekday()]}。\n"
         f"当前学期：{_cur_xnm}-{_cur_xnm+1}学年第{_cur_xqm}学期。\n"
@@ -333,8 +334,12 @@ def chat_loop(client, model: str):
         f"「本学年」= {_cur_xnm}学年"
         f"（query_grades: year='{_cur_xnm}', semester=''）。"
     )
+
+
+def chat_loop(client, model: str):
     from sjtu_agent.bots._core import build_profile_ctx  # 局部导入避免循环依赖
-    messages = [{"role": "system", "content": SYSTEM_PROMPT + _date_ctx + build_profile_ctx()}]
+    # 稳定前缀：system prompt 不含时间（时间每轮注入用户消息，保证缓存命中）
+    messages = [{"role": "system", "content": build_system_prompt() + build_profile_ctx()}]
     model_box  = [model]   # 用列表包裹使内部可修改
     client_box = [client]  # 同理，切换模型时可替换 client
 
@@ -364,7 +369,7 @@ def chat_loop(client, model: str):
         setup_json = json.dumps(setup, ensure_ascii=False)
         messages.append({
             "role": "user",
-            "content": f"配置检查结果：{setup_json}\n请根据结果告知我缺少哪些配置，并引导我完成设置。",
+            "content": _build_date_ctx() + f"\n\n配置检查结果：{setup_json}\n请根据结果告知我缺少哪些配置，并引导我完成设置。",
         })
         _run_one_turn(client_box[0], model_box[0], messages)
         print("输入问题继续对话，输入 quit 退出。\n")
@@ -435,12 +440,12 @@ def chat_loop(client, model: str):
             # 切换协议时重置对话，避免消息格式冲突
             messages.clear()
             from sjtu_agent.bots._core import build_profile_ctx  # 局部导入避免循环依赖
-            messages.append({"role": "system", "content": SYSTEM_PROMPT + build_profile_ctx()})
+            messages.append({"role": "system", "content": build_system_prompt() + build_profile_ctx()})
             proto = "Anthropic" if _is_anthropic_model(updated["model"]) else "OpenAI"
             print(f"  已切换到: {updated['model']}  [协议: {proto}]（已保存，对话已重置）\n")
             continue
 
-        messages.append({"role": "user", "content": user_input})
+        messages.append({"role": "user", "content": _build_date_ctx() + "\n\n" + user_input})
         try:
             _run_one_turn(client_box[0], model_box[0], messages)
         except KeyboardInterrupt:

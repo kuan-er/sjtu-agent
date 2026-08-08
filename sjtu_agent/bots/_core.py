@@ -12,7 +12,7 @@ from __future__ import annotations
 import datetime as _dt
 import re
 
-from sjtu_agent.agent import SYSTEM_PROMPT, _run_one_turn
+from sjtu_agent.agent import _run_one_turn, build_system_prompt
 
 # Each bot previously defined this regex locally; kept here once. feishu never
 # needed it because it doesn't capture stdout — the shared path also doesn't.
@@ -161,26 +161,17 @@ def make_session(agent_cfg: dict | None = None) -> dict:
 
 
 def init_messages(sess: dict, platform_ctx: str = "") -> None:
-    """首次对话注入 system prompt；后续由 refresh_system_prompt 刷新时间。"""
+    """首次对话注入 system prompt。
+
+    稳定前缀：system 不含时间（时间每轮注入用户消息），保证 DeepSeek
+    前缀缓存命中。画像（build_profile_ctx）低频变化，留在前缀可被缓存。
+    """
     if sess["messages"]:
         return
     sess["messages"].append({
         "role": "system",
-        "content": SYSTEM_PROMPT + build_date_ctx() + platform_ctx + build_profile_ctx(),
+        "content": build_system_prompt() + platform_ctx + build_profile_ctx(),
     })
-
-
-def refresh_system_prompt(sess: dict, platform_ctx: str = "",
-                          extra_suffix_fn=None, user_text: str = "") -> None:
-    """每轮刷新 [0] system 内容（时间过期）+ 可选额外上下文。
-
-    extra_suffix_fn(user_text) -> str 是飞书记忆注入的钩子。
-    """
-    if sess["messages"] and sess["messages"][0]["role"] == "system":
-        base = SYSTEM_PROMPT + build_date_ctx() + platform_ctx + build_profile_ctx()
-        if extra_suffix_fn:
-            base += extra_suffix_fn(user_text)
-        sess["messages"][0]["content"] = base
 
 
 def log_turn(user_text, reply) -> None:
@@ -212,21 +203,22 @@ def extract_assistant_reply(sess: dict) -> str:
     return "(已完成)"
 
 
-def run_one_turn(sess: dict, user_text: str, platform_ctx: str = "",
-                 extra_suffix_fn=None) -> str:
-    """追加文本用户轮次 → 跑 LLM → 返回 assistant 回复。"""
+def run_one_turn(sess: dict, user_text: str, platform_ctx: str = "") -> str:
+    """追加文本用户轮次 → 跑 LLM → 返回 assistant 回复。
+
+    动态时间（build_date_ctx）注入到用户消息首部，保持 system 前缀稳定
+    （缓存命中），模型仍能从最新一轮读到当前时间/学期。
+    """
     init_messages(sess, platform_ctx)
-    refresh_system_prompt(sess, platform_ctx, extra_suffix_fn, user_text)
-    sess["messages"].append({"role": "user", "content": user_text})
+    sess["messages"].append({"role": "user", "content": build_date_ctx() + "\n\n" + user_text})
     _run_one_turn(sess["client_box"][0], sess["model_box"][0], sess["messages"])
     return extract_assistant_reply(sess)
 
 
-def run_one_turn_multimodal(sess: dict, content: list, platform_ctx: str = "",
-                            extra_suffix_fn=None) -> str:
+def run_one_turn_multimodal(sess: dict, content: list, platform_ctx: str = "") -> str:
     """同 run_one_turn，但用户消息是 OpenAI multimodal content list。"""
     init_messages(sess, platform_ctx)
-    refresh_system_prompt(sess, platform_ctx, extra_suffix_fn, "")
-    sess["messages"].append({"role": "user", "content": content})
+    ctx = {"type": "text", "text": build_date_ctx() + "\n"}
+    sess["messages"].append({"role": "user", "content": [ctx] + list(content)})
     _run_one_turn(sess["client_box"][0], sess["model_box"][0], sess["messages"])
     return extract_assistant_reply(sess)
