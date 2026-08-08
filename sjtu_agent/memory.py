@@ -23,14 +23,23 @@ _client_lock = threading.Lock()
 
 
 def _get_client(persist_dir: str):
-    """Return or create a PersistentClient (thread-safe, lazy-init)."""
+    """Return or create a PersistentClient (thread-safe, lazy-init).
+
+    chromadb 是可选依赖（[memory] extra）。未安装时抛清晰的 RuntimeError，
+    由 store_memory/search_memory 捕获后优雅降级（语义记忆功能不可用）。
+    """
     global _client
     if _client is not None:
         return _client
     with _client_lock:
         if _client is not None:
             return _client
-        import chromadb
+        try:
+            import chromadb
+        except ImportError:
+            raise RuntimeError(
+                "语义记忆需要可选依赖 chromadb。安装: pip install -e \".[memory]\""
+            ) from None
         _client = chromadb.PersistentClient(path=persist_dir)
     return _client
 
@@ -46,7 +55,10 @@ def store_memory(
     """Store a text as an embedding in ChromaDB. Returns the memory ID."""
     from sjtu_agent.paths import DATA_DIR
     persist_dir = persist_dir or str(DATA_DIR / "chroma_memory")
-    client = _get_client(persist_dir)
+    try:
+        client = _get_client(persist_dir)
+    except Exception:
+        return ""  # 语义记忆不可用（未装 [memory] extra）→ 静默跳过
     collection = client.get_or_create_collection("agent_memory")
 
     meta = dict(metadata or {})
@@ -71,7 +83,10 @@ def search_memory(
     """Semantically search stored memories for a user. Returns list of {text, metadata, distance}."""
     from sjtu_agent.paths import DATA_DIR
     persist_dir = persist_dir or str(DATA_DIR / "chroma_memory")
-    client = _get_client(persist_dir)
+    try:
+        client = _get_client(persist_dir)
+    except Exception:
+        return []  # 语义记忆不可用（未装 [memory] extra）→ 空结果
 
     try:
         collection = client.get_collection("agent_memory")
