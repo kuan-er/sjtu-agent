@@ -2,6 +2,15 @@
 
 本文件记录各版本的用户可见变化。Agent 通过 `get_recent_updates` 读取（问「最近更新了什么」时），不写入 system prompt。
 
+## v0.9.0 (2026-08-08)
+- 🏗 **Agent 核心架构升级**（Prompt/Context/Harness/Loop 四层工程）：
+  - ⚡ 稳定 system 前缀：动态时间/记忆移出前缀 → 用户消息，命中 DeepSeek 前缀缓存（成本大降）
+  - 📊 上下文质量：tool 结果清理 + 64K 质量预算折叠带摘要（抗腐烂、防"念旧账"也防"健忘"）
+  - 🧩 Prompt 审计：SYSTEM_PROMPT 模块化拆分，-20% 体积；近期更新 / Bot 配置引导移出前缀（按需工具读取）
+  - 🛡 Harness：工具参数 schema 校验 + `execute_python` 危险操作拦截 + 工具调用日志（可观测）
+  - 🔁 Loop：工具循环迭代预算（8 轮收敛）+ 网络重试上限（2 次）
+  - 🔧 飞书斜杠命令重构：注册表化、修复 `/news`、统一错误处理、集中帮助文案
+
 ## v0.8.0 (2026-08-07)
 - 🧠 bot 记忆开机自动分析：user-profile 首次会话后台 LLM 重分析，画像注入 system prompt（#113 #4）
 - 🌐 画像在飞书/微信/QQ 跨平台积累（之前只在 telegram）
