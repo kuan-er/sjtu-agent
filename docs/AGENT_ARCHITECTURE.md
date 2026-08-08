@@ -136,14 +136,14 @@ Loop Engineering  → 设计"自动操作 Agent 的系统"
   - 4×Bot 配置引导移出前缀（~60 行，12%）→ `get_bot_setup_guide(platform)` 工具按需读
   - 路由去重（search_courses）
   - SYSTEM_PROMPT ~13KB → ~10.5KB
+- ✅ **Phase 4 Harness**：工具 schema 校验（必填 + 类型规约）+ `execute_python` 危险操作静态拦截（破坏性 git / os.system / shell=True / rmtree / 删写关键配置）+ 工具调用日志（脱敏参数/耗时/结果长度）
 
 | Phase | 内容 | 价值 | 风险 |
 |-------|------|------|------|
-| **4. Harness** | schema 校验 + execute_python 拦截 + 调用日志 | 🟡 可靠/安全 | 中 |
 | **5. Loop** | 迭代预算 + 重试 + 轻量反射 | 🟢 更自主 | 中 |
 | **6. Graph 评估** | Plan-Execute 试点 | 🟢 复杂任务 | 高（可后置） |
 
-每步独立测试（现有 357 个测试作回归基线），可随时停下不返工。
+每步独立测试（现有 367 个测试作回归基线），可随时停下不返工。
 
 ---
 
