@@ -47,3 +47,44 @@ def test_apply_vision_config_updates_saves_block(fake_agent_config):
     assert saved["vision_model"]["enabled"] is True
     assert saved["vision_model"]["model"] == "qwen-vl-max"
     assert saved["vision_model"]["api_key"] == "vm-key"
+
+
+# ── Phase 3: 向导必填/可选分组 ───────────────────────────────────────────────
+
+def _fake_status(agent_ok=True, jaccount_ok=True):
+    from sjtu_agent.setup_wizard import _agent_config_status
+    return {
+        "agent": {"configured": agent_ok, "base_url": "https://x", "model": "deepseek-chat"}
+        if agent_ok else {"configured": False},
+        "config_file_exists": True,
+        "jaccount": {"has_credentials": jaccount_ok},
+        "canvas": {"has_token": False, "settings_url": "https://canvas", "can_auto_fetch": False},
+        "aihaoke": {"has_cookies": False},
+        "phycai": {"has_cookies": False},
+        "icourse": {"has_credentials": False, "has_cookies": False},
+        "shuiyuan": {"has_api_key": False, "has_cookies": False},
+    }
+
+
+def test_build_recommendations_marks_priority():
+    from sjtu_agent.setup_wizard import _build_recommendations
+    recs = _build_recommendations(_fake_status(agent_ok=False, jaccount_ok=False))
+    assert any("[必填]" in r for r in recs)
+    assert any("[可选]" in r for r in recs)
+
+
+def test_print_setup_status_groups_required_optional(capsys):
+    from sjtu_agent.setup_wizard import _print_setup_status
+    _print_setup_status(_fake_status())
+    out = capsys.readouterr().out
+    assert "[必填]" in out
+    assert "[可选]" in out
+    assert "jAccount" in out
+    assert "Canvas" in out
+
+
+def test_classify_yes_recognizes_user_inputs():
+    """确定性修复：用户实际打过的肯定词都能识别（可/可以/来吧/继续/y）。"""
+    from sjtu_agent.setup_wizard import _classify_reply
+    for inp in ["可以", "可", "来吧", "继续", "好", "y", "Y"]:
+        assert _classify_reply(inp) == "yes", f"{inp!r} 应识别为 yes"

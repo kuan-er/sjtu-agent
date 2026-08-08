@@ -376,9 +376,11 @@ def _print_setup_status(status: dict) -> None:
     agent_detail = agent_status.get("model") or str(AGENT_CONFIG_PATH)
     if agent_status.get("configured") and agent_status.get("base_url"):
         agent_detail = f"{agent_status['model']} @ {agent_status['base_url']}"
-    _print_check("LLM config", bool(agent_status.get("configured")), str(agent_detail))
+    print("\n[必填] 核心配置（建议配好）")
+    _print_check("LLM 模型", bool(agent_status.get("configured")), str(agent_detail))
+    _print_check("jAccount 账号", status["jaccount"]["has_credentials"], str(ENV_PATH))
+    print("[可选] 校园平台（用到时再补，随时可跳过）")
     _print_check("config.json", status["config_file_exists"], str(CONFIG_PATH))
-    _print_check("jAccount credentials", status["jaccount"]["has_credentials"], str(ENV_PATH))
     _print_check("Canvas token", status["canvas"]["has_token"], status["canvas"]["settings_url"])
     _print_check("AI 好课 (aihaoke) cookies", status["aihaoke"]["has_cookies"])
     _print_check("物理实验 (phycai) cookies", status["phycai"]["has_cookies"])
@@ -394,20 +396,20 @@ def _print_setup_status(status: dict) -> None:
 def _build_recommendations(status: dict) -> list[str]:
     recommendations: list[str] = []
     if not status["agent"]["configured"]:
-        recommendations.append(f"Add your LLM API settings in {AGENT_CONFIG_PATH} or rerun sjtu-agent setup.")
+        recommendations.append(f"[必填] 配好大模型 API（{AGENT_CONFIG_PATH} 或重跑 sjtu-agent setup）——否则无法进入智能体对话")
     if not status["jaccount"]["has_credentials"]:
-        recommendations.append(f"Add jAccount credentials in {ENV_PATH} or rerun sjtu-agent setup.")
+        recommendations.append(f"[必填] 配好 jAccount 账号（{ENV_PATH} 或重跑 sjtu-agent setup）——DDL/课表等需要")
     if not status["canvas"]["has_token"]:
         if status["canvas"].get("can_auto_fetch"):
-            recommendations.append("Canvas token can be auto-created now; rerun sjtu-agent setup and it will try automatically.")
+            recommendations.append("[可选] Canvas token 可以自动创建，重跑 setup 即可")
         else:
             recommendations.append(
-                f"Generate a Canvas token at {status['canvas']['settings_url']} and save it with sjtu-agent setup."
+                f"[可选] 在 {status['canvas']['settings_url']} 生成 Canvas token，用 sjtu-agent setup 保存——作业/DDL 需要"
             )
     if not status["aihaoke"]["has_cookies"] or not status["phycai"]["has_cookies"] or not status["icourse"]["has_cookies"]:
-        recommendations.append("Log into the teaching sites in Chrome, then rerun sjtu-agent setup or sjtu-agent setup-config.")
+        recommendations.append("[可选] 在 Chrome 登录教学平台后，重跑 setup 或 setup-config 导入 cookie——AI 好课/物理实验/中国大学 MOOC 需要")
     if not (status["shuiyuan"]["has_api_key"] or status["shuiyuan"]["has_cookies"]):
-        recommendations.append("Optional: set up Shuiyuan later from the chat agent if you need forum search.")
+        recommendations.append("[可选] 需要水源论坛搜索时，之后在对话里让 agent 配置水源即可")
     return recommendations
 
 
@@ -621,8 +623,8 @@ def _classify_reply(raw: str) -> str:
         return "question"
     # 肯定词必须是完整匹配（或 + 标点），不能用子串，否则 token 里出现 y/go/ok 也会被误判
     _stripped = text.rstrip(".!。！~～ ")
-    if _stripped in {"继续", "开始", "安装", "执行", "导入", "保存", "打开", "可以",
-                     "好的", "好", "行", "嗯", "对", "是",
+    if _stripped in {"继续", "开始", "安装", "执行", "导入", "保存", "打开", "可以", "可",
+                     "好的", "好", "行", "嗯", "对", "是", "来吧", "来", "搞起",
                      "yes", "y", "ok", "okay", "sure", "continue", "go", "yep", "yeah"}:
         return "yes"
     return "text"
@@ -1117,13 +1119,18 @@ class SetupConversation:
         if sys.platform == "darwin" and _launchd_state(self.args)["all_present"]:
             self.say("macOS 后台服务也已经就绪。")
 
+        core_ready = bool(status["agent"]["configured"] and status["jaccount"]["has_credentials"])
+        if core_ready:
+            self.say("✅ 核心配置已就绪——你现在就可以开始用了。")
+            self.say("  运行 `sjtu-agent` 开始对话；`sjtu-agent doctor` 随时检查环境。")
+        else:
+            self.say("核心还没完全配好（LLM 或 jAccount 缺失）。先把 [必填] 项补上，效果会更好。")
+
         recommendations = _build_recommendations(status)
         if recommendations:
-            print("\nNext:")
+            print("\n可选补充（需要时再配，随时能补）：")
             for item in recommendations:
                 print(f"- {item}")
-        else:
-            self.say("核心配置已经齐了，你现在可以直接开始使用。")
 
         if not status["agent"]["configured"]:
             self.say(f"模型 API 还没配好，所以这次还不能直接启动智能体。配好后直接运行 sjtu-agent 就能进入主对话。")
@@ -1131,25 +1138,37 @@ class SetupConversation:
             return 0
 
         if recommendations:
-            self.say("虽然还有一些校园平台配置可以继续补，但智能体已经可以启动了。")
+            self.say("校园平台还可以继续补，但不影响现在启动智能体。")
 
         self.say("如果你愿意，我现在就直接启动 SJTU Agent 主对话。你也可以先结束 setup，之后手动运行 sjtu-agent。")
-        self.say("你可以回复继续启动，或者回复 skip 先结束 setup。")
+        self.say("回复 y 启动主对话，n 结束 setup（随时可输入 status / help）。")
         while True:
             raw = self.prompt()
-            intent = self.handle_common(raw, "finish", status)
-            if intent == "handled":
-                continue
-            if intent in {"quit", "skip"}:
-                if intent == "quit":
-                    self.quit_setup()
-                    return 0
+            # 确定性 y/N：二选一决策不依赖模糊意图解析
+            text = raw.strip().lower().rstrip(".!。！~～ ")
+            if not text:  # 空回车 = 默认启动（与旧行为一致）
+                return self.launch_main_agent()
+            if text in {"y", "yes", "可以", "可", "好的", "好", "行", "嗯", "对", "是",
+                        "继续", "开始", "启动", "ok", "go", "sure", "来吧", "来", "搞起"}:
+                return self.launch_main_agent()
+            if text in {"n", "no", "skip", "退出", "结束", "取消", "不要", "不了",
+                        "先不", "不用", "不需要", "后面再说"}:
                 self.say("好的，这次 setup 到这里结束。之后你随时可以直接运行 sjtu-agent。")
                 self.say("如果以后想重新检查环境，直接运行 sjtu-agent setup 或 sjtu-agent doctor。")
                 return 0
-            if intent in {"yes", "empty"}:
-                return self.launch_main_agent()
-            self.say("你可以回复继续启动，或者回复 skip 先结束 setup。")
+            # 其他命令（status / help / quit 等）仍走 handle_common
+            intent = self.handle_common(raw, "finish", status)
+            if intent == "handled":
+                continue
+            if intent == "quit":
+                self.quit_setup()
+                return 0
+            if intent == "skip":
+                self.say("好的，这次 setup 到这里结束。之后你随时可以直接运行 sjtu-agent。")
+                self.say("如果以后想重新检查环境，直接运行 sjtu-agent setup 或 sjtu-agent doctor。")
+                return 0
+            # 未识别 → 明确的 y/N 提示，不再含糊重播
+            self.say("请回复 y 启动主对话，或 n 结束 setup。")
 
     def launch_main_agent(self) -> int:
         self.say("正在启动 SJTU Agent 主对话。之后你可以直接描述需求，或者输入 /help 查看命令。")
@@ -1168,6 +1187,7 @@ class SetupConversation:
     def run(self) -> int:
         self.say("我是 SJTU Agent 的 setup assistant。我会先把模型 API 配好，再按缺口一步一步带你完成校园平台配置。")
         self.say("过程中你可以随时输入 status、help、skip 或 quit。")
+        self.say("**核心 2 步必填**（大模型 API、jAccount），其余（Canvas / MOOC / Cookie / 视觉模型等）都是**可选的**——随时可以 skip，之后想用再补。")
         _print_runtime_summary()
 
         self.say("我先完成基础依赖检查。")
