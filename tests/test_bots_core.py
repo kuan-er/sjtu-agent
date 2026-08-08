@@ -66,4 +66,26 @@ def test_run_one_turn_multimodal(monkeypatch):
     reply = core.run_one_turn_multimodal(sess, content, "【平台】")
 
     assert reply == "多模态回复"
-    assert sess["messages"][1]["content"] == content
+    # 时间注入为首个 text 元素，原始内容保留在其后
+    user_content = sess["messages"][1]["content"]
+    assert user_content[0]["type"] == "text"
+    assert "当前时间" in user_content[0]["text"]
+    assert user_content[1:] == content
+
+
+def test_stable_prefix_system_has_no_date(monkeypatch):
+    """Phase 1 稳定前缀：system 不含时间（时间注入用户消息），保证缓存命中。"""
+    import sjtu_agent.bots._core as core
+
+    sess = {"messages": [], "model_box": ["deepseek-chat"], "client_box": [object()]}
+    core.init_messages(sess, "【平台】")
+    sys_content = sess["messages"][0]["content"]
+    assert "当前学期" not in sys_content  # 动态时间/学期不进 system 前缀
+    assert "【平台】" in sys_content
+
+    # run_one_turn 把时间放用户消息首部
+    monkeypatch.setattr(core, "_run_one_turn", lambda c, m, msgs: None)
+    sess2 = {"messages": [], "model_box": ["deepseek-chat"], "client_box": [object()]}
+    core.run_one_turn(sess2, "你好")
+    assert "当前学期" in sess2["messages"][1]["content"]
+    assert "你好" in sess2["messages"][1]["content"]

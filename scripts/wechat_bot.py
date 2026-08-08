@@ -56,6 +56,7 @@ from sjtu_agent.paths import CONFIG_PATH
 from sjtu_agent.config import cfg as _cfg
 from sjtu_agent.bots._core import (
     build_date_ctx as _build_date_ctx,
+    build_profile_ctx as _build_profile_ctx,
     log_turn as _log_turn,
     make_session,
     model_supports_vision as _model_supports_vision,
@@ -269,7 +270,7 @@ def _init_messages(sess: dict) -> None:
         return
     sess["messages"].append({
         "role": "system",
-        "content": agent.SYSTEM_PROMPT + _build_date_ctx(),
+        "content": agent.SYSTEM_PROMPT + _build_profile_ctx(),
     })
 
 

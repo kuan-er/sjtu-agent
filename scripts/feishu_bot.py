@@ -212,7 +212,7 @@ def _init_messages(sess: dict) -> None:
         pass
     sess["messages"].append({
         "role": "system",
-        "content": agent.SYSTEM_PROMPT + _build_date_ctx() + _FS_CTX + _inject_profile_ctx(),
+        "content": agent.SYSTEM_PROMPT + _FS_CTX + _inject_profile_ctx(),
     })
 
 
@@ -230,14 +230,15 @@ def _extract_assistant_reply(sess: dict) -> str:
 
 
 def _capture_turn(sess: dict, user_text: str, open_id: str = "") -> str:
-    """Run one agent turn, return the assistant reply text."""
+    """Run one agent turn, return the assistant reply text.
+
+    稳定前缀：system 不含时间/记忆（都随用户消息注入），保证缓存命中。
+    """
     _init_messages(sess)
-    if sess["messages"] and sess["messages"][0]["role"] == "system":
-        base = agent.SYSTEM_PROMPT + _build_date_ctx() + _FS_CTX + _inject_profile_ctx()
-        if open_id:
-            base += _inject_memory_ctx(open_id, user_text)
-        sess["messages"][0]["content"] = base
-    sess["messages"].append({"role": "user", "content": user_text})
+    ctx = _build_date_ctx()
+    if open_id:
+        ctx += _inject_memory_ctx(open_id, user_text)
+    sess["messages"].append({"role": "user", "content": ctx + "\n\n" + user_text})
 
     agent._run_one_turn(
         sess["client_box"][0],
@@ -294,12 +295,10 @@ def _is_duplicate_content(sender_id: str, text: str) -> bool:
 
 def _capture_turn_multimodal(sess: dict, content: list, open_id: str = "") -> str:
     _init_messages(sess)
-    if sess["messages"] and sess["messages"][0]["role"] == "system":
-        base = agent.SYSTEM_PROMPT + _build_date_ctx() + _FS_CTX + _inject_profile_ctx()
-        if open_id:
-            base += _inject_memory_ctx(open_id, "")
-        sess["messages"][0]["content"] = base
-    sess["messages"].append({"role": "user", "content": content})
+    ctx = _build_date_ctx()
+    if open_id:
+        ctx += _inject_memory_ctx(open_id, "")
+    sess["messages"].append({"role": "user", "content": [{"type": "text", "text": ctx + "\n"}] + list(content)})
 
     agent._run_one_turn(
         sess["client_box"][0],
