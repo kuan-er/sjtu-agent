@@ -23,6 +23,11 @@ from sjtu_agent.paths import AGENT_CONFIG_PATH, ENV_PATH
 from sjtu_agent.terminal_ui import print_markdown_message, print_rule
 from sjtu_agent.agent.prompts import _TOOL_LABELS
 
+# ── Loop 边界（Phase 5）：迭代预算 + 网络重试上限 ────────────────────────────
+# 防止模型无限调工具 / 网络持续失败导致死循环。
+_MAX_TOOL_ITERATIONS = 8   # 单轮最多工具调用迭代次数，超出后收敛
+_MAX_NETWORK_RETRIES = 2   # 网络/超时重试上限
+
 
 def _get_tools():
     """Lazy import TOOLS，避免 runner ↔ tools 循环依赖。"""
@@ -277,8 +282,14 @@ def _run_one_turn_openai(client: OpenAI, model: str, messages: list) -> None:
     - 正文内容流式缓冲，结束后用 print_markdown_message 统一渲染 markdown
     """
     spinner = Spinner()
+    iteration = 0
+    retries = 0
 
     while True:
+        iteration += 1
+        if iteration > _MAX_TOOL_ITERATIONS:
+            break  # 迭代预算耗尽 → 收敛（下方 _converge_openai）
+
         # ── 流式请求 ────────────────────────────────────────────────────────
         spinner.start("等待响应…")
         try:
@@ -289,7 +300,8 @@ def _run_one_turn_openai(client: OpenAI, model: str, messages: list) -> None:
         except Exception as e:
             spinner.stop()
             err = str(e).lower()
-            if "timeout" in err or "timed out" in err or "read" in err:
+            if ("timeout" in err or "timed out" in err or "read" in err) and retries < _MAX_NETWORK_RETRIES:
+                retries += 1
                 import time as _time
                 print(f"\r[提示] 网络超时，5 秒后重试…（{e}）")
                 _time.sleep(5)
@@ -345,6 +357,31 @@ def _run_one_turn_openai(client: OpenAI, model: str, messages: list) -> None:
                 spinner.stop()
             messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
 
+    # 迭代预算耗尽：无工具调用，强制模型合成最终回复
+    _converge_openai(client, model, messages)
+
+
+def _converge_openai(client: OpenAI, model: str, messages: list) -> None:
+    """迭代预算耗尽时收敛：无工具调用，强制生成最终回复（流式，保持 UX）。"""
+    spinner = Spinner()
+    spinner.start("已达到工具调用上限，正在汇总…")
+    full = ""
+    try:
+        stream = client.chat.completions.create(
+            model=model, messages=messages, timeout=180, stream=True,
+        )
+        full, _reasoning, _tcm = _stream_with_think_tags(stream, spinner)
+    except Exception:
+        full = ""
+    finally:
+        spinner.stop()
+    if full:
+        print_markdown_message("Agent", full)
+    messages.append({
+        "role": "assistant",
+        "content": full or "(已达工具调用上限，未能完成任务。请尝试把任务拆小，或分步询问。)",
+    })
+
 
 def _run_one_turn_anthropic(client: Anthropic, model: str, messages: list) -> None:
     """流式调用 Anthropic Messages API（SSE），实时显示 thinking block 和正文。"""
@@ -365,7 +402,14 @@ def _run_one_turn_anthropic(client: Anthropic, model: str, messages: list) -> No
         "user-agent":         ua,
     }
 
+    iteration = 0
+    retries = 0
+
     while True:
+        iteration += 1
+        if iteration > _MAX_TOOL_ITERATIONS:
+            break  # 迭代预算耗尽 → 收敛（下方 _converge_anthropic）
+
         api_msgs = []
         for m in messages:
             if m["role"] == "system":
@@ -506,10 +550,13 @@ def _run_one_turn_anthropic(client: Anthropic, model: str, messages: list) -> No
             if in_thinking or in_text:
                 sys.stdout.write("\033[0m\n")
                 sys.stdout.flush()
-            import time as _time
-            print(f"\r[提示] 网络连接失败，5 秒后重试…（{type(e).__name__}: {e}）")
-            _time.sleep(5)
-            continue
+            if retries < _MAX_NETWORK_RETRIES:
+                retries += 1
+                import time as _time
+                print(f"\r[提示] 网络连接失败，5 秒后重试…（{type(e).__name__}: {e}）")
+                _time.sleep(5)
+                continue
+            raise
         except Exception as e:
             spinner.stop()
             if in_thinking or in_text:
@@ -535,12 +582,14 @@ def _run_one_turn_anthropic(client: Anthropic, model: str, messages: list) -> No
         if error_payload:
             import time as _time
             msg = (error_payload.get("message") or str(error_payload))[:200]
-            if "overload" in msg.lower() or "过载" in msg:
+            if ("overload" in msg.lower() or "过载" in msg) and retries < _MAX_NETWORK_RETRIES:
+                retries += 1
                 print(f"\r[提示] 模型过载，10 秒后重试…")
                 _time.sleep(10)
                 continue
-            if error_payload.get("type") == "invalid_request_error" and "500" in str(error_payload):
-                import time as _time
+            if (error_payload.get("type") == "invalid_request_error" and "500" in str(error_payload)
+                    and retries < _MAX_NETWORK_RETRIES):
+                retries += 1
                 _time.sleep(5)
                 continue
             raise RuntimeError(f"Anthropic API 错误: {msg}")
@@ -575,6 +624,28 @@ def _run_one_turn_anthropic(client: Anthropic, model: str, messages: list) -> No
                 spinner.stop()
             tool_results.append({"type": "tool_result", "tool_use_id": b["id"], "content": result})
         messages.append({"role": "user", "content": tool_results})
+
+    # 迭代预算耗尽：无工具调用强制合成最终回复
+    _converge_anthropic(client, model, messages)
+
+
+def _converge_anthropic(client: Anthropic, model: str, messages: list) -> None:
+    """迭代预算耗尽时收敛：无工具调用，强制生成最终回复（非流式）。"""
+    system = next((m["content"] for m in messages if m["role"] == "system"), "")
+    api_msgs = [m for m in messages if m["role"] != "system" and m.get("content")]
+    try:
+        resp = client.messages.create(
+            model=model, system=system, messages=api_msgs, max_tokens=4096,
+        )
+        text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
+    except Exception:
+        text = ""
+    if text:
+        print_markdown_message("Agent", text)
+    messages.append({
+        "role": "assistant",
+        "content": text or "(已达工具调用上限，未能完成任务。请尝试把任务拆小，或分步询问。)",
+    })
 
 
 def _run_one_turn(client, model: str, messages: list) -> None:
