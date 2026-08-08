@@ -125,20 +125,25 @@ Loop Engineering  → 设计"自动操作 Agent 的系统"
 
 ## 五、实施路线（增量、每步可测）
 
-**已完成（上下文工程单元）**：
+**已完成（上下文工程 + Prompt 审计单元）**：
 - ✅ **Phase 1 稳定前缀**：动态时间/记忆移出 system prompt → 用户消息；system 稳定喂缓存（5 个入口全改）
 - ✅ **Phase 2 Clearing + 质量预算**：tool 结果清理（无损）+ 64K 质量预算折叠带摘要（缓存感知）
 - ✅ **skills 死代码修复**：`build_system_prompt()` 接入全部入口（CLI / 4 bot / web），prompt-only skills 生效
 - ✅ **web 聊天补齐**：稳定前缀 + skills + trim 钩子（原绕过点）
+- ✅ **Phase 3 Prompt 审计**：
+  - 模块化拆分：`_CORE_PRINCIPLES` / `_TOOL_ROUTING` / `_DOMAIN_GUIDE` / `_BOT_SETUP`，SYSTEM_PROMPT 拼接（行为不变）
+  - 近期更新移出前缀（动态内容，发版破坏缓存）→ `CHANGELOG.md` + `get_recent_updates` 工具按需读
+  - 4×Bot 配置引导移出前缀（~60 行，12%）→ `get_bot_setup_guide(platform)` 工具按需读
+  - 路由去重（search_courses）
+  - SYSTEM_PROMPT ~13KB → ~10.5KB
 
 | Phase | 内容 | 价值 | 风险 |
 |-------|------|------|------|
-| **3. Prompt 审计** | SYSTEM_PROMPT（638 行）分层重构 | 🟡 指令遵循更稳 | 低 |
 | **4. Harness** | schema 校验 + execute_python 拦截 + 调用日志 | 🟡 可靠/安全 | 中 |
 | **5. Loop** | 迭代预算 + 重试 + 轻量反射 | 🟢 更自主 | 中 |
 | **6. Graph 评估** | Plan-Execute 试点 | 🟢 复杂任务 | 高（可后置） |
 
-每步独立测试（现有 353 个测试作回归基线），可随时停下不返工。
+每步独立测试（现有 357 个测试作回归基线），可随时停下不返工。
 
 ---
 
