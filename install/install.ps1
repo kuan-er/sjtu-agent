@@ -70,7 +70,7 @@ function Resolve-PythonCommand {
         }
     }
 
-    throw "No usable Python found. Please install Python 3.10+ or specify one with -Python."
+    throw "No usable Python found. Please install Python 3.11+ or specify one with -Python."
 }
 
 function Invoke-PythonCommand {
@@ -121,8 +121,24 @@ $PythonCommand = Resolve-PythonCommand -RequestedPython $Python
 
 Invoke-PythonCommand -PythonCommand $PythonCommand -Arguments @(
     "-c",
-    "import sys; sys.exit('Python 3.10 or higher is required.') if sys.version_info < (3, 10) else None"
+    "import sys; sys.exit('Python 3.11 or higher is required (browser-use needs 3.11+).') if sys.version_info < (3, 11) else None"
 ) -ErrorMessage "Python version check failed."
+
+# ── 确保 uv 可用（未装则自动安装，2026 标准，比 pip 快一个数量级）──────────
+if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+    Write-Log "未检测到 uv，正在安装…"
+    try {
+        winget install --id astral-sh.uv -e --accept-source-agreements --accept-package-agreements 2>$null
+    } catch {
+    }
+    if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+        # fallback: 官方 PowerShell 安装脚本
+        try { Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression } catch {}
+    }
+    if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+        throw "uv 安装失败，请手动安装: winget install astral-sh.uv"
+    }
+}
 
 $VenvDir = Join-Path $ProjectDir ".venv"
 $VenvPython = Join-Path $VenvDir "Scripts\python.exe"
@@ -138,15 +154,19 @@ if ((Test-Path $VenvDir) -and -not (Test-Path $VenvPython)) {
 }
 
 if (-not (Test-Path $VenvDir)) {
-    Write-Log "Creating virtual environment: $VenvDir"
-    Invoke-PythonCommand -PythonCommand $PythonCommand -Arguments @("-m", "venv", $VenvDir) -ErrorMessage "Failed to create virtual environment."
+    Write-Log "Creating virtual environment (uv): $VenvDir"
+    $PythonPath = (Get-Command $PythonCommand.Executable).Source
+    uv venv $VenvDir --python $PythonPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to create virtual environment with uv."
+    }
 }
 
-Write-Log "Upgrading pip"
-Invoke-ExternalCommand -Executable $VenvPython -Arguments @("-m", "pip", "install", "--upgrade", "pip") -ErrorMessage "Failed to upgrade pip."
-
-Write-Log "Installing SJTU Agent"
-Invoke-ExternalCommand -Executable $VenvPython -Arguments @("-m", "pip", "install", "-e", $ProjectDir) -ErrorMessage "Failed to install SJTU Agent."
+Write-Log "Installing SJTU Agent (uv)"
+uv pip install -e $ProjectDir --python $VenvPython
+if ($LASTEXITCODE -ne 0) {
+    throw "Failed to install SJTU Agent with uv."
+}
 
 # Windows 上 editable install 的 .pth 文件偶尔会失效或丢失，
 # 手动写一个兜底 .pth 确保 sjtu_agent 包始终可被找到

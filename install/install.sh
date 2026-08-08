@@ -69,12 +69,20 @@ command -v "$PYTHON_CMD" >/dev/null 2>&1 || fail "未找到 Python: $PYTHON_CMD"
 "$PYTHON_CMD" - <<'PY'
 import sys
 
-if sys.version_info < (3, 10):
-    raise SystemExit("Python 3.10 或更高版本是必需的。")
+if sys.version_info < (3, 11):
+    raise SystemExit("Python 3.11 或更高版本是必需的（browser-use 需要 3.11+）。")
 PY
 
 VENV_DIR="$PROJECT_DIR/.venv"
 VENV_PY="$VENV_DIR/bin/python"
+
+# ── 确保 uv 可用（未装则自动安装，2026 标准，比 pip 快一个数量级）───────────
+if ! command -v uv >/dev/null 2>&1; then
+  log "未检测到 uv，正在安装…（https://astral.sh/uv/install.sh）"
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+  command -v uv >/dev/null 2>&1 || fail "uv 安装失败，请手动安装: curl -LsSf https://astral.sh/uv/install.sh | sh"
+fi
 
 if [[ $FORCE_RECREATE_VENV -eq 1 && -d "$VENV_DIR" ]]; then
   log "按要求重建虚拟环境: $VENV_DIR"
@@ -87,15 +95,12 @@ if [[ -d "$VENV_DIR" && ! -x "$VENV_PY" ]]; then
 fi
 
 if [[ ! -d "$VENV_DIR" ]]; then
-  log "创建虚拟环境: $VENV_DIR"
-  "$PYTHON_CMD" -m venv "$VENV_DIR"
+  log "创建虚拟环境（uv）: $VENV_DIR"
+  uv venv "$VENV_DIR" --python "$(command -v "$PYTHON_CMD")"
 fi
 
-log "升级 pip"
-"$VENV_PY" -m pip install --upgrade pip
-
-log "安装 SJTU Agent"
-"$VENV_PY" -m pip install -e "$PROJECT_DIR"
+log "安装 SJTU Agent（uv）"
+uv pip install -e "$PROJECT_DIR" --python "$VENV_PY"
 
 if [[ $INSTALL_PLAYWRIGHT -eq 1 ]]; then
   log "安装 Playwright Chromium"
