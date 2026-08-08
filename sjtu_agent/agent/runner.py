@@ -578,6 +578,10 @@ def _run_one_turn_anthropic(client: Anthropic, model: str, messages: list) -> No
 
 
 def _run_one_turn(client, model: str, messages: list) -> None:
+    # 上下文质量管理（Phase 2）：清理旧 tool 结果 + 超质量预算折叠最旧轮次。
+    # 所有入口（bots / feishu / CLI）都经过这里，单点覆盖。
+    from sjtu_agent.agent.context import trim_session
+    trim_session(messages)
     if _is_anthropic_model(model):
         _run_one_turn_anthropic(client, model, messages)
     else:
