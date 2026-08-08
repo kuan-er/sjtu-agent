@@ -29,3 +29,7 @@ include = ["sjtu_agent", "sjtu_agent.*"]
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}
+
+[project.optional-dependencies]
+# 按需所取：语义记忆（跨会话语义检索）需要 chromadb
+memory = ["chromadb>=0.5.0"]
