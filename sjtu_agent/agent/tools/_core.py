@@ -112,6 +112,14 @@ from sjtu_agent.agent.tools._dining import (
     tool_recommend_canteen, tool_record_dining_choice,
     tool_get_dining_history,
 )
+from sjtu_agent.agent.tools._changelog import (
+    TOOLS_ENTRIES as _CHANGELOG_TOOLS,
+    tool_get_recent_updates,
+)
+from sjtu_agent.agent.tools._bot_setup import (
+    TOOLS_ENTRIES as _BOT_SETUP_TOOLS,
+    tool_get_bot_setup_guide,
+)
 
 TOOLS = [
     {
@@ -842,6 +850,8 @@ TOOLS = [
     *_USER_PROFILE_TOOLS,
     *_REPORT_PREFS_TOOLS,
     *_PLATFORM_TOOLS,
+    *_CHANGELOG_TOOLS,
+    *_BOT_SETUP_TOOLS,
     {
         "type": "function",
         "function": {
@@ -3612,6 +3622,8 @@ _TOOL_REGISTRY = {
     "setup_canvas": tool_setup_canvas,
     "login_platform": lambda **kw: tool_login_platform(kw["platform"]),
     "get_ddls": tool_get_ddls,
+    "get_recent_updates": _no_args(tool_get_recent_updates),
+    "get_bot_setup_guide": tool_get_bot_setup_guide,
     "get_next_lab": _no_args(tool_get_next_lab),
     "get_all": tool_get_all,
     "download_assignments": tool_download_assignments,
