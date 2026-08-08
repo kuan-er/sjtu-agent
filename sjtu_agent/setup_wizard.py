@@ -623,8 +623,8 @@ def _classify_reply(raw: str) -> str:
         return "question"
     # 肯定词必须是完整匹配（或 + 标点），不能用子串，否则 token 里出现 y/go/ok 也会被误判
     _stripped = text.rstrip(".!。！~～ ")
-    if _stripped in {"继续", "开始", "安装", "执行", "导入", "保存", "打开", "可以",
-                     "好的", "好", "行", "嗯", "对", "是",
+    if _stripped in {"继续", "开始", "安装", "执行", "导入", "保存", "打开", "可以", "可",
+                     "好的", "好", "行", "嗯", "对", "是", "来吧", "来", "搞起",
                      "yes", "y", "ok", "okay", "sure", "continue", "go", "yep", "yeah"}:
         return "yes"
     return "text"
@@ -1141,22 +1141,34 @@ class SetupConversation:
             self.say("校园平台还可以继续补，但不影响现在启动智能体。")
 
         self.say("如果你愿意，我现在就直接启动 SJTU Agent 主对话。你也可以先结束 setup，之后手动运行 sjtu-agent。")
-        self.say("你可以回复继续启动，或者回复 skip 先结束 setup。")
+        self.say("回复 y 启动主对话，n 结束 setup（随时可输入 status / help）。")
         while True:
             raw = self.prompt()
-            intent = self.handle_common(raw, "finish", status)
-            if intent == "handled":
-                continue
-            if intent in {"quit", "skip"}:
-                if intent == "quit":
-                    self.quit_setup()
-                    return 0
+            # 确定性 y/N：二选一决策不依赖模糊意图解析
+            text = raw.strip().lower().rstrip(".!。！~～ ")
+            if not text:  # 空回车 = 默认启动（与旧行为一致）
+                return self.launch_main_agent()
+            if text in {"y", "yes", "可以", "可", "好的", "好", "行", "嗯", "对", "是",
+                        "继续", "开始", "启动", "ok", "go", "sure", "来吧", "来", "搞起"}:
+                return self.launch_main_agent()
+            if text in {"n", "no", "skip", "退出", "结束", "取消", "不要", "不了",
+                        "先不", "不用", "不需要", "后面再说"}:
                 self.say("好的，这次 setup 到这里结束。之后你随时可以直接运行 sjtu-agent。")
                 self.say("如果以后想重新检查环境，直接运行 sjtu-agent setup 或 sjtu-agent doctor。")
                 return 0
-            if intent in {"yes", "empty"}:
-                return self.launch_main_agent()
-            self.say("你可以回复继续启动，或者回复 skip 先结束 setup。")
+            # 其他命令（status / help / quit 等）仍走 handle_common
+            intent = self.handle_common(raw, "finish", status)
+            if intent == "handled":
+                continue
+            if intent == "quit":
+                self.quit_setup()
+                return 0
+            if intent == "skip":
+                self.say("好的，这次 setup 到这里结束。之后你随时可以直接运行 sjtu-agent。")
+                self.say("如果以后想重新检查环境，直接运行 sjtu-agent setup 或 sjtu-agent doctor。")
+                return 0
+            # 未识别 → 明确的 y/N 提示，不再含糊重播
+            self.say("请回复 y 启动主对话，或 n 结束 setup。")
 
     def launch_main_agent(self) -> int:
         self.say("正在启动 SJTU Agent 主对话。之后你可以直接描述需求，或者输入 /help 查看命令。")

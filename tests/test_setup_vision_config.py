@@ -81,3 +81,10 @@ def test_print_setup_status_groups_required_optional(capsys):
     assert "[可选]" in out
     assert "jAccount" in out
     assert "Canvas" in out
+
+
+def test_classify_yes_recognizes_user_inputs():
+    """确定性修复：用户实际打过的肯定词都能识别（可/可以/来吧/继续/y）。"""
+    from sjtu_agent.setup_wizard import _classify_reply
+    for inp in ["可以", "可", "来吧", "继续", "好", "y", "Y"]:
+        assert _classify_reply(inp) == "yes", f"{inp!r} 应识别为 yes"
