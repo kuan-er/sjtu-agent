@@ -268,3 +268,34 @@ def test_handle_commands_delete():
     r = _handle_commands("test-open-id", "/delete 1")
     assert "OK" in r
     assert "已删除" in r
+
+
+# ── 斜杠命令注册表 ───────────────────────────────────────────────────────────
+
+def test_command_registry_has_news():
+    """/news 已实现（修复：README/帮助宣传但分发缺失）。"""
+    from scripts.feishu_bot import _COMMAND_REGISTRY
+    assert "/news" in _COMMAND_REGISTRY
+    assert "/hw" in _COMMAND_REGISTRY
+    assert "/eat" in _COMMAND_REGISTRY
+    assert "/template" in _COMMAND_REGISTRY
+
+
+def test_handle_commands_unknown_and_help():
+    from scripts.feishu_bot import _handle_commands
+    assert "未知命令" in _handle_commands("x", "/nope")
+    help_text = _handle_commands("x", "/help")
+    assert "/news" in help_text
+    assert "/hw" in help_text
+
+
+def test_handle_commands_hw_due_invalid():
+    """/hw due abc → 干净报错而非崩溃。"""
+    from scripts.feishu_bot import _handle_commands
+    r = _handle_commands("x", "/hw due abc")
+    assert "无效天数" in r
+
+
+def test_handle_commands_not_command():
+    from scripts.feishu_bot import _handle_commands
+    assert _handle_commands("x", "你好呀") is None

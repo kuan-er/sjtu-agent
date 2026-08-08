@@ -691,12 +691,184 @@ def _do_hw_answer(open_id: str) -> str:
         specific_idx=ctx["idx"], answer_mode=True)
 
 
+# ── 斜杠命令（注册表化）──────────────────────────────────────────────────────
+
+_COMMAND_HELP = """**飞书 Bot 命令帮助**
+
+[对话]  `/new <名称>`  `/list`  `/switch <N>`  `/name <N> <名>`  `/delete <N>`  `/history`
+
+[作业]  `/hw`  `/hw do <N>`  `/hw brief <N>`  `/hw due <N>`  `/hw past`  `/hw all`  `/hw answer`
+
+[新闻]  `/news`  `/news_block <分类>`  `/news_reset`
+
+[食堂]  `/eat [闵行|徐汇|张江]`
+
+[AI]    `/aihot`  今日 AI 圈精选新闻
+
+[LaTeX] `/template`  `/template <名称>`  `/template compile`  `/template clone <id>`  `/template push`
+
+[信息]  查 DDL、看课表、查成绩、Canvas 课程公告和 quiz
+
+[记忆]  我会记住你聊过的课程、考试、学习偏好，下次对话自动关联
+
+[系统]  `/help`
+"""
+
+
+def _cmd_help(open_id: str, parts: list[str]) -> str:
+    return _COMMAND_HELP
+
+
+def _cmd_hw(open_id: str, parts: list[str]) -> str:
+    sub = parts[1] if len(parts) > 1 else ""
+    from sjtu_agent.homework_agent import run_homework_check
+    if sub == "do":
+        if len(parts) < 3:
+            return "用法：/hw do <序号>"
+        try:
+            idx = int(parts[2])
+        except ValueError:
+            return f"无效序号：{parts[2]}"
+        return "[homework] 🧠 解题助手模式…\n\n" + run_homework_check(specific_idx=idx)
+    elif sub == "brief":
+        if len(parts) < 3:
+            return "用法：/hw brief <序号>"
+        try:
+            idx = int(parts[2])
+        except ValueError:
+            return f"无效序号：{parts[2]}"
+        return "[homework] 正在获取摘要…\n\n" + run_homework_check(specific_idx=idx, brief=True)
+    elif sub == "past":
+        rest = parts[2] if len(parts) > 2 else ""
+        rest_parts = rest.split(maxsplit=1)
+        if rest_parts and rest_parts[0] == "do":
+            try:
+                idx = int(rest_parts[1])
+            except (ValueError, IndexError):
+                return "用法：/hw past do <序号>"
+            return "[homework] 正在分析历史作业…\n\n" + run_homework_check(specific_idx=idx, include_past=True)
+        return run_homework_check(list_only=True, include_past=True)
+    elif sub == "list":
+        return run_homework_check(list_only=True)
+    elif sub == "due":
+        try:
+            days = int(parts[2]) if len(parts) > 2 else 3
+        except ValueError:
+            return f"无效天数：{parts[2]}。用法：/hw due <N>"
+        return run_homework_check(due_within_days=days, list_only=True)
+    elif sub == "all":
+        return run_homework_check(due_within_days=3650, include_past=True, list_only=True)
+    elif sub == "answer":
+        return _do_hw_answer(open_id)
+    else:
+        return run_homework_check(list_only=True)
+
+
+def _cmd_aihot(open_id: str, parts: list[str]) -> str:
+    return "[aihot] 正在获取 AI 资讯…\n\n" + _fetch_aihot_news()
+
+
+def _cmd_news(open_id: str, parts: list[str]) -> str:
+    return "[news] 正在生成校园新闻摘要…\n\n" + _fetch_news_digest()
+
+
+def _cmd_news_block(open_id: str, parts: list[str]) -> str:
+    from sjtu_agent.news_aggregator.profile import UserProfile
+    category = parts[1].strip() if len(parts) > 1 else ""
+    if not category:
+        return "[news] 请指定要屏蔽的分类，如 `/news_block 教务处`。可用分类：教务处、水源社区、交大新闻网、Canvas"
+    UserProfile().block_category(category)
+    return f"[news] 已屏蔽「{category}」类新闻，后续摘要将不再推送此类内容。用 `/news_reset` 可重置。"
+
+
+def _cmd_news_reset(open_id: str, parts: list[str]) -> str:
+    from sjtu_agent.news_aggregator.profile import UserProfile
+    UserProfile().reset()
+    return "[news] 已重置新闻画像，下次摘要将恢复默认推荐。"
+
+
+def _cmd_eat(open_id: str, parts: list[str]) -> str:
+    campus = parts[1].strip() if len(parts) > 1 else "闵行"
+    valid = {"闵行", "徐汇", "张江"}
+    if campus not in valid:
+        return f"[eat] 未知校区「{campus}」，可选：{' / '.join(valid)}"
+    return "[eat] 正在查询食堂拥挤度…\n\n" + _fetch_eat_recommendation(campus)
+
+
+def _cmd_template(open_id: str, parts: list[str]) -> str:
+    sub = parts[1].strip() if len(parts) > 1 else ""
+    action = sub.split()[0] if sub else ""
+    rest = " ".join(sub.split()[1:]) if sub and " " in sub else ""
+
+    from sjtu_agent.overleaf_client import (
+        list_local_templates, apply_template, clone_template_from_overleaf,
+        compile_latex, find_tex_file, push_to_overleaf,
+    )
+
+    if action == "compile":
+        from sjtu_agent.paths import PAPERS_DIR
+        tex = find_tex_file()
+        if not tex:
+            return f"[xelatex] 在 {PAPERS_DIR} 下未找到 .tex 文件。请先用 /template <name> 套用模板，放入文档后编译。"
+        ok, output = compile_latex(tex)
+        if ok:
+            pdf = tex.with_suffix(".pdf")
+            return f"[xelatex] 编译成功 ✅\nPDF: {pdf.name} ({pdf.stat().st_size // 1024} KB)"
+        return f"[xelatex] 编译失败 ❌\n```\n{output}\n```"
+
+    if action == "clone":
+        args = rest.split() if rest else []
+        if not args:
+            return "用法: /template clone <project-id> [name]"
+        pid = args[0]
+        name = args[1] if len(args) > 1 else ""
+        path = clone_template_from_overleaf(pid, name)
+        if not path:
+            return f"克隆失败: 请检查 project-id 是否正确，以及 Git 是否已配置。Overleaf Git Bridge URL: https://latex.sjtu.edu.cn/git/{pid}"
+        return f"模板已克隆到 `{path}`\n\n/template {Path(path).name} 即可套用。"
+
+    if action == "push":
+        from sjtu_agent.paths import PAPERS_DIR
+        target = PAPERS_DIR
+        msg = push_to_overleaf(target)
+        return f"[git] {msg[1]}"
+
+    templates = list_local_templates()
+    if not templates:
+        return "暂无可用模板。用 /template clone <project-id> 从 Overleaf 克隆。"
+    if not sub:
+        lines = ["📄 **可用模板**："]
+        for t in templates:
+            src = "📦 内置" if t["source"] == "builtin" else "📥 下载"
+            lines.append(f"  [{t['name']}] {t['description']} {src}")
+        lines.append("\n子命令: /template <名称> | compile | clone <id> | push")
+        return "\n".join(lines)
+
+    match = next((t for t in templates if t["name"] == sub), None)
+    if not match:
+        return f"模板不存在: {sub}。用 /template 查看可用模板。"
+    msg = apply_template(sub)
+    return f"{msg}\n\n把你的文档文件放进去，然后 /template compile 编译。"
+
+
+_COMMAND_REGISTRY: dict[str, callable] = {
+    "/help": _cmd_help,
+    "/hw": _cmd_hw,
+    "/aihot": _cmd_aihot,
+    "/news": _cmd_news,
+    "/news_block": _cmd_news_block,
+    "/news_reset": _cmd_news_reset,
+    "/eat": _cmd_eat,
+    "/template": _cmd_template,
+}
+
+
 def _handle_commands(open_id: str, text: str) -> str | None:
-    """解析并执行对话管理命令。返回命令结果文本（None 表示不是命令）。"""
+    """解析并执行斜杠命令。返回命令结果文本（None 表示不是命令）。"""
     # 自然语言触发"给我答案"（子串匹配，兼容标点符号）
     _at = text.strip()
     if any(kw in _at for kw in ["给我答案", "给答案", "核对答案", "我要答案",
-                                  "获取完整解答", "看答案", "要答案", "上答案", "出答案"]):
+                                "获取完整解答", "看答案", "要答案", "上答案", "出答案"]):
         with _hw_ctx_lock:
             ctx = _hw_context.get(open_id, {})
         if ctx:
@@ -705,145 +877,20 @@ def _handle_commands(open_id: str, text: str) -> str | None:
     if not text.startswith("/"):
         return None
     parts = text.strip().split(maxsplit=2)
-    cmd = parts[0].lower() if parts else ""
+    cmd = parts[0].lower()
     # 多对话命令 → 委托 ConversationManager
     conv_result = _conv_mgr.handle_command(open_id, cmd, parts)
     if conv_result is not None:
         return conv_result
-
-    if cmd == "/help":
-            return (
-                "**飞书 Bot 命令帮助**\n\n"
-                "[对话]  `/new <名称>`  `/list`  `/switch <N>`  `/name <N> <名>`  `/delete <N>`  `/history`\n\n"
-                "[作业]  `/hw`  `/hw do <N>`  `/hw brief <N>`  `/hw due <N>`  `/hw past`  `/hw all`\n\n"
-                "[新闻]  `/news`\n"
-                "[食堂]  `/eat [闵行|徐汇|张江]`\n"
-                "[AI]    `/aihot`  今日 AI 圈精选新闻\n\n"
-                "[LaTeX] `/template`  `/template <名称>`  `/template compile`  `/template clone <id>`  `/template push`\n\n"
-                "[信息]  查 DDL、看课表、查成绩、Canvas 课程公告和 quiz\n"
-                "[记忆]  我会记住你聊过的课程、考试、学习偏好，下次对话自动关联\n\n"
-                "[系统]  `/help`"
-            )
-    if cmd == "/hw":
-        sub = parts[1] if len(parts) > 1 else ""
-        from sjtu_agent.homework_agent import run_homework_check
-        if sub == "do":
-            if len(parts) < 3:
-                return "用法：/hw do <序号>"
-            try:
-                idx = int(parts[2])
-            except ValueError:
-                return f"无效序号：{parts[2]}"
-            return "[homework] 🧠 解题助手模式…\n\n" + run_homework_check(specific_idx=idx)
-        elif sub == "brief":
-            if len(parts) < 3:
-                return "用法：/hw brief <序号>"
-            try:
-                idx = int(parts[2])
-            except ValueError:
-                return f"无效序号：{parts[2]}"
-            return "[homework] 正在获取摘要…\n\n" + run_homework_check(specific_idx=idx, brief=True)
-        elif sub == "past":
-            rest = parts[2] if len(parts) > 2 else ""
-            rest_parts = rest.split(maxsplit=1)
-            if rest_parts and rest_parts[0] == "do":
-                try:
-                    idx = int(rest_parts[1])
-                except (ValueError, IndexError):
-                    return "用法：/hw past do <序号>"
-                return "[homework] 正在分析历史作业…\n\n" + run_homework_check(specific_idx=idx, include_past=True)
-            return run_homework_check(list_only=True, include_past=True)
-        elif sub == "list":
-            return run_homework_check(list_only=True)
-        elif sub == "due":
-            days = int(parts[2]) if len(parts) > 2 else 3
-            return run_homework_check(due_within_days=days, list_only=True)
-        elif sub == "all":
-            return run_homework_check(due_within_days=3650, include_past=True, list_only=True)
-        elif sub == "answer":
-            return _do_hw_answer(open_id)
-        else:
-            return run_homework_check(list_only=True)
-    if cmd == "/aihot":
-        return "[aihot] 正在获取 AI 资讯…\n\n" + _fetch_aihot_news()
-    if cmd == "/news_block":
-        from sjtu_agent.news_aggregator.profile import UserProfile
-        category = parts[1].strip() if len(parts) > 1 else ""
-        if not category:
-            return "[news] 请指定要屏蔽的分类，如 `/news_block 教务处`。可用分类：教务处、水源社区、交大新闻网、Canvas"
-        UserProfile().block_category(category)
-        return f"[news] 已屏蔽「{category}」类新闻，后续摘要将不再推送此类内容。用 `/news_reset` 可重置。"
-    if cmd == "/news_reset":
-        from sjtu_agent.news_aggregator.profile import UserProfile
-        UserProfile().reset()
-        return "[news] 已重置新闻画像，下次摘要将恢复默认推荐。"
-    if cmd == "/eat":
-        try:
-            campus = parts[1].strip() if len(parts) > 1 else "闵行"
-            valid = {"闵行", "徐汇", "张江"}
-            if campus not in valid:
-                return f"[eat] 未知校区「{campus}」，可选：{' / '.join(valid)}"
-            return "[eat] 正在查询食堂拥挤度…\n\n" + _fetch_eat_recommendation(campus)
-        except Exception as e:
-            import traceback
-            tb = traceback.format_exc()
-            _logger.error(tb)
-            return f"[eat] 查询失败：{e}\n```\n{tb[-500:]}\n```"
-    if cmd == "/template":
-        sub = parts[1].strip() if len(parts) > 1 else ""
-        action = sub.split()[0] if sub else ""
-        rest = " ".join(sub.split()[1:]) if sub and " " in sub else ""
-
-        from sjtu_agent.overleaf_client import (
-            list_local_templates, apply_template, clone_template_from_overleaf,
-            compile_latex, find_tex_file, push_to_overleaf,
-        )
-
-        if action == "compile":
-            from sjtu_agent.paths import PAPERS_DIR
-            tex = find_tex_file()
-            if not tex:
-                return f"[xelatex] 在 {PAPERS_DIR} 下未找到 .tex 文件。请先用 /template <name> 套用模板，放入文档后编译。"
-            ok, output = compile_latex(tex)
-            if ok:
-                pdf = tex.with_suffix(".pdf")
-                return f"[xelatex] 编译成功 ✅\nPDF: {pdf.name} ({pdf.stat().st_size // 1024} KB)"
-            return f"[xelatex] 编译失败 ❌\n```\n{output}\n```"
-
-        if action == "clone":
-            args = rest.split() if rest else []
-            if not args:
-                return "用法: /template clone <project-id> [name]"
-            pid = args[0]
-            name = args[1] if len(args) > 1 else ""
-            path = clone_template_from_overleaf(pid, name)
-            if not path:
-                return f"克隆失败: 请检查 project-id 是否正确，以及 Git 是否已配置。Overleaf Git Bridge URL: https://latex.sjtu.edu.cn/git/{pid}"
-            return f"模板已克隆到 `{path}`\n\n/template {Path(path).name} 即可套用。"
-
-        if action == "push":
-            from sjtu_agent.paths import PAPERS_DIR
-            target = PAPERS_DIR
-            msg = push_to_overleaf(target)
-            return f"[git] {msg[1]}"
-
-        templates = list_local_templates()
-        if not templates:
-            return "暂无可用模板。用 /template clone <project-id> 从 Overleaf 克隆。"
-        if not sub:
-            lines = ["📄 **可用模板**："]
-            for t in templates:
-                src = "📦 内置" if t["source"] == "builtin" else "📥 下载"
-                lines.append(f"  [{t['name']}] {t['description']} {src}")
-            lines.append("\n子命令: /template <名称> | compile | clone <id> | push")
-            return "\n".join(lines)
-
-        match = next((t for t in templates if t["name"] == sub), None)
-        if not match:
-            return f"模板不存在: {sub}。用 /template 查看可用模板。"
-        msg = apply_template(sub)
-        return f"{msg}\n\n把你的文档文件放进去，然后 /template compile 编译。"
-    return f"未知命令：{cmd}。输入 /help 查看可用命令。"
+    handler = _COMMAND_REGISTRY.get(cmd)
+    if handler is None:
+        return f"未知命令：{cmd}。输入 /help 查看可用命令。"
+    # 统一错误处理：任何命令执行出错都返回可读信息，不崩 bot
+    try:
+        return handler(open_id, parts)
+    except Exception as e:
+        import traceback
+        return f"[命令错误] `{cmd}` 执行出错：{e}\n```\n{traceback.format_exc()[-300:]}\n```"
 
 
 def _process_hw_command(sender_open_id: str, message_id: str, text: str) -> None:
