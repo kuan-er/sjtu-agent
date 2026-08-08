@@ -127,13 +127,14 @@ Loop Engineering  → 设计"自动操作 Agent 的系统"
 
 | Phase | 内容 | 价值 | 风险 |
 |-------|------|------|------|
-| **1. Context 预算** | `trim_session()` 滑动窗口 + tool 结果清理 | 🔴 降成本、缓腐烂 | 低 |
-| **2. Prompt 审计** | SYSTEM_PROMPT 分层重构 | 🟡 指令遵循更稳 | 低 |
-| **3. Harness** | schema 校验 + execute_python 拦截 + 调用日志 | 🟡 可靠/安全 | 中 |
-| **4. Loop** | 迭代预算 + 重试 + 轻量反射 | 🟢 更自主 | 中 |
-| **5. Graph 评估** | Plan-Execute 试点 | 🟢 复杂任务 | 高（可后置） |
+| **1. 稳定前缀** | 动态时间/记忆移出 system prompt → 用户消息；system 稳定喂缓存（**已实现**） | 🔴 缓存命中、成本大降 | 低 |
+| **2. Clearing + 质量预算** | tool 结果清理 + 高阈值折叠（带摘要、缓存感知） | 🔴 抗腐烂、防健忘 | 低 |
+| **3. Prompt 审计** | SYSTEM_PROMPT 分层重构（含修复 build_system_prompt 死代码） | 🟡 指令遵循更稳 | 低 |
+| **4. Harness** | schema 校验 + execute_python 拦截 + 调用日志 | 🟡 可靠/安全 | 中 |
+| **5. Loop** | 迭代预算 + 重试 + 轻量反射 | 🟢 更自主 | 中 |
+| **6. Graph 评估** | Plan-Execute 试点 | 🟢 复杂任务 | 高（可后置） |
 
-每步独立测试（现有 341 个测试作回归基线），可随时停下不返工。
+每步独立测试（现有 342 个测试作回归基线），可随时停下不返工。
 
 ---
 
