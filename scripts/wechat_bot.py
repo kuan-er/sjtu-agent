@@ -270,7 +270,7 @@ def _init_messages(sess: dict) -> None:
         return
     sess["messages"].append({
         "role": "system",
-        "content": agent.SYSTEM_PROMPT + _build_profile_ctx(),
+        "content": agent.build_system_prompt() + _build_profile_ctx(),
     })
 
 

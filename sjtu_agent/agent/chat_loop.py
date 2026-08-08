@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 
 from sjtu_agent.paths import AGENT_CONFIG_PATH, ENV_PATH, DDL_CACHE_PATH
 from sjtu_agent.terminal_ui import print_markdown_message, print_rule
-from sjtu_agent.agent.prompts import SYSTEM_PROMPT
+from sjtu_agent.agent.prompts import build_system_prompt
 from sjtu_agent.agent.runner import _make_client, _run_one_turn, _is_anthropic_model, Spinner
 from sjtu_agent.agent.tools import TOOLS, run_tool, _fetch_ddls_parallel, _ddl_cache_get, tool_check_setup, _load_reminders
 
@@ -339,7 +339,7 @@ def _build_date_ctx() -> str:
 def chat_loop(client, model: str):
     from sjtu_agent.bots._core import build_profile_ctx  # 局部导入避免循环依赖
     # 稳定前缀：system prompt 不含时间（时间每轮注入用户消息，保证缓存命中）
-    messages = [{"role": "system", "content": SYSTEM_PROMPT + build_profile_ctx()}]
+    messages = [{"role": "system", "content": build_system_prompt() + build_profile_ctx()}]
     model_box  = [model]   # 用列表包裹使内部可修改
     client_box = [client]  # 同理，切换模型时可替换 client
 
@@ -440,7 +440,7 @@ def chat_loop(client, model: str):
             # 切换协议时重置对话，避免消息格式冲突
             messages.clear()
             from sjtu_agent.bots._core import build_profile_ctx  # 局部导入避免循环依赖
-            messages.append({"role": "system", "content": SYSTEM_PROMPT + build_profile_ctx()})
+            messages.append({"role": "system", "content": build_system_prompt() + build_profile_ctx()})
             proto = "Anthropic" if _is_anthropic_model(updated["model"]) else "OpenAI"
             print(f"  已切换到: {updated['model']}  [协议: {proto}]（已保存，对话已重置）\n")
             continue

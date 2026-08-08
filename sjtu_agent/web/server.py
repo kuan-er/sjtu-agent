@@ -369,15 +369,16 @@ def _stream_chat(user_message: str):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
     import agent as _agent
 
+    _now = _dt.datetime.now()
+    _date_ctx = (
+        f"\n\n## 当前时间\n"
+        f"现在：{_now.strftime('%Y年%m月%d日 %H:%M')}，星期{'一二三四五六日'[_now.weekday()]}。"
+    )
     if not _chat_history:
-        _now = _dt.datetime.now()
-        _date_ctx = (
-            f"\n\n## 当前时间\n"
-            f"现在：{_now.strftime('%Y年%m月%d日 %H:%M')}，星期{'一二三四五六日'[_now.weekday()]}。"
-        )
-        _chat_history.append({"role": "system", "content": _agent.SYSTEM_PROMPT + _date_ctx})
+        # 稳定前缀（含 prompt-only skills）；时间每轮注入用户消息 → 缓存命中
+        _chat_history.append({"role": "system", "content": _agent.build_system_prompt()})
 
-    _chat_history.append({"role": "user", "content": user_message})
+    _chat_history.append({"role": "user", "content": _date_ctx + "\n\n" + user_message})
 
     try:
         client, model, proto = _get_chat_client()

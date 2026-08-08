@@ -73,6 +73,26 @@ def test_run_one_turn_multimodal(monkeypatch):
     assert user_content[1:] == content
 
 
+def test_build_system_prompt_includes_skills(monkeypatch):
+    """build_system_prompt 注入启用技能（修复死代码）。"""
+    from sjtu_agent.agent.prompts import build_system_prompt
+    monkeypatch.setattr(
+        "sjtu_agent.extensions.skills.build_skill_prompt",
+        lambda: "\n\n## 技能\n能力X",
+    )
+    result = build_system_prompt()
+    assert "能力X" in result
+
+
+def test_init_messages_uses_build_system_prompt(monkeypatch):
+    """_core.init_messages 走 build_system_prompt（带 skills）。"""
+    import sjtu_agent.bots._core as core
+    monkeypatch.setattr(core, "build_system_prompt", lambda *a: "SYSTEM_WITH_SKILLS")
+    sess = {"messages": [], "model_box": ["m"], "client_box": [object()]}
+    core.init_messages(sess, "平台")
+    assert "SYSTEM_WITH_SKILLS" in sess["messages"][0]["content"]
+
+
 def test_stable_prefix_system_has_no_date(monkeypatch):
     """Phase 1 稳定前缀：system 不含时间（时间注入用户消息），保证缓存命中。"""
     import sjtu_agent.bots._core as core

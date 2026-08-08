@@ -12,7 +12,7 @@ from __future__ import annotations
 import datetime as _dt
 import re
 
-from sjtu_agent.agent import SYSTEM_PROMPT, _run_one_turn
+from sjtu_agent.agent import _run_one_turn, build_system_prompt
 
 # Each bot previously defined this regex locally; kept here once. feishu never
 # needed it because it doesn't capture stdout — the shared path also doesn't.
@@ -170,7 +170,7 @@ def init_messages(sess: dict, platform_ctx: str = "") -> None:
         return
     sess["messages"].append({
         "role": "system",
-        "content": SYSTEM_PROMPT + platform_ctx + build_profile_ctx(),
+        "content": build_system_prompt() + platform_ctx + build_profile_ctx(),
     })
 
 

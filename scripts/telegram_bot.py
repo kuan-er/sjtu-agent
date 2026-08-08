@@ -98,7 +98,7 @@ def _init_messages(sess: dict) -> None:
     """首次对话时注入 system prompt（稳定前缀：不含时间，时间每轮进用户消息）。"""
     if sess["messages"]:
         return
-    sess["messages"].append({"role": "system", "content": agent.SYSTEM_PROMPT + _TG_CTX + _build_profile_ctx()})
+    sess["messages"].append({"role": "system", "content": agent.build_system_prompt() + _TG_CTX + _build_profile_ctx()})
 
 
 # ── 输出捕获 ──────────────────────────────────────────────────────────────────

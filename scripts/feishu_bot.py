@@ -212,7 +212,7 @@ def _init_messages(sess: dict) -> None:
         pass
     sess["messages"].append({
         "role": "system",
-        "content": agent.SYSTEM_PROMPT + _FS_CTX + _inject_profile_ctx(),
+        "content": agent.build_system_prompt() + _FS_CTX + _inject_profile_ctx(),
     })
 
 
