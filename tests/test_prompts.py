@@ -26,4 +26,12 @@ def test_key_sections_present():
     assert "核心原则" in _CORE_PRINCIPLES
     assert "工具选择策略" in _TOOL_ROUTING
     assert "食堂用餐推荐" in _DOMAIN_GUIDE
-    assert "Telegram Bot 配置" in _BOT_SETUP
+    # Bot 配置引导移出前缀，只留路由
+    assert "Bot 接入配置" in _BOT_SETUP
+    assert "get_bot_setup_guide" in SYSTEM_PROMPT
+
+
+def test_bot_setup_guides_out_of_prefix():
+    """4 平台详细引导已移出 system prompt（改为按需工具）。"""
+    assert "open.feishu.cn" not in SYSTEM_PROMPT
+    assert "BotFather" not in SYSTEM_PROMPT

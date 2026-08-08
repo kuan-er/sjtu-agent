@@ -114,15 +114,11 @@ _DOMAIN_GUIDE = """## 启动行为
 
 ## 搜索行为
 
-- **「选课社区」「课评」「XX 课怎么样」「XX 老师课如何」 → 必须用 search_courses，禁止走 search_campus**
-
 - 用户说「水源」「水源社区」「bbs」→ search_campus(query=..., sites=["shuiyuan"])
 
 - 用户说「教务处」「jwc」→ search_campus(query=..., sites=["jwc"])
 
 - 用户说「传承」「dyweb」「传承交大」→ search_campus(query=..., sites=["dyweb"])。该站是 SPA，fetch_url/browse_mysjtu 均无法获取内容，只用 search_campus 结果即可。资料为空时告知用户「暂无上传资料，欢迎贡献」而非再次尝试访问网站
-
-- 用户未指定平台且明显是课程/老师评价类问题 → search_courses（**不要**走 search_campus）
 
 - 用户未指定平台且是通用搜索 → 不传 sites 参数，搜全部三个
 
@@ -366,69 +362,9 @@ browse_mysjtu 的使用场景：成绩、绩点、奖学金、培养方案、注
 - 用户问「最近更新了什么」「有什么新功能」「新版变化」「更新日志」→ 调用 get_recent_updates（读取 CHANGELOG 返回，**不要凭记忆编造**更新内容）。
 """
 
-_BOT_SETUP = """## Telegram Bot 配置
+_BOT_SETUP = """## Bot 接入配置
 
-用户说「接入Telegram」「配置Telegram」「怎么把你接入Telegram」「Telegram bot 怎么用」时：
-
-1. 如果用户还没有 Bot Token：先引导去 Telegram 找 @BotFather，发 /newbot，按提示创建，拿到 Token
-
-2. 用户提供 Token 后：调用 setup_telegram(telegram_token=...) 保存配置并验证 Token 有效性
-
-3. 配置成功后告知用户：
-
-   - 运行 `sjtu-agent telegram-bot` 启动 Bot（长轮询，适合本地/服务器常驻）
-
-   - 在 Telegram 中给 Bot 发 /id，获取自己的 user_id
-
-   - 如果想限制 Bot 只响应自己，再次调用 setup_telegram 补填 allowed_ids
-
-4. Bot 功能与终端版本完全相同：可以查 DDL、看课表、查成绩、搜索校园内容等
-
-## 微信 Bot 配置（ilink 协议）
-
-用户说「接入微信」「配置微信」「微信 bot」「把你接入微信」「微信推送」时：
-
-1. 调用 setup_wechat()，**这会在终端直接打印二维码并等待扫码**，整个过程在终端完成，无需用户手动操作
-
-2. 扫码成功后 bot_token 自动保存到 config.json，告知用户：
-
-   - 在微信里找到你刚才登录的 AI Bot（搜索"AI小助手"）
-
-   - 给 Bot 发一条消息（如「你好」），系统自动记录 context_token
-
-   - 运行 `python3 wechat_bot.py` 启动 Bot 后台服务（或 `sjtu-agent wechat-bot`）
-
-3. Bot 功能与终端版本完全相同：查 DDL、看课表、查成绩、搜索校园内容、接收日报推送等
-
-## 飞书 Bot 配置
-用户说「接入飞书」「配置飞书」「飞书 bot」「把你接入飞书」「飞书推送」「飞书」时：
-1. 引导用户在 https://open.feishu.cn/app 创建企业自建应用（无需企业资质，个人即可创建）
-2. 依次在应用设置中完成：开启 Bot 能力 → 添加 im:message 权限 → 事件订阅 im.message.receive_v1 并选择 WebSocket 模式（长连接，无需公网地址）→ 发布应用
-3. 从「凭证与基础信息」页面获取 App ID 和 App Secret
-4. 调用 setup_feishu(feishu_app_id=..., feishu_app_secret=...) 保存凭据并验证
-5. 配置成功后告知用户：
-   - 运行 `sjtu-agent feishu-bot` 启动 Bot（WebSocket 长连接模式，无需公网 IP）
-   - 在飞书中搜索创建的应用名，进入机器人对话窗口，直接发消息即可
-   - 需要后台常驻时运行 `sjtu-agent install-daemons` 安装守护进程
-6. Bot 功能与终端版本完全相同：查 DDL、看课表、查成绩、搜索校园内容、接收日报推送等
-
-## QQ Bot 配置
-用户说「接入QQ」「配置QQ bot」「QQ机器人」时：
-1. 引导用户先登录 https://q.qq.com/ ，进入机器人平台（OpenClaw）
-2. 指引用户「选择机器人」→「创建机器人」，然后获取 app_id（AppID）和 app_secret（AppSecret）
-3. 收集 app_id 和 app_secret 后调用 setup_qq 保存并验证
-4. 配置成功后告知用户：
-   - 让用户先从 QQ 给 Bot 发送一条消息，获取「QQ 用户标识」
-   - 让用户把该用户标识回填，用于加入白名单
-5. 如需限制可用用户，按白名单流程引导：
-   - 第一次先不填 qq_allowed_user_ids（留空=允许所有人），先跑通收消息链路
-   - 让目标用户给 Bot 发一条消息，记录机器人提示或日志里的「QQ 用户标识」
-   - 再次调用 setup_qq 补填 qq_allowed_user_ids（可传多个）
-   - 明确提醒：qq_allowed_user_ids 填的是 QQ 用户标识（openid/id），不是 QQ 号
-6. QQ 用户管理：
-   - 用户说「增加QQ用户」「添加QQ白名单用户」→ 调用 qq_add_user。若用户还没提供用户标识，先提示该账号给 Bot 发消息，拿到「QQ 用户标识」后回填
-   - 用户说「QQ用户列表」「查看QQ白名单」→ 调用 qq_list_users
-   - 用户说「删除QQ用户」「移除QQ白名单用户」→ 调用 qq_remove_user
+用户说「接入/配置 Telegram / 微信 / 飞书 / QQ」（如「接入Telegram」「配置飞书」「怎么把你接入XX」）→ 调用 get_bot_setup_guide(platform="telegram"/"wechat"/"feishu"/"qq")，按返回的步骤引导用户配置，不要凭记忆编造配置流程。
 """
 
 SYSTEM_PROMPT = _CORE_PRINCIPLES + _TOOL_ROUTING + _DOMAIN_GUIDE + _BOT_SETUP
