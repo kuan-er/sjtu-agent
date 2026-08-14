@@ -14,10 +14,10 @@
 
 ```bash
 # macOS / Linux
-git clone https://github.com/kuan-er/sjtu-agent.git && cd sjtu-agent && bash install.sh
+git clone https://github.com/kuan-er/sjtu-agent.git && cd sjtu-agent && bash install/install.sh
 
 # Windows PowerShell
-git clone https://github.com/kuan-er/sjtu-agent.git; cd sjtu-agent; powershell -ExecutionPolicy Bypass -File .\install.ps1
+git clone https://github.com/kuan-er/sjtu-agent.git; cd sjtu-agent; powershell -ExecutionPolicy Bypass -File .\install\install.ps1
 ```
 
 安装脚本自动创建 `.venv`、安装依赖和 Playwright Chromium，然后启动 `sjtu-agent setup`。setup 向导引导你配置大模型 API，依次保存校园平台凭据、自动创建 Canvas Token、从 Chrome 导入 Cookie。
@@ -25,8 +25,8 @@ git clone https://github.com/kuan-er/sjtu-agent.git; cd sjtu-agent; powershell -
 **安装选项：**
 
 ```bash
-bash install.sh --no-setup          # 只安装，不进入 setup
-bash install.sh --skip-playwright   # 跳过 Chromium
+bash install/install.sh --no-setup          # 只安装，不进入 setup
+bash install/install.sh --skip-playwright   # 跳过 Chromium
 ```
 
 **手动安装：**

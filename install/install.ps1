@@ -111,7 +111,8 @@ if ($Help) {
 }
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ProjectDir = $ScriptDir
+# 脚本在 install\ 下，项目根目录是它的父目录
+$ProjectDir = Split-Path -Parent $ScriptDir
 
 if (-not (Test-Path (Join-Path $ProjectDir "pyproject.toml"))) {
     throw "Please run this script from the repository root directory."

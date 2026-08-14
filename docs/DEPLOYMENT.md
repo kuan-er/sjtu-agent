@@ -15,7 +15,7 @@
 
 ## 二、现状诊断（已对照代码核实）
 
-**流程**（`install/install.sh` / `install.ps1`）：
+**流程**（`install/install.sh` / `install/install.ps1`）：
 ```
 创建 .venv → pip install -e .（全量依赖）→ playwright install chromium → 启动 setup 向导
 ```
