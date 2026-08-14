@@ -15,13 +15,13 @@ If this project helps you, please consider giving it a ⭐ Star!
 macOS / Linux:
 
 ```bash
-git clone https://github.com/kuan-er/sjtu-agent.git && cd sjtu-agent && bash install.sh
+git clone https://github.com/kuan-er/sjtu-agent.git && cd sjtu-agent && bash install/install.sh
 ```
 
 Windows PowerShell:
 
 ```powershell
-git clone https://github.com/kuan-er/sjtu-agent.git; cd sjtu-agent; powershell -ExecutionPolicy Bypass -File .\install.ps1
+git clone https://github.com/kuan-er/sjtu-agent.git; cd sjtu-agent; powershell -ExecutionPolicy Bypass -File .\install\install.ps1
 ```
 
 The install script automatically creates `.venv`, installs dependencies, installs Playwright Chromium, then launches `sjtu-agent setup`.
@@ -34,14 +34,14 @@ Skip setup or Chromium:
 
 ```bash
 # macOS / Linux
-bash install.sh --no-setup
-bash install.sh --skip-playwright
+bash install/install.sh --no-setup
+bash install/install.sh --skip-playwright
 ```
 
 ```powershell
 # Windows
-.\install.ps1 -NoSetup
-.\install.ps1 -SkipPlaywright
+.\install\install.ps1 -NoSetup
+.\install\install.ps1 -SkipPlaywright
 ```
 
 Manual install:

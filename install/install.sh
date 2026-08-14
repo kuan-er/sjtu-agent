@@ -3,7 +3,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
-PROJECT_DIR="$SCRIPT_DIR"
+# 脚本在 install/ 下，项目根目录是它的父目录
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 PYTHON_CMD="python3"
 INSTALL_PLAYWRIGHT=1
 RUN_SETUP=1
