@@ -104,17 +104,9 @@ def test_new_store_reuses_web_session_store():
 
 
 def test_tui_command_without_textual_reports_install_hint(monkeypatch, capsys):
-    import builtins
+    from sjtu_agent.tui import app as app_module
 
-    real_import = builtins.__import__
-
-    def fake_import(name, *args, **kwargs):
-        if name == "textual" or name.startswith("textual."):
-            raise ImportError("No module named 'textual'")
-        return real_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", fake_import)
-    from sjtu_agent.tui.app import run_tui
-    assert run_tui() == 1
+    monkeypatch.setattr(app_module, "TEXTUAL_AVAILABLE", False)
+    assert app_module.run_tui() == 1
     captured = capsys.readouterr()
     assert "pip install -e" in captured.err

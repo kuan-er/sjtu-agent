@@ -1,8 +1,8 @@
 """
 sjtu_agent/tui/app.py — Textual 全屏聊天界面。
 
-Textual 是可选依赖：本模块只在 `sjtu-agent tui` 被调用时通过 run_tui()
-延迟导入；未安装时给出安装提示，不影响其余 CLI 功能。
+Textual 是可选依赖：本模块导入失败时 TEXTUAL_AVAILABLE=False，
+run_tui() 给出安装提示；其余 CLI 功能不受影响。
 
 消息区使用 VerticalScroll + Markdown widgets：
 - 历史消息按条渲染，Markdown 完整排版
@@ -21,18 +21,22 @@ from .messages import display_text
 from .session_model import TuiSessionModel
 from sjtu_agent.commands import is_core_command
 
+try:
+    from textual import on
+    from textual.app import App, ComposeResult
+    from textual.containers import Horizontal, Vertical, VerticalScroll
+    from textual.widgets import Footer, Header, Input, Label, ListItem, ListView, Markdown, Static
+    TEXTUAL_AVAILABLE = True
+except ImportError:  # pragma: no cover - depends on optional extra
+    App = None  # type: ignore[assignment]
+    ComposeResult = None  # type: ignore[assignment]
+    Horizontal = Vertical = VerticalScroll = None  # type: ignore[assignment]
+    Footer = Header = Input = Label = ListItem = ListView = Markdown = Static = None  # type: ignore[assignment]
+    on = None  # type: ignore[assignment]
+    TEXTUAL_AVAILABLE = False
 
-def run_tui() -> int:
-    try:
-        from textual import on
-        from textual.app import App, ComposeResult
-        from textual.containers import Horizontal, Vertical, VerticalScroll
-        from textual.widgets import Footer, Header, Input, Label, ListItem, ListView, Markdown, Static
-    except ImportError as exc:
-        import sys
-        print("未安装 Textual。运行 `pip install -e \".[tui]\"` 后重试。", file=sys.stderr)
-        print(f"详细错误：{exc}", file=sys.stderr)
-        return 1
+
+if TEXTUAL_AVAILABLE:
 
     class ChatApp(App):
         """与 Web GUI 共用 session store 的 Textual 聊天客户端。"""
@@ -89,6 +93,8 @@ def run_tui() -> int:
 
         async def on_mount(self) -> None:
             await self.refresh_sessions()
+            if self.session_id:
+                await self.load_session(self.session_id)
             self.query_one("#prompt", Input).focus()
 
         # ── 会话 ─────────────────────────────────────────────────────────
@@ -113,27 +119,34 @@ def run_tui() -> int:
             session_list = self.query_one("#sessions", ListView)
             await session_list.clear()
             target = select_id or self.session_id
-            for index, session in enumerate(self.model.list_sessions()):
-                item = ListItem(
-                    Label(session.get("title") or "未命名会话"),
-                    id=f"session-{session['id']}",
+            items = []
+            for session in self.model.list_sessions():
+                items.append(
+                    ListItem(
+                        Label(session.get("title") or "未命名会话"),
+                        id=f"session-{session['id']}",
+                    )
                 )
-                session_list.append(item)
-                if session["id"] == target:
-                    session_list.index = index
+            await session_list.extend(items)
+            if target:
+                for index, session in enumerate(self.model.list_sessions()):
+                    if session["id"] == target:
+                        session_list.index = index
+                        break
 
         async def load_session(self, session_id: str) -> None:
             self.model.select(session_id)
             await self.messages.remove_children()
             session = self.model.get_current()
             title = (session or {}).get("title", "")
-            await self.messages.mount(Markdown(f"# {title}"))
+            widgets: list[Markdown] = [Markdown(f"# {title}")]
             for message in self.model.messages(session_id):
                 text = display_text(message.get("content", ""))
                 if message.get("role") == "user":
-                    await self.messages.mount(Markdown(f"> **你**\n\n{text}"))
+                    widgets.append(Markdown(f"> **你**\n\n{text}"))
                 else:
-                    await self.messages.mount(Markdown(text))
+                    widgets.append(Markdown(text))
+            await self.messages.mount(*widgets)
             self.messages.scroll_end(animate=False)
 
         @on(ListView.Selected)
@@ -228,10 +241,13 @@ def run_tui() -> int:
                 await self.messages.mount(Markdown("> 无法创建会话"))
                 return
 
-            await self.messages.mount(Markdown(f"> **你**\n\n{text}"))
-            self.stream_text = ""
-            await self.messages.mount(Markdown(id="stream-markdown"))
+            await self.messages.mount(
+                Markdown(f"> **你**\n\n{text}"),
+                Markdown(id="stream-markdown"),
+            )
+            self.messages.scroll_end(animate=False)
 
+            self.stream_text = ""
             self.busy = True
             self.turn_session = session_id
             command_mode = text.startswith("/") and is_core_command(text)
@@ -251,15 +267,22 @@ def run_tui() -> int:
                 for event in stream:
                     if event.get("kind") == "done":
                         break
-                    self.call_from_thread(self.render_event, event, turn_session)
+                    self.post_thread_event(self.render_event, event, turn_session)
             except Exception as exc:
-                self.call_from_thread(
+                self.post_thread_event(
                     self.render_event,
                     {"kind": "error", "text": str(exc)},
                     turn_session,
                 )
             finally:
-                self.call_from_thread(self.finish_turn, turn_session)
+                self.post_thread_event(self.finish_turn, turn_session)
+
+        def post_thread_event(self, callback, *args) -> None:
+            """从 worker 线程安全地投递 UI 回调；app 关闭后静默丢弃。"""
+            try:
+                self.call_from_thread(callback, *args)
+            except RuntimeError:
+                pass
 
         # ── 渲染（App 线程）─────────────────────────────────────────────
         def render_event(self, event: dict[str, Any], turn_session: str) -> None:
@@ -289,7 +312,10 @@ def run_tui() -> int:
                 self.stream_text += f"\n\n❌ **错误：{event.get('text', '')}**"
             elif kind == "cancelled":
                 self.stream_text += "\n\n_已取消_"
-            self.run_worker(self.flush_stream(), group="stream", exclusive=True)
+            try:
+                self.run_worker(self.flush_stream(), group="stream", exclusive=True)
+            except RuntimeError:
+                pass
 
         async def flush_stream(self) -> None:
             try:
@@ -303,10 +329,25 @@ def run_tui() -> int:
             if turn_session == self.session_id:
                 self.busy = False
                 self.pending_approval = None
-            self.run_worker(
-                self.refresh_sessions(select_id=turn_session),
-                group="sessions-refresh",
-            )
+            try:
+                self.run_worker(
+                    self.refresh_sessions(select_id=turn_session),
+                    group="sessions-refresh",
+                )
+            except RuntimeError:
+                pass
 
-    ChatApp().run()
+
+def build_app() -> "App | None":
+    if not TEXTUAL_AVAILABLE:
+        return None
+    return ChatApp()
+
+
+def run_tui() -> int:
+    if not TEXTUAL_AVAILABLE:
+        import sys
+        print("未安装 Textual。运行 `pip install -e \".[tui]\"` 后重试。", file=sys.stderr)
+        return 1
+    build_app().run()  # type: ignore[union-attr]
     return 0
