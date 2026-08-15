@@ -9,6 +9,7 @@
 - 🖥 `install-daemons` / setup 新增 `--no-browser`；未安装 `web` 服务时不再等待或尝试打开浏览器
 - 🐧 systemd 补齐 `web`、`news-digest`、`aihot-push` 服务，并修正早报/午报时间
 - 💧 水源授权优先复用仍有效的 session cookie，登录后校验当前用户，减少异地登录触发
+- 🧬 水源 Playwright 登录复用持久化浏览器 profile（`shuiyuan_browser_profile/`），降低 jAccount 风控概率；异地登录二次验证时给出更明确的处理提示
 - 📚 新增排错手册、服务器部署指南和 GitHub Issue 模板
 
 ## v0.10.0 (2026-08-09)

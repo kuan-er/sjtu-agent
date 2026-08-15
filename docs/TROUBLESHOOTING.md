@@ -159,6 +159,7 @@ loginctl enable-linger "$USER"
 
 - jAccount 把无头浏览器 / 服务器 IP 判定为异地登录，触发交我办 / 邮箱 / 手机验证。
 - 项目会先复用已保存的 `shuiyuan_cookies`，只有在失效时才重新登录；如果你每次都被要求重新登录，说明 cookie 没有保存成功或被风控拦截。
+- Playwright 登录现在会复用运行时数据目录下的 `shuiyuan_browser_profile/`（持久化浏览器 profile，保留 cookie、localStorage 和浏览器指纹），比每次新建无痕窗口更不容易触发风控。
 
 建议按顺序尝试：
 
@@ -166,6 +167,7 @@ loginctl enable-linger "$USER"
 2. 对 Agent 说「配置水源」，让它先复用已有 session；不要从服务器 IP 首次登录。
 3. 本机自动化失败时，手动导出 cookie（见下节）。
 4. 服务器部署时，优先把本机已经配好的 `config.json` 复制到服务器，而不是让服务器去登录 jAccount。
+5. 若怀疑 profile 已损坏或想重置浏览器指纹，可删除 `sjtu-agent doctor` 显示的 `shuiyuan_profile_dir` 后重试。
 
 ### 手动导出水源 cookie（兜底方案）
 

@@ -32,6 +32,7 @@ from sjtu_agent.paths import (
     PACKAGE_ROOT,
     PROJECT_ROOT,
     REMINDERS_PATH,
+    SHUIYUAN_PROFILE_DIR,
     USER_PROFILE_PATH,
     atomic_write_json,
     read_json_safe,
@@ -1668,7 +1669,11 @@ def tool_setup_shuiyuan() -> dict:
 
 
 def _setup_shuiyuan_session(cfg: dict, username: str, password: str) -> dict:
-    """降级方案：Playwright 登录水源，保存 session cookie。"""
+    """Playwright 登录水源并保存 session cookie。
+
+    优先复用持久化浏览器 profile（shuiyuan_browser_profile/），profile 失效
+    或不可用时回退到新的浏览器上下文，并把 config 中的 jAccount cookie 合并进去。
+    """
     manual_note = (
         "水源社区没有固定的 API 设置页面；不要去偏好设置里找 API。"
         "如果 User API Key 授权不可用，session cookie 就是当前的降级方案。"
@@ -1695,28 +1700,77 @@ def _setup_shuiyuan_session(cfg: dict, username: str, password: str) -> dict:
         return _shuiyuan_session_error(f"加载登录模块失败：{e}")
 
     jaccount_cookies = cfg.get("jaccount_cookies", {})
+    try:
+        SHUIYUAN_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        return _shuiyuan_session_error(f"无法创建水源浏览器 profile 目录：{e}")
+    _ManualLoginRequired = getattr(login_module, "ManualLoginRequired", None)
 
     new_session: dict = {}
     with _sync_pw() as pw:
-        browser = pw.chromium.launch(headless=True)
-        ctx = browser.new_context()
-        if jaccount_cookies:
-            ctx.add_cookies([
-                {"name": k, "value": v, "domain": "jaccount.sjtu.edu.cn", "path": "/"}
-                for k, v in jaccount_cookies.items()
-            ])
+        # 优先复用持久化浏览器 profile：保留 localStorage / cookie / 浏览器指纹，
+        # 比每次新建无痕上下文更不容易触发 jAccount 异地登录风控。
+        browser = None
+        profile_reused = False
+        try:
+            try:
+                ctx = pw.chromium.launch_persistent_context(
+                    user_data_dir=str(SHUIYUAN_PROFILE_DIR),
+                    headless=True,
+                    locale="zh-CN",
+                    timezone_id="Asia/Shanghai",
+                    viewport={"width": 1440, "height": 900},
+                )
+                profile_reused = True
+            except Exception:
+                browser = pw.chromium.launch(headless=True)
+                ctx = browser.new_context(
+                    locale="zh-CN",
+                    timezone_id="Asia/Shanghai",
+                    viewport={"width": 1440, "height": 900},
+                )
+
+            # 无论 profile 是否存在，都把 config 里最新的 jAccount cookie 合并进去。
+            if jaccount_cookies:
+                try:
+                    ctx.add_cookies([
+                        {"name": k, "value": v, "domain": "jaccount.sjtu.edu.cn", "path": "/"}
+                        for k, v in jaccount_cookies.items()
+                    ])
+                except Exception:
+                    pass
+        except Exception as e:
+            if browser is not None:
+                try:
+                    browser.close()
+                except Exception:
+                    pass
+            return _shuiyuan_session_error(f"启动浏览器失败：{e}")
+
+        def _close() -> None:
+            try:
+                ctx.close()
+            except Exception:
+                pass
+            if browser is not None:
+                try:
+                    browser.close()
+                except Exception:
+                    pass
+
         page = ctx.new_page()
         try:
             page.goto("https://shuiyuan.sjtu.edu.cn/", wait_until="networkidle", timeout=20_000)
         except Exception:
             pass
+
         if "jaccount" in page.url:
             if not username or not password:
-                browser.close()
+                _close()
                 return {"error": "需要 jAccount 凭据，请先用 save_credentials 配置"}
             try:
                 if not login_module._fill_jaccount(page, username, password):
-                    browser.close()
+                    _close()
                     return _shuiyuan_session_error("jAccount 登录失败，请检查账号密码")
                 try:
                     page.wait_for_url("**/shuiyuan.sjtu.edu.cn/**", timeout=15_000)
@@ -1727,14 +1781,29 @@ def _setup_shuiyuan_session(cfg: dict, username: str, password: str) -> dict:
                 if new_ja:
                     cfg["jaccount_cookies"] = new_ja
             except Exception as e:
-                browser.close()
+                _close()
+                if _ManualLoginRequired is not None and isinstance(e, _ManualLoginRequired):
+                    return _shuiyuan_session_error(
+                        f"{e}。建议先在常用电脑的浏览器里登录水源一次，再重试；"
+                        "也可按排错手册手动导出 shuiyuan cookie。"
+                    )
                 return _shuiyuan_session_error(f"jAccount 登录失败：{e}")
+
         new_session = {c["name"]: c["value"] for c in ctx.cookies()
                        if "shuiyuan.sjtu.edu.cn" in c.get("domain", "")}
-        browser.close()
+        profile_ja = {c["name"]: c["value"] for c in ctx.cookies()
+                      if "jaccount" in c.get("domain", "")}
+        if profile_ja:
+            cfg["jaccount_cookies"] = profile_ja
+        _close()
+
+    if not profile_reused and not new_session:
+        return _shuiyuan_session_error("未能获取水源社区 session，请检查账号")
 
     if not new_session:
-        return _shuiyuan_session_error("未能获取水源社区 session，请检查账号")
+        return _shuiyuan_session_error(
+            "未能从浏览器 profile 中获取水源社区 session，请检查是否已登录。"
+        )
 
     # 不能只看域名 cookie：即使没有登录也可能拿到游客 cookie。
     # 必须通过 Discourse 当前用户接口确认 session 真的已登录。
