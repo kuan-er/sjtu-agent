@@ -4,7 +4,7 @@
 [![Pages](https://github.com/kuan-er/sjtu-agent/actions/workflows/pages.yml/badge.svg)](https://github.com/kuan-er/sjtu-agent/actions/workflows/pages.yml)
 [![Release](https://github.com/kuan-er/sjtu-agent/actions/workflows/release.yml/badge.svg)](https://github.com/kuan-er/sjtu-agent/actions/workflows/release.yml)
 
-A campus assistant for Shanghai Jiao Tong University students, offering terminal chat, a local Web GUI, Telegram / Feishu (Lark) / WeChat / QQ bots, DDL aggregation, daily reports, campus news, canteen recommendations, and an MCP server.
+A campus assistant for Shanghai Jiao Tong University students, offering terminal chat, a Textual TUI, a local Web GUI, Telegram / Feishu (Lark) / WeChat / QQ bots, DDL aggregation, daily reports, campus news, canteen recommendations, and an MCP server.
 
 中文文档: [README.md](README.md)
 
@@ -129,6 +129,7 @@ If your main model does not support vision input (e.g. `deepseek-chat`), you can
 
 ```bash
 sjtu-agent                # start interactive chat
+sjtu-agent tui            # start the full-screen Textual TUI (optional [tui] extra)
 sjtu-agent setup          # first-run config wizard
 sjtu-agent doctor         # show config status and runtime paths
 sjtu-agent setup-config   # build config.json from browser cookies
@@ -163,6 +164,17 @@ sjtu-agent setup
 sjtu-agent setup --yes --skip-cookie-import --skip-launchd
 sjtu-agent setup --yes --write-daemons-only --output-dir /tmp/sjtu-agent-launchd
 ```
+
+## Textual TUI
+
+A full-screen terminal chat interface whose sessions stay in sync with the Web GUI:
+
+```bash
+pip install -e ".[tui]"   # install the optional extra
+sjtu-agent tui            # start the TUI
+```
+
+Session switching, streaming Markdown messages, `/` command completion, dangerous-tool approval, `ctrl+x` to stop generation, and `ctrl+n` for a new session are supported. If Textual is missing, the command prints an install hint.
 
 ## Web GUI
 
@@ -611,7 +623,7 @@ The Feishu Bot self-checks credentials, ChromaDB, and Agent API connectivity on 
 
 ## Version
 
-Current version: **v0.17.0**. Release history: [Releases](https://github.com/kuan-er/sjtu-agent/releases).
+Current version: **v0.18.0**. Release history: [Releases](https://github.com/kuan-er/sjtu-agent/releases).
 
 ## Release Notes
 

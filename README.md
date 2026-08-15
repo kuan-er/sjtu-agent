@@ -5,7 +5,7 @@
 [![Release](https://github.com/kuan-er/sjtu-agent/actions/workflows/release.yml/badge.svg)](https://github.com/kuan-er/sjtu-agent/actions/workflows/release.yml)
 [![Python](https://img.shields.io/badge/Python-3.11%20%7C%203.13-blue)](https://www.python.org/)
 
-面向上海交通大学学生的校园助手，提供终端对话、本地 Web GUI、飞书 / Telegram / 微信 / QQ Bot、DDL 聚合、日报推送和 MCP Server。
+面向上海交通大学学生的校园助手，提供终端对话、Textual TUI、本地 Web GUI、飞书 / Telegram / 微信 / QQ Bot、DDL 聚合、日报推送和 MCP Server。
 
 [English Version](README_EN.md) · [项目展示页](https://kuan-er.github.io/sjtu-agent) · [文档站](https://kuan-er.github.io/sjtu-agent/docs/) · [排错手册](docs/TROUBLESHOOTING.md) · [服务器部署](docs/SERVER_DEPLOYMENT.md)
 
@@ -96,6 +96,7 @@ ZHIYUAN_API_KEY=你的APIKey
 | 命令 | 用途 |
 | --- | --- |
 | `sjtu-agent` | 终端对话 |
+| `sjtu-agent tui` | 全屏 Textual TUI（可选依赖 `[tui]`） |
 | `sjtu-agent doctor` | 检查配置、路径和依赖 |
 | `sjtu-agent update` | 更新代码并自动恢复后台服务 |
 | `sjtu-agent web` | 本地 Web GUI：聊天、会话、附件、斜杠命令、配置（`--host 0.0.0.0` 供服务器监听） |
@@ -116,6 +117,17 @@ sjtu-agent              # 交互式对话
 sjtu-agent doctor       # 查看配置和运行时路径
 sjtu-agent update       # 一键更新到最新版本
 ```
+
+### Textual TUI
+
+全屏终端聊天界面，会话与 Web GUI 完全同步：
+
+```bash
+pip install -e ".[tui]"   # 安装可选依赖
+sjtu-agent tui            # 启动 TUI
+```
+
+支持会话列表切换、Markdown 流式消息、`/` 命令补全面板、危险工具审批、`ctrl+x` 停止生成、`ctrl+n` 新会话。未安装 Textual 时命令会给出安装提示。
 
 ### Web GUI
 
@@ -408,4 +420,4 @@ sjtu-agent install-daemons       # 服务器无桌面环境时加 --no-browser
 
 ## 版本
 
-当前版本：**v0.17.0**。发布历史见 [Releases](https://github.com/kuan-er/sjtu-agent/releases)。
+当前版本：**v0.18.0**。发布历史见 [Releases](https://github.com/kuan-er/sjtu-agent/releases)。

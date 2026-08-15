@@ -101,6 +101,11 @@ sjtu_agent/
     storage.py        # news storage and deduplication
     sources/          # per-platform scrapers (jwc, shuiyuan, official, canvas)
 
+  tui/                # Textual full-screen chat TUI (optional extra [tui])
+    app.py            # ChatApp: session list, Markdown messages, slash completion
+    engine.py         # adapts the Web SSE chat/command streams and approvals
+    session_model.py  # reuses web_sessions.sqlite3 so Web and TUI stay in sync
+
   web/                # local Web GUI + legacy config page
     server.py         # pure stdlib HTTP server: SSE chat (/api/chat), command SSE (/api/command), config APIs
     session_store.py  # SQLite-backed Web sessions/messages
@@ -139,8 +144,7 @@ New code should go into `sjtu_agent/`, not these root or script files.
 
 ### Refactoring status
 
-Refactoring status (as of v0.17.0):
-- **Done**: agent.py split into `sjtu_agent/agent/`; tools split into `agent/tools/` subpackage; ConfigStore + protected write path; `run_tool` registry; Notifier abstraction; unified logging; Web GUI (multi-session, attachments, approvals); shared slash-command layer (`sjtu_agent/commands/`) used by Feishu + WebUI
-- **Partial/deferred**: full BaseBotRunner transport abstraction to deduplicate all bot glue; BasePlatform for DDL scrapers; `/hw do` fine-grained progress callbacks
-- **Next**: Textual TUI (`sjtu-agent tui`), reusing the Web SQLite session store so CLI and Web progress stay in sync
-- CI workflow exists (`.github/workflows/test.yml`) but coverage is thin
+Refactoring status (as of v0.18.0):
+- **Done**: agent.py split into `sjtu_agent/agent/`; tools split into `agent/tools/` subpackage; ConfigStore + protected write path; `run_tool` registry; Notifier abstraction; unified logging; Web GUI (multi-session, attachments, approvals); shared slash-command layer (`sjtu_agent/commands/`); Textual TUI (`sjtu-agent tui`, reuses the Web SQLite session store and SSE engine)
+- **Partial/deferred**: full BaseBotRunner transport abstraction to deduplicate all bot glue; BasePlatform for DDL scrapers; `/hw do` fine-grained progress callbacks; structured command cards inside the TUI
+- CI workflow exists (`.github/workflows/test.yml`, installs `[tui]`) but coverage is thin

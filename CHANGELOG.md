@@ -2,6 +2,13 @@
 
 本文件记录各版本的用户可见变化。Agent 通过 `get_recent_updates` 读取（问「最近更新了什么」时），不写入 system prompt。
 
+## v0.18.0 (2026-08-16)
+- 🖥 新增 Textual TUI：`sjtu-agent tui` 全屏终端聊天界面（需 `pip install -e ".[tui]"`；未安装时给出提示）
+- 🔄 TUI 与 Web GUI 共用同一 SQLite 会话存储和 SSE 引擎，会话 / 消息 / 命令结果实时同步
+- ⌨️ TUI 支持：会话列表、Markdown 流式消息、`/` 命令补全面板、危险工具 approve/deny、`ctrl+x` 停止、`ctrl+n` 新会话
+- 🛡 TUI 稳定性：Textual 8.x 异步 API 适配、80ms 流式节流、UI worker 防闪退、未捕获异常落盘 `logs/tui_error.log`
+- 🧪 CI 测试矩阵安装 `[tui]`，Textual headless UI 测试（布局 / 流式 / 命令补全 / 压力）随 PR 执行
+
 ## v0.17.0 (2026-08-16)
 - 🧭 斜杠命令统一为共享执行层：新增 `sjtu_agent.commands`（元数据 / dispatch / homework / news / dining / template），飞书 Bot 与 WebUI 共用同一份 `/hw` `/news*` `/eat` `/template` 逻辑；飞书文本输出保持不变
 - 🖥 WebUI 命令体验：输入框上方快捷 chips（作业 / 新闻 / 食堂 / 模板 / DDL / 配置）、`/` 命令补全面板（↑↓ 选择、Enter 填入、Esc 关闭）
