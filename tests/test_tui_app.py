@@ -110,6 +110,33 @@ def test_stream_exception_is_rendered_without_thread_crash(tmp_path, monkeypatch
     _run(scenario())
 
 
+def test_ui_workers_never_exit_app(tmp_path, monkeypatch):
+    store = SessionStore(tmp_path / "web_sessions.sqlite3")
+    model = TuiSessionModel(store)
+    model.create_session("新会话")
+
+    async def scenario():
+        app = build_app()
+        app.model = model
+        calls = []
+
+        def fake_run_worker(work, **kwargs):
+            calls.append(kwargs)
+            if hasattr(work, "close"):
+                work.close()  # 测试替身不执行，显式关闭避免未 await 警告
+            return None
+
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            monkeypatch.setattr(app, "run_worker", fake_run_worker)
+            app.render_event({"kind": "token", "text": "hello"}, app.session_id)
+            assert calls
+            assert calls[-1]["exit_on_error"] is False
+            assert calls[-1]["exclusive"] is True
+
+    _run(scenario())
+
+
 def test_command_suggestions_fill_input(tmp_path):
     store = SessionStore(tmp_path / "web_sessions.sqlite3")
     model = TuiSessionModel(store)

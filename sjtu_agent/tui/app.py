@@ -116,38 +116,45 @@ if TEXTUAL_AVAILABLE:
             cancel_turn(self.session_id)
 
         async def refresh_sessions(self, select_id: str | None = None) -> None:
-            session_list = self.query_one("#sessions", ListView)
-            await session_list.clear()
-            target = select_id or self.session_id
-            items = []
-            for session in self.model.list_sessions():
-                items.append(
-                    ListItem(
-                        Label(session.get("title") or "未命名会话"),
-                        id=f"session-{session['id']}",
+            try:
+                session_list = self.query_one("#sessions", ListView)
+                await session_list.clear()
+                target = select_id or self.session_id
+                items = []
+                for session in self.model.list_sessions():
+                    items.append(
+                        ListItem(
+                            Label(session.get("title") or "未命名会话"),
+                            id=f"session-{session['id']}",
+                        )
                     )
-                )
-            await session_list.extend(items)
-            if target:
-                for index, session in enumerate(self.model.list_sessions()):
-                    if session["id"] == target:
-                        session_list.index = index
-                        break
+                await session_list.extend(items)
+                if target:
+                    for index, session in enumerate(self.model.list_sessions()):
+                        if session["id"] == target:
+                            session_list.index = index
+                            break
+            except Exception:
+                # 会话列表刷新失败不应导致 App 退出。
+                return
 
         async def load_session(self, session_id: str) -> None:
-            self.model.select(session_id)
-            await self.messages.remove_children()
-            session = self.model.get_current()
-            title = (session or {}).get("title", "")
-            widgets: list[Markdown] = [Markdown(f"# {title}")]
-            for message in self.model.messages(session_id):
-                text = display_text(message.get("content", ""))
-                if message.get("role") == "user":
-                    widgets.append(Markdown(f"> **你**\n\n{text}"))
-                else:
-                    widgets.append(Markdown(text))
-            await self.messages.mount(*widgets)
-            self.messages.scroll_end(animate=False)
+            try:
+                self.model.select(session_id)
+                await self.messages.remove_children()
+                session = self.model.get_current()
+                title = (session or {}).get("title", "")
+                widgets: list[Markdown] = [Markdown(f"# {title}")]
+                for message in self.model.messages(session_id):
+                    text = display_text(message.get("content", ""))
+                    if message.get("role") == "user":
+                        widgets.append(Markdown(f"> **你**\n\n{text}"))
+                    else:
+                        widgets.append(Markdown(text))
+                await self.messages.mount(*widgets)
+                self.messages.scroll_end(animate=False)
+            except Exception:
+                return
 
         @on(ListView.Selected)
         async def on_session_selected(self, event) -> None:
@@ -216,6 +223,18 @@ if TEXTUAL_AVAILABLE:
             event.input.value = ""
             await self.start_turn(text)
 
+        def schedule_worker(self, work, group: str, *, exclusive: bool = False) -> None:
+            """启动 UI worker；任何刷新错误都不允许让 App 闪退。"""
+            try:
+                self.run_worker(
+                    work,
+                    group=group,
+                    exclusive=exclusive,
+                    exit_on_error=False,
+                )
+            except RuntimeError:
+                pass
+
         def handle_approval(self, text: str) -> None:
             approval = self.pending_approval
             self.pending_approval = None
@@ -223,14 +242,14 @@ if TEXTUAL_AVAILABLE:
             if not approved and text.lower() not in {"deny", "no", "n", "拒绝"}:
                 self.pending_approval = approval
                 self.stream_text += "\n\n> 请输入 approve 或 deny。"
-                self.run_worker(self.flush_stream(), group="stream", exclusive=True)
+                self.schedule_worker(self.flush_stream(), group="stream", exclusive=True)
                 return
             decide_approval(str(approval.get("approval_id", "")), approved)
             self.stream_text += (
                 f"\n\n_{'已批准' if approved else '已拒绝'}："
                 f"{approval.get('tool_name', '')}_"
             )
-            self.run_worker(self.flush_stream(), group="stream", exclusive=True)
+            self.schedule_worker(self.flush_stream(), group="stream", exclusive=True)
 
         async def start_turn(self, text: str) -> None:
             if self.session_id is None:
@@ -241,11 +260,14 @@ if TEXTUAL_AVAILABLE:
                 await self.messages.mount(Markdown("> 无法创建会话"))
                 return
 
-            await self.messages.mount(
-                Markdown(f"> **你**\n\n{text}"),
-                Markdown(id="stream-markdown"),
-            )
-            self.messages.scroll_end(animate=False)
+            try:
+                await self.messages.mount(
+                    Markdown(f"> **你**\n\n{text}"),
+                    Markdown(id="stream-markdown"),
+                )
+                self.messages.scroll_end(animate=False)
+            except Exception:
+                pass
 
             self.stream_text = ""
             self.busy = True
@@ -312,30 +334,25 @@ if TEXTUAL_AVAILABLE:
                 self.stream_text += f"\n\n❌ **错误：{event.get('text', '')}**"
             elif kind == "cancelled":
                 self.stream_text += "\n\n_已取消_"
-            try:
-                self.run_worker(self.flush_stream(), group="stream", exclusive=True)
-            except RuntimeError:
-                pass
+            self.schedule_worker(self.flush_stream(), group="stream", exclusive=True)
 
         async def flush_stream(self) -> None:
             try:
                 markdown = self.query_one("#stream-markdown", Markdown)
+                await markdown.update(self.stream_text)
+                self.messages.scroll_end(animate=False)
             except Exception:
+                # 会话切换 / widget 被移除 / 更新失败都不允许闪退。
                 return
-            await markdown.update(self.stream_text)
-            self.messages.scroll_end(animate=False)
 
         def finish_turn(self, turn_session: str) -> None:
             if turn_session == self.session_id:
                 self.busy = False
                 self.pending_approval = None
-            try:
-                self.run_worker(
-                    self.refresh_sessions(select_id=turn_session),
-                    group="sessions-refresh",
-                )
-            except RuntimeError:
-                pass
+            self.schedule_worker(
+                self.refresh_sessions(select_id=turn_session),
+                group="sessions-refresh",
+            )
 
 
 def build_app() -> "App | None":
