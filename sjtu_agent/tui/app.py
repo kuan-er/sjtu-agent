@@ -3,6 +3,10 @@ sjtu_agent/tui/app.py — Textual 全屏聊天界面。
 
 Textual 是可选依赖：本模块只在 `sjtu-agent tui` 被调用时通过 run_tui()
 延迟导入；未安装时给出安装提示，不影响其余 CLI 功能。
+
+消息区使用 VerticalScroll + Markdown widgets：
+- 历史消息按条渲染，Markdown 完整排版
+- 当前回复是单一 Markdown widget，流式更新
 """
 
 from __future__ import annotations
@@ -22,12 +26,12 @@ def run_tui() -> int:
     try:
         from textual import on
         from textual.app import App, ComposeResult
-        from textual.containers import Horizontal, Vertical
-        from textual.widgets import Footer, Header, Input, Label, ListItem, ListView, RichLog, Static
-        from rich.markup import escape
+        from textual.containers import Horizontal, Vertical, VerticalScroll
+        from textual.widgets import Footer, Header, Input, Label, ListItem, ListView, Markdown, Static
     except ImportError as exc:
-        print("未安装 Textual。运行 `pip install -e \".[tui]\"` 后重试。", file=__import__("sys").stderr)
-        print(f"详细错误：{exc}", file=__import__("sys").stderr)
+        import sys
+        print("未安装 Textual。运行 `pip install -e \".[tui]\"` 后重试。", file=sys.stderr)
+        print(f"详细错误：{exc}", file=sys.stderr)
         return 1
 
     class ChatApp(App):
@@ -36,7 +40,8 @@ def run_tui() -> int:
         CSS = """
         #main { height: 1fr; }
         #sessions { width: 32; border-right: solid $primary-darken-2; }
-        #chat { width: 1fr; height: 1fr; }
+        #messages { width: 1fr; height: 1fr; padding: 1 2; }
+        #messages Markdown { margin: 0 0 1 0; }
         #prompt { dock: bottom; }
         #suggestions {
             height: auto;
@@ -44,7 +49,6 @@ def run_tui() -> int:
             padding: 0 1;
             color: $text-muted;
         }
-        #suggestions .active { color: $secondary; text-style: bold; }
         """
 
         BINDINGS = [
@@ -62,24 +66,26 @@ def run_tui() -> int:
             self.pending_approval: dict[str, Any] | None = None
             self.suggestions: list[dict[str, Any]] = []
             self.suggestion_index = 0
+            self.stream_text = ""
+            self.turn_session: str | None = None
 
         @property
         def session_id(self) -> str | None:
             return self.model.current_id
+
+        @property
+        def messages(self) -> VerticalScroll:
+            return self.query_one("#messages", VerticalScroll)
 
         def compose(self) -> ComposeResult:
             yield Header()
             with Vertical():
                 with Horizontal(id="main"):
                     yield ListView(id="sessions")
-                    yield RichLog(id="chat", markup=True, wrap=True)
+                    yield VerticalScroll(id="messages")
                 yield Input(placeholder="输入消息，/ 执行斜杠命令，Enter 发送", id="prompt")
                 yield Static(id="suggestions")
             yield Footer()
-
-        @property
-        def chat(self) -> RichLog:
-            return self.query_one("#chat", RichLog)
 
         async def on_mount(self) -> None:
             await self.refresh_sessions()
@@ -87,10 +93,13 @@ def run_tui() -> int:
 
         # ── 会话 ─────────────────────────────────────────────────────────
         async def action_new_session(self) -> None:
+            if self.busy and self.session_id:
+                cancel_turn(self.session_id)
             session = self.model.create_session("新会话")
             self.pending_approval = None
+            self.busy = False
             await self.refresh_sessions(select_id=session.get("id"))
-            self.load_session(session.get("id") or "")
+            await self.load_session(session.get("id") or "")
 
         def action_focus_prompt(self) -> None:
             self.query_one("#prompt", Input).focus()
@@ -99,7 +108,6 @@ def run_tui() -> int:
             if not self.busy or not self.session_id:
                 return
             cancel_turn(self.session_id)
-            self.chat.write("\n[dim]已请求停止…[/]")
 
         async def refresh_sessions(self, select_id: str | None = None) -> None:
             session_list = self.query_one("#sessions", ListView)
@@ -114,25 +122,33 @@ def run_tui() -> int:
                 if session["id"] == target:
                     session_list.index = index
 
-        def load_session(self, session_id: str) -> None:
+        async def load_session(self, session_id: str) -> None:
             self.model.select(session_id)
-            chat = self.query_one("#chat", RichLog)
-            chat.clear()
+            await self.messages.remove_children()
             session = self.model.get_current()
-            chat.write(f"[bold]会话：{(session or {}).get('title', '')}[/]\n")
+            title = (session or {}).get("title", "")
+            await self.messages.mount(Markdown(f"# {title}"))
             for message in self.model.messages(session_id):
                 text = display_text(message.get("content", ""))
                 if message.get("role") == "user":
-                    chat.write(f"[bold cyan]你[/] {escape(text)}")
+                    await self.messages.mount(Markdown(f"> **你**\n\n{text}"))
                 else:
-                    chat.write(f"[bold green]Agent[/] {escape(text)}")
+                    await self.messages.mount(Markdown(text))
+            self.messages.scroll_end(animate=False)
 
         @on(ListView.Selected)
-        def on_session_selected(self, event) -> None:
+        async def on_session_selected(self, event) -> None:
             item_id = getattr(event.item, "id", "") or ""
             if not item_id.startswith("session-"):
                 return
-            self.load_session(item_id[len("session-"):])
+            target = item_id[len("session-"):]
+            if target == self.session_id:
+                return
+            if self.busy and self.session_id:
+                cancel_turn(self.session_id)
+            self.busy = False
+            self.pending_approval = None
+            await self.load_session(target)
 
         # ── / 命令补全 ──────────────────────────────────────────────────
         def render_suggestions(self) -> None:
@@ -193,10 +209,15 @@ def run_tui() -> int:
             approved = text.lower() in {"approve", "yes", "y", "同意", "允许"}
             if not approved and text.lower() not in {"deny", "no", "n", "拒绝"}:
                 self.pending_approval = approval
-                self.chat.write("[yellow]请输入 approve / deny 确认审批[/]")
+                self.stream_text += "\n\n> 请输入 approve 或 deny。"
+                self.run_worker(self.flush_stream(), group="stream", exclusive=True)
                 return
             decide_approval(str(approval.get("approval_id", "")), approved)
-            self.chat.write(f"[dim]{'已批准' if approved else '已拒绝'}：{approval.get('tool_name', '')}[/]")
+            self.stream_text += (
+                f"\n\n_{'已批准' if approved else '已拒绝'}："
+                f"{approval.get('tool_name', '')}_"
+            )
+            self.run_worker(self.flush_stream(), group="stream", exclusive=True)
 
         async def start_turn(self, text: str) -> None:
             if self.session_id is None:
@@ -204,69 +225,88 @@ def run_tui() -> int:
                 await self.refresh_sessions(select_id=session.get("id"))
             session_id = self.model.ensure_for_message(text)
             if not session_id:
-                self.chat.write("[red]无法创建会话[/]")
+                await self.messages.mount(Markdown("> 无法创建会话"))
                 return
 
+            await self.messages.mount(Markdown(f"> **你**\n\n{text}"))
+            self.stream_text = ""
+            await self.messages.mount(Markdown(id="stream-markdown"))
+
             self.busy = True
-            self.chat.write(f"[bold cyan]你[/] {escape(text)}")
+            self.turn_session = session_id
             command_mode = text.startswith("/") and is_core_command(text)
-            self.chat.write(
-                f"[dim]{'⚡ 执行命令…' if command_mode else '…'}"
-            )
             threading.Thread(
                 target=self._run_stream,
-                args=(text, command_mode),
+                args=(text, command_mode, session_id),
                 daemon=True,
             ).start()
 
-        def _run_stream(self, text: str, command_mode: bool) -> None:
+        def _run_stream(self, text: str, command_mode: bool, turn_session: str) -> None:
             try:
                 stream = (
-                    iter_command_events(self.session_id, text)
+                    iter_command_events(turn_session, text)
                     if command_mode
-                    else iter_chat_events(self.session_id, text)
+                    else iter_chat_events(turn_session, text)
                 )
                 for event in stream:
                     if event.get("kind") == "done":
                         break
-                    self.call_from_thread(self.render_event, event)
+                    self.call_from_thread(self.render_event, event, turn_session)
             except Exception as exc:
-                self.call_from_thread(self.render_event, {"kind": "error", "text": str(exc)})
+                self.call_from_thread(
+                    self.render_event,
+                    {"kind": "error", "text": str(exc)},
+                    turn_session,
+                )
             finally:
-                self.call_from_thread(self.finish_turn)
+                self.call_from_thread(self.finish_turn, turn_session)
 
-        def render_event(self, event: dict[str, Any]) -> None:
+        # ── 渲染（App 线程）─────────────────────────────────────────────
+        def render_event(self, event: dict[str, Any], turn_session: str) -> None:
+            if turn_session != self.session_id:
+                return
             kind = event.get("kind")
-            chat = self.query_one("#chat", RichLog)
             if kind == "token":
-                chat.write(escape(str(event.get("text", ""))))
+                self.stream_text += str(event.get("text", ""))
             elif kind == "tool_start":
-                chat.write(f"\n🔧 {escape(str(event.get('name', '')))}")
+                self.stream_text += f"\n\n🔧 **{event.get('name', '')}**"
             elif kind == "tool_end":
-                chat.write(f" ✓ {escape(str(event.get('name', '')))}")
+                self.stream_text += f"\n\n✅ **{event.get('name', '')}** 完成"
             elif kind == "approval_required":
                 self.pending_approval = event
-                chat.write(
-                    f"\n[yellow]⚠️ 需要确认工具调用：{escape(str(event.get('tool_name', '')))}\n"
-                    f"参数：{escape(json.dumps(event.get('arguments', {}), ensure_ascii=False))}\n"
-                    "输入 approve 或 deny[/]"
+                self.stream_text += (
+                    f"\n\n⚠️ **需要确认：{event.get('tool_name', '')}**\n\n"
+                    f"```json\n{json.dumps(event.get('arguments', {}), ensure_ascii=False)}\n```\n\n"
+                    "输入 `approve` 或 `deny`"
                 )
             elif kind == "command_start":
-                chat.write(f"\n⚡ {escape(str(event.get('raw', '')))}")
+                self.stream_text += f"\n\n⚡ `{event.get('raw', '')}`"
             elif kind == "command_progress":
-                chat.write(f"[dim]{escape(str(event.get('message', '')))}[/]")
+                self.stream_text += f"\n\n_{event.get('message', '')}_"
             elif kind == "command_result":
-                chat.write("\n" + escape(str(event.get("text", ""))))
+                self.stream_text += "\n\n" + str(event.get("text", ""))
             elif kind == "error":
-                chat.write(f"\n[red]错误：{escape(str(event.get('text', '')))}[/]")
+                self.stream_text += f"\n\n❌ **错误：{event.get('text', '')}**"
             elif kind == "cancelled":
-                chat.write("\n[dim]已取消[/]")
+                self.stream_text += "\n\n_已取消_"
+            self.run_worker(self.flush_stream(), group="stream", exclusive=True)
 
-        async def finish_turn(self) -> None:
-            self.busy = False
-            self.pending_approval = None
-            self.chat.write("\n")
-            await self.refresh_sessions(select_id=self.session_id)
+        async def flush_stream(self) -> None:
+            try:
+                markdown = self.query_one("#stream-markdown", Markdown)
+            except Exception:
+                return
+            await markdown.update(self.stream_text)
+            self.messages.scroll_end(animate=False)
+
+        def finish_turn(self, turn_session: str) -> None:
+            if turn_session == self.session_id:
+                self.busy = False
+                self.pending_approval = None
+            self.run_worker(
+                self.refresh_sessions(select_id=turn_session),
+                group="sessions-refresh",
+            )
 
     ChatApp().run()
     return 0
