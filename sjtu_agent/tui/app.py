@@ -78,6 +78,27 @@ if TEXTUAL_AVAILABLE:
         def session_id(self) -> str | None:
             return self.model.current_id
 
+        def _handle_exception(self, error: Exception) -> None:
+            """未捕获异常退出前，先把完整 traceback 写入运行时日志。"""
+            import datetime as _dt
+            import sys as _sys
+            import traceback
+            from sjtu_agent.paths import DATA_DIR
+
+            try:
+                log_dir = DATA_DIR / "logs"
+                log_dir.mkdir(parents=True, exist_ok=True)
+                with (log_dir / "tui_error.log").open("a", encoding="utf-8") as fh:
+                    fh.write(f"\n[{_dt.datetime.now().isoformat()}] TUI unhandled exception\n")
+                    traceback.print_exception(type(error), error, error.__traceback__, file=fh)
+                print(
+                    f"\n[TUI] 发生未处理异常，完整 traceback 已写入 {log_dir / 'tui_error.log'}",
+                    file=_sys.stderr,
+                )
+            except Exception:
+                pass
+            super()._handle_exception(error)
+
         @property
         def messages(self) -> VerticalScroll:
             return self.query_one("#messages", VerticalScroll)
