@@ -1768,11 +1768,32 @@ def _setup_shuiyuan_session(cfg: dict, username: str, password: str) -> dict:
 
         page = ctx.new_page()
         try:
-            page.goto("https://shuiyuan.sjtu.edu.cn/", wait_until="networkidle", timeout=20_000)
+            # jAccount SSO 页资源较多，networkidle 容易超时；先等 DOM 再按需等待。
+            page.goto("https://shuiyuan.sjtu.edu.cn/", wait_until="domcontentloaded", timeout=20_000)
         except Exception:
             pass
 
         if "jaccount" in page.url:
+            # 正常情况应停在 /jaccount/jalogin?... 登录页。若落在 /（只显示
+            # Welcome to SJTU jAccount）或登录框未渲染，说明重定向被旧 cookie
+            # 干扰。清除 cookie 后重新从水源发起 SSO。
+            for _attempt in range(2):
+                if "/jaccount/jalogin" in page.url and page.locator("#input-login-user").count():
+                    break
+                try:
+                    ctx.clear_cookies()
+                except Exception:
+                    pass
+                try:
+                    page.goto(
+                        "https://shuiyuan.sjtu.edu.cn/",
+                        wait_until="domcontentloaded",
+                        timeout=20_000,
+                    )
+                    page.wait_for_url("**/jaccount/jalogin**", timeout=15_000)
+                except Exception:
+                    pass
+
             if not username or not password:
                 _close()
                 return {"error": "需要 jAccount 凭据，请先用 save_credentials 配置"}
