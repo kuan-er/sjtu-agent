@@ -1,9 +1,9 @@
 """
-sjtu_agent/commands.py — 跨入口命令定义
+sjtu_agent/commands/defs.py — 跨入口命令定义
 
 飞书 / WebUI / CLI 共用同一份斜杠命令元数据。WebUI 通过
 /api/commands/resolve 把命令转换为自然语言提示后交给现有 Agent 工具链；
-Feishu Bot 的执行层仍在其本地注册表中，后续再统一抽取。
+命令执行层在 dispatch.py 和各领域模块中共享。
 """
 
 from __future__ import annotations

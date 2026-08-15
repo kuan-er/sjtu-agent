@@ -70,7 +70,7 @@ sjtu_agent/
   config.py           # ConfigStore singleton — typed, cached, hot-reloading access to config.json
   setup_wizard.py     # interactive first-run configuration (large, ~54KB)
   terminal_ui.py      # Rich-powered terminal helpers
-  commands.py         # shared slash-command metadata + WebUI command→prompt resolver
+  commands/           # shared slash-command metadata, prompt resolver, and execution handlers
   homework_agent.py   # Canvas homework fetching + Claude Code analysis
   vision.py           # dual-model vision — standalone vision model for image recognition
   logging.py          # unified logging (RotatingFileHandler + stdout mirror)
