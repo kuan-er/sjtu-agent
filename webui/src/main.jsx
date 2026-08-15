@@ -267,6 +267,8 @@ function App() {
   const [search, setSearch] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
+  const [commands, setCommands] = useState([]);
+  const [cmdIndex, setCmdIndex] = useState(0);
   const [theme, setThemeState] = useState(() => localStorage.getItem('sjtu-agent-theme') || 'dark');
   const [accent, setAccentState] = useState(() => localStorage.getItem('sjtu-agent-accent') || '#3b82f6');
   const abortRef = useRef(null);
@@ -274,6 +276,8 @@ function App() {
   const messagesRef = useRef(null);
   const sessionRef = useRef(null);
   const fileInputRef = useRef(null);
+  const textareaRef = useRef(null);
+  const commandItemRefs = useRef({});
 
   sessionRef.current = sessionId;
 
@@ -312,6 +316,7 @@ function App() {
   useEffect(() => {
     loadSessions();
     api('/api/config').then(data => setModel(data.model || '')).catch(() => {});
+    api('/api/commands').then(data => setCommands(data.commands || [])).catch(() => {});
   }, [loadSessions]);
 
   useEffect(() => {
@@ -390,6 +395,31 @@ function App() {
     try { await api('/api/attachments/' + attachment.id, { method: 'DELETE' }); } catch (_) {}
     setAttachments(prev => prev.filter(a => a.id !== attachment.id));
     setStagedFiles(prev => prev.filter(a => a.id !== attachment.id));
+  };
+
+  const chooseCommandPrompt = async (text) => {
+    const value = String(text || '').trim();
+    if (!value) return;
+    // 基础命令（无参数）直接用本地元数据，避免一次网络往返
+    const exact = commands.find(c => c.name === value);
+    if (exact) {
+      setInput(exact.prompt || value);
+    } else {
+      try {
+        const data = await api('/api/commands/resolve?text=' + encodeURIComponent(value));
+        setInput(data.prompt || value);
+      } catch (_) {
+        setInput(value);
+      }
+    }
+    setCmdIndex(0);
+    requestAnimationFrame(() => {
+      const ta = textareaRef.current;
+      if (ta) {
+        ta.focus();
+        ta.setSelectionRange(ta.value.length, ta.value.length);
+      }
+    });
   };
 
   const parseSSE = (text) => {
@@ -537,10 +567,71 @@ function App() {
   };
 
   const onKeyDown = (e) => {
+    const panelOpen = commandOpen && commandCandidates.length > 0;
+    if (panelOpen) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setCmdIndex(i => Math.min(i + 1, commandCandidates.length - 1));
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setCmdIndex(i => Math.max(i - 1, 0));
+        return;
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const active = Math.min(cmdIndex, commandCandidates.length - 1);
+        if (commandCandidates[active]) chooseCommandPrompt(commandCandidates[active].value);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setInput('');
+        setCmdIndex(0);
+        return;
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
   };
 
   const activeTitle = useMemo(() => sessions.find(s => s.id === sessionId)?.title || '开始新会话', [sessions, sessionId]);
+  const commandQuery = useMemo(() => input.trimStart(), [input]);
+  const commandOpen = commandQuery.startsWith('/');
+  const commandCandidates = useMemo(() => {
+    if (!commandOpen) return [];
+    const q = commandQuery.toLowerCase();
+    const qName = q.split(/\s+/)[0];
+    const seen = new Set();
+    const out = [];
+    const push = (value, command) => {
+      if (!value || seen.has(value)) return;
+      seen.add(value);
+      out.push({
+        value,
+        label: command.label,
+        icon: command.icon,
+        description: command.description,
+        kind: value === command.name ? 'command' : 'example',
+      });
+    };
+    for (const command of commands) {
+      if (command.name.toLowerCase().startsWith(q)) push(command.name, command);
+      // 输入了完整命令名 + 参数时，补全其示例变体（如 /hw d → /hw do 3）
+      if (command.name.toLowerCase() === qName) {
+        for (const example of command.examples || []) {
+          if (example.toLowerCase().startsWith(q)) push(example, command);
+        }
+      }
+    }
+    return out.slice(0, 8);
+  }, [commands, commandOpen, commandQuery]);
+  const activeCmdIndex = commandCandidates.length ? Math.min(cmdIndex, commandCandidates.length - 1) : 0;
+  useEffect(() => {
+    const active = commandCandidates[activeCmdIndex];
+    const el = active && commandItemRefs.current[active.value];
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+  }, [activeCmdIndex, commandCandidates]);
   const filteredSessions = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return sessions;
@@ -624,10 +715,44 @@ function App() {
           </div>
         )}
         <div className="composer-wrap">
+          <div className="quick-chips">
+            {commands.filter(c => c.chip !== false).map(c => (
+              <button key={c.name} className="quick-chip" title={c.description} onClick={() => chooseCommandPrompt(c.name)}>
+                <span className="quick-chip-icon">{c.icon}</span>{c.label}
+              </button>
+            ))}
+            <button className="quick-chip" title="外观与模型设置" onClick={() => setShowSettings(true)}>
+              <span className="quick-chip-icon">⚙️</span>配置
+            </button>
+          </div>
           <div className="composer">
+            {commandOpen && commandCandidates.length > 0 && (
+              <div className="command-panel" role="listbox" aria-label="命令补全">
+                {commandCandidates.map((candidate, i) => (
+                  <button
+                    key={candidate.value}
+                    ref={el => { if (el) commandItemRefs.current[candidate.value] = el; }}
+                    role="option"
+                    aria-selected={i === activeCmdIndex}
+                    className={'command-item' + (i === activeCmdIndex ? ' active' : '')}
+                    onMouseDown={e => e.preventDefault()}
+                    onMouseEnter={() => setCmdIndex(i)}
+                    onClick={() => chooseCommandPrompt(candidate.value)}
+                  >
+                    <span className="command-item-head">
+                      <span className="command-icon">{candidate.icon}</span>
+                      <span className="command-name">{candidate.value}</span>
+                      <span className="command-label">{candidate.label}</span>
+                    </span>
+                    <span className="command-desc">{candidate.description}</span>
+                  </button>
+                ))}
+                <div className="command-hint">↑↓ 选择 · Enter 确认 · Esc 关闭</div>
+              </div>
+            )}
             <input ref={fileInputRef} type="file" multiple style={{ display: 'none' }} onChange={e => { uploadFiles(Array.from(e.target.files || [])); e.target.value = ''; }} />
             <button className="attach-btn" title="上传附件" onClick={() => fileInputRef.current && fileInputRef.current.click()}>📎</button>
-            <textarea rows="1" value={input} onChange={e => setInput(e.target.value)} onKeyDown={onKeyDown} placeholder="输入消息，Enter 发送，Shift+Enter 换行" />
+            <textarea ref={textareaRef} rows="1" value={input} onChange={e => { setInput(e.target.value); setCmdIndex(0); }} onKeyDown={onKeyDown} placeholder="输入消息，/ 唤起命令，Enter 发送，Shift+Enter 换行" />
             {sending ? <button className="send-btn stop" onClick={stop}>停止</button> : <button className="send-btn" onClick={send}>发送</button>}
           </div>
         </div>

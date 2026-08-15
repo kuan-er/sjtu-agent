@@ -1005,6 +1005,17 @@ class _Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
             return
+        elif path == "/api/commands":
+            if not _check_auth(self): self._send_json({"error":"unauthorized"}, 403); return
+            from sjtu_agent.commands import command_defs
+            self._send_json({"commands": command_defs()})
+        elif path == "/api/commands/resolve":
+            if not _check_auth(self): self._send_json({"error":"unauthorized"}, 403); return
+            from urllib.parse import parse_qs
+            from sjtu_agent.commands import command_prompt
+            qs = parse_qs(urlparse(self.path).query)
+            text = (qs.get("text") or [""])[0]
+            self._send_json({"prompt": command_prompt(text)})
         elif path == "/api/config":
             if not _check_auth(self): self._send_json({"error":"unauthorized"}, 403); return
             self._send_json(_get_config_values())

@@ -201,7 +201,54 @@ body {
 
 .composer-wrap { flex: 0 0 auto; border-top: 1px solid var(--border); padding: 14px 20px; background: var(--panel); }
 
-.composer { display: flex; align-items: flex-end; gap: 10px; max-width: 900px; margin: 0 auto; }
+.quick-chips { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; max-width: 900px; margin: 0 auto 10px; }
+
+.quick-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
+  border-radius: 999px; padding: 6px 12px; font-size: 13px; font-family: inherit; cursor: pointer;
+}
+
+.quick-chip:hover { border-color: var(--accent); }
+.quick-chip-icon { font-size: 14px; line-height: 1; }
+
+.composer { position: relative; display: flex; align-items: flex-end; gap: 10px; max-width: 900px; margin: 0 auto; }
+
+.command-panel {
+  position: absolute; bottom: calc(100% + 10px); left: 0; right: 0; z-index: 15;
+  display: flex; flex-direction: column; gap: 2px; padding: 6px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0,0,0,.25);
+  max-height: min(320px, 45vh); overflow: auto;
+}
+
+.command-item {
+  display: flex; flex-direction: column; gap: 3px; width: 100%; text-align: left;
+  border: 0; background: transparent; color: var(--text); border-radius: 8px;
+  padding: 8px 10px; cursor: pointer; font-family: inherit;
+}
+
+.command-item:hover, .command-item.active { background: var(--panel-2); }
+.command-item.active { box-shadow: inset 0 0 0 1px var(--accent); }
+
+.command-item-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.command-icon { font-size: 14px; line-height: 1; }
+.command-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px; font-weight: 600;
+}
+.command-label {
+  flex: 0 0 auto; font-size: 12px; color: var(--text-2);
+  background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px;
+}
+.command-desc {
+  padding-left: 22px; font-size: 12px; color: var(--text-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.command-hint {
+  margin-top: 2px; padding: 6px 10px 4px; font-size: 11px; color: var(--text-2);
+  border-top: 1px solid var(--border); text-align: right;
+}
 
 .composer textarea {
   flex: 1; resize: none; border: 1px solid var(--border);
