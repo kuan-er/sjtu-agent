@@ -503,6 +503,15 @@ def _get_chat_client():
         return client, model, "openai"
 
 
+def _date_context() -> str:
+    import datetime as _dt
+    now = _dt.datetime.now()
+    return (
+        f"\n\n## 当前时间\n"
+        f"现在：{now.strftime('%Y年%m月%d日 %H:%M')}，星期{'一二三四五六日'[now.weekday()]}。"
+    )
+
+
 def _stream_chat(user_message: str, session_id: str | None = None):
     """生成器：将 user_message 发给 LLM，支持完整 tool_use 循环，以 SSE 格式 yield 数据行。
     事件类型：
@@ -512,17 +521,11 @@ def _stream_chat(user_message: str, session_id: str | None = None):
       {error: "..."} — 错误
       [DONE] — 结束
     """
-    import datetime as _dt
-
     # 延迟导入 agent 模块（避免循环依赖 + 启动时间）
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
     import agent as _agent
 
-    _now = _dt.datetime.now()
-    _date_ctx = (
-        f"\n\n## 当前时间\n"
-        f"现在：{_now.strftime('%Y年%m月%d日 %H:%M')}，星期{'一二三四五六日'[_now.weekday()]}。"
-    )
+    _date_ctx = _date_context()
 
     history = _build_history(_agent, session_id)
     user_entry = {"role": "user", "content": _date_ctx + "\n\n" + user_message}
@@ -570,6 +573,41 @@ def _stream_chat(user_message: str, session_id: str | None = None):
                 _session_store.append_message(session_id, "assistant", message["content"])
 
     _clear_cancel_flag(cancel_key)
+    yield "data: [DONE]\n\n"
+
+
+def _stream_command(command: str, session_id: str | None = None):
+    """生成器：通过共享命令层执行斜杠命令，以 SSE 格式返回进度和结果。
+
+    事件类型：
+      {command_start: {name, raw}} — 命令开始
+      {command_progress: {stage, message}} — 进度
+      {command_result: {name, text}} — 命令结果（Markdown 文本）
+      {error: "..."} — 错误
+      [DONE] — 结束
+    """
+    from sjtu_agent.commands import parse_command, run_command
+
+    def _sse(obj):
+        return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
+
+    parsed = parse_command(command)
+    name = parsed[0] if parsed else command
+    user_entry = {"role": "user", "content": _date_context() + "\n\n" + command}
+    if session_id:
+        _session_store.append_message(session_id, "user", user_entry["content"])
+
+    yield _sse({"command_start": {"name": name, "raw": command}})
+    yield _sse({"command_progress": {"stage": "running", "message": f"正在执行 {name}…"}})
+
+    result = run_command(command, user_id=session_id or "")
+    if result is None:
+        result = f"未知命令：{command}"
+
+    if session_id:
+        _session_store.append_message(session_id, "assistant", result)
+
+    yield _sse({"command_result": {"name": name, "text": result}})
     yield "data: [DONE]\n\n"
 
 
@@ -1169,6 +1207,34 @@ class _Handler(BaseHTTPRequestHandler):
             session_id = body.get("session_id") or "__legacy__"
             _mark_cancelled(session_id)
             self._send_json({"ok": True})
+        elif path == "/api/command":
+            from sjtu_agent.commands import command_prompt, is_core_command
+            body = self._read_body()
+            command = str(body.get("command") or "").strip()
+            session_id = body.get("session_id") or None
+            if not command:
+                self._send_json({"error": "命令不能为空"}, 400)
+                return
+            if session_id and not _session_store.get_session(session_id):
+                self._send_json({"error": "session not found"}, 404)
+                return
+            if not is_core_command(command):
+                self._send_json({
+                    "error": "unknown command",
+                    "prompt": command_prompt(command),
+                }, 400)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            for chunk in _stream_command(command, session_id=session_id):
+                try:
+                    self.wfile.write(chunk.encode("utf-8"))
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    break
         elif path == "/api/chat":
             body = self._read_body()
             user_msg = body.get("message", "").strip()

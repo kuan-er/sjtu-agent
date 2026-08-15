@@ -147,6 +147,18 @@ function ToolCard({ event }) {
   );
 }
 
+function CommandCard({ run }) {
+  return (
+    <div className={'command-card' + (run.status === 'running' ? ' running' : '')}>
+      <div className="command-card-head">
+        {run.status === 'running' ? <span className="tool-spinner" /> : <span className="tool-done">✓</span>}
+        <span className="tool-name">命令：{run.raw}</span>
+      </div>
+      <div className="command-card-body">{run.progress || '正在执行…'}</div>
+    </div>
+  );
+}
+
 function Message({ message }) {
   const role = message.role === 'user' ? 'user' : 'assistant';
   const [copied, setCopied] = useState(false);
@@ -269,6 +281,8 @@ function App() {
   const [mobileNav, setMobileNav] = useState(false);
   const [commands, setCommands] = useState([]);
   const [cmdIndex, setCmdIndex] = useState(0);
+  const [commandPanelOpen, setCommandPanelOpen] = useState(false);
+  const [commandRun, setCommandRun] = useState(null);
   const [theme, setThemeState] = useState(() => localStorage.getItem('sjtu-agent-theme') || 'dark');
   const [accent, setAccentState] = useState(() => localStorage.getItem('sjtu-agent-accent') || '#3b82f6');
   const abortRef = useRef(null);
@@ -397,6 +411,16 @@ function App() {
     setStagedFiles(prev => prev.filter(a => a.id !== attachment.id));
   };
 
+  const focusComposer = () => {
+    requestAnimationFrame(() => {
+      const ta = textareaRef.current;
+      if (ta) {
+        ta.focus();
+        ta.setSelectionRange(ta.value.length, ta.value.length);
+      }
+    });
+  };
+
   const chooseCommandPrompt = async (text) => {
     const value = String(text || '').trim();
     if (!value) return;
@@ -413,13 +437,18 @@ function App() {
       }
     }
     setCmdIndex(0);
-    requestAnimationFrame(() => {
-      const ta = textareaRef.current;
-      if (ta) {
-        ta.focus();
-        ta.setSelectionRange(ta.value.length, ta.value.length);
-      }
-    });
+    setCommandPanelOpen(false);
+    focusComposer();
+  };
+
+  const insertCommandText = (text) => {
+    const value = String(text || '').trim();
+    if (!value) return;
+    const known = commands.find(c => c.name === value.split(/\s+/)[0].toLowerCase());
+    setInput(known && known.exec !== true && known.prompt ? known.prompt : value);
+    setCmdIndex(0);
+    setCommandPanelOpen(false);
+    focusComposer();
   };
 
   const parseSSE = (text) => {
@@ -433,10 +462,107 @@ function App() {
     return events;
   };
 
+  const commandNameOf = (text) => String(text || '').trim().split(/\s+/)[0].toLowerCase();
+  const isExecutableCommand = (text) => {
+    const name = commandNameOf(text);
+    return name.startsWith('/') && commands.some(c => c.exec === true && c.name === name);
+  };
+
+  const sendCommand = async (commandText) => {
+    if (!commandText || sending) return;
+    setSending(true);
+    setInput('');
+    partialRef.current = '';
+
+    let id = sessionId;
+    let wasNew = false;
+    if (!id) {
+      try {
+        const session = await createSession();
+        id = session.id;
+        wasNew = true;
+        setSessionId(id);
+      } catch (err) { setSending(false); return; }
+    }
+
+    setMessages(prev => [...prev, { role: 'user', content: commandText }]);
+    ensureSessionTitle(id, commandText, wasNew);
+    setStagedFiles([]);
+    setStream([]);
+    setApproval(null);
+    setCommandRun({ raw: commandText, status: 'running', progress: '' });
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+    try {
+      const res = await fetch('/api/command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: commandText, session_id: id }),
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        let message = 'HTTP ' + res.status;
+        try {
+          const data = await res.json();
+          if (data && data.error) message = data.error;
+          if (data && data.prompt) setInput(data.prompt);
+        } catch (_) {}
+        throw new Error(message);
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const event of parseSSE(lines.join('\n'))) {
+          if (event.command_start) {
+            setCommandRun(prev => prev ? { ...prev, name: event.command_start.name } : prev);
+          }
+          if (event.command_progress) {
+            setCommandRun(prev => prev ? { ...prev, progress: event.command_progress.message } : prev);
+          }
+          if (event.command_result) {
+            setMessages(prev => [...prev, { role: 'assistant', content: event.command_result.text }]);
+            setCommandRun(null);
+          }
+          if (event.error) throw new Error(event.error);
+        }
+      }
+      setCommandRun(null);
+      await loadSession(id);
+      await loadSessions();
+    } catch (err) {
+      setCommandRun(null);
+      if (err.name === 'AbortError') {
+        setMessages(prev => [...prev, { role: 'assistant', content: '（已停止）' }]);
+      } else {
+        setMessages(prev => [...prev, { role: 'assistant', content: '❌ ' + (err.message || '命令执行失败') }]);
+      }
+    } finally {
+      abortRef.current = null;
+      setSending(false);
+    }
+  };
+
   const send = async () => {
     const rawMessage = input.trim();
     if ((!rawMessage && stagedFiles.length === 0) || sending) return;
-    const message = rawMessage || '请查看我上传的附件';
+    if (rawMessage.startsWith('/') && stagedFiles.length === 0 && isExecutableCommand(rawMessage)) {
+      await sendCommand(rawMessage);
+      return;
+    }
+    let message = rawMessage || '请查看我上传的附件';
+    if (rawMessage.startsWith('/')) {
+      const name = commandNameOf(rawMessage);
+      const known = commands.find(c => c.name === name);
+      if (known && known.exec !== true) message = known.prompt || rawMessage;
+    }
     setSending(true);
     setInput('');
     partialRef.current = '';
@@ -552,6 +678,7 @@ function App() {
     if (abortRef.current) abortRef.current.abort();
     try { await api('/api/chat/cancel', { method: 'POST', body: JSON.stringify({ session_id: id || '' }) }); } catch (_) {}
     setStream(prev => prev.map(t => t.status === 'running' ? { ...t, status: 'cancelled' } : t));
+    setCommandRun(null);
     setApproval(null);
     setMessages(prev => {
       const copy = prev.slice();
@@ -567,7 +694,7 @@ function App() {
   };
 
   const onKeyDown = (e) => {
-    const panelOpen = commandOpen && commandCandidates.length > 0;
+    const panelOpen = commandPanelOpen && commandOpen && commandCandidates.length > 0;
     if (panelOpen) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
@@ -582,13 +709,14 @@ function App() {
       if (e.key === 'Enter') {
         e.preventDefault();
         const active = Math.min(cmdIndex, commandCandidates.length - 1);
-        if (commandCandidates[active]) chooseCommandPrompt(commandCandidates[active].value);
+        if (commandCandidates[active]) insertCommandText(commandCandidates[active].value);
         return;
       }
       if (e.key === 'Escape') {
         e.preventDefault();
         setInput('');
         setCmdIndex(0);
+        setCommandPanelOpen(false);
         return;
       }
     }
@@ -694,6 +822,7 @@ function App() {
                 </React.Fragment>
               ))}
               {stream.map((t, i) => <ToolCard key={i} event={t} />)}
+              {commandRun && <CommandCard run={commandRun} />}
             </>
           )}
         </div>
@@ -726,7 +855,7 @@ function App() {
             </button>
           </div>
           <div className="composer">
-            {commandOpen && commandCandidates.length > 0 && (
+            {commandPanelOpen && commandOpen && commandCandidates.length > 0 && (
               <div className="command-panel" role="listbox" aria-label="命令补全">
                 {commandCandidates.map((candidate, i) => (
                   <button
@@ -737,7 +866,7 @@ function App() {
                     className={'command-item' + (i === activeCmdIndex ? ' active' : '')}
                     onMouseDown={e => e.preventDefault()}
                     onMouseEnter={() => setCmdIndex(i)}
-                    onClick={() => chooseCommandPrompt(candidate.value)}
+                    onClick={() => insertCommandText(candidate.value)}
                   >
                     <span className="command-item-head">
                       <span className="command-icon">{candidate.icon}</span>
@@ -747,12 +876,12 @@ function App() {
                     <span className="command-desc">{candidate.description}</span>
                   </button>
                 ))}
-                <div className="command-hint">↑↓ 选择 · Enter 确认 · Esc 关闭</div>
+                <div className="command-hint">↑↓ 选择 · Enter 填入 · 再按 Enter 执行 · Esc 关闭</div>
               </div>
             )}
             <input ref={fileInputRef} type="file" multiple style={{ display: 'none' }} onChange={e => { uploadFiles(Array.from(e.target.files || [])); e.target.value = ''; }} />
             <button className="attach-btn" title="上传附件" onClick={() => fileInputRef.current && fileInputRef.current.click()}>📎</button>
-            <textarea ref={textareaRef} rows="1" value={input} onChange={e => { setInput(e.target.value); setCmdIndex(0); }} onKeyDown={onKeyDown} placeholder="输入消息，/ 唤起命令，Enter 发送，Shift+Enter 换行" />
+            <textarea ref={textareaRef} rows="1" value={input} onChange={e => { const next = e.target.value; setInput(next); setCmdIndex(0); setCommandPanelOpen(next.trimStart().startsWith('/')); }} onKeyDown={onKeyDown} placeholder="输入消息，/ 唤起命令，Enter 发送，Shift+Enter 换行" />
             {sending ? <button className="send-btn stop" onClick={stop}>停止</button> : <button className="send-btn" onClick={send}>发送</button>}
           </div>
         </div>

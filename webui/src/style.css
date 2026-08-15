@@ -199,6 +199,16 @@ body {
 .tool-card.open .tool-body { display: block; }
 .tool-section { color: var(--text); font-weight: 600; margin: 10px 0 4px; }
 
+.command-card {
+  border: 1px solid var(--border); border-radius: 10px;
+  margin: 0 0 16px 40px; background: var(--panel);
+}
+.command-card-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px; font-size: 14px;
+}
+.command-card-body { padding: 0 12px 12px 32px; font-size: 13px; color: var(--text-2); }
+
 .composer-wrap { flex: 0 0 auto; border-top: 1px solid var(--border); padding: 14px 20px; background: var(--panel); }
 
 .quick-chips { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; max-width: 900px; margin: 0 auto 10px; }

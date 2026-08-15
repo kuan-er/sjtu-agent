@@ -28,6 +28,7 @@ def test_command_defs_cover_webui_commands():
             "prompt",
             "examples",
             "chip",
+            "exec",
         }
         assert item["name"].startswith("/")
         assert item["prompt"]
@@ -52,6 +53,18 @@ def test_chip_flags():
     assert data["/news_block"] is False
     assert data["/news_reset"] is False
     assert data["/help"] is False
+
+
+def test_exec_flags_match_shared_registry():
+    data = {item["name"]: item["exec"] for item in command_defs()}
+    assert {name for name, can_exec in data.items() if can_exec} == {
+        "/hw",
+        "/news",
+        "/news_block",
+        "/news_reset",
+        "/eat",
+        "/template",
+    }
 
 
 def test_plain_text_passes_through():

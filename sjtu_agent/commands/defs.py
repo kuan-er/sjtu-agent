@@ -225,6 +225,7 @@ def command_prompt(text: str) -> str:
 
 def command_defs() -> list[dict]:
     """导出给 /api/commands 的 JSON-safe 命令元数据。"""
+    from .dispatch import CORE_COMMAND_REGISTRY
     return [
         {
             "name": c.name,
@@ -234,6 +235,7 @@ def command_defs() -> list[dict]:
             "prompt": c.prompt,
             "examples": list(c.examples),
             "chip": c.chip,
+            "exec": c.name in CORE_COMMAND_REGISTRY,
         }
         for c in COMMANDS
     ]
