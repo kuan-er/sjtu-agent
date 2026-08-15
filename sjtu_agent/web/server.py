@@ -297,6 +297,23 @@ def _get_config_values() -> dict:
 # ── 聊天会话（旧版全局内存 + 新版 SQLite 会话） ────────────────────────────────
 
 _legacy_chat_history: list[dict] = []   # 旧版无 session_id 的全局会话
+_cancel_lock = threading.Lock()
+_cancel_flags: dict[str, bool] = {}
+
+
+def _mark_cancelled(key: str) -> None:
+    with _cancel_lock:
+        _cancel_flags[key] = True
+
+
+def _clear_cancel_flag(key: str) -> None:
+    with _cancel_lock:
+        _cancel_flags.pop(key, None)
+
+
+def _is_cancelled(key: str) -> bool:
+    with _cancel_lock:
+        return bool(_cancel_flags.get(key, False))
 
 
 def _system_message(_agent) -> dict:
@@ -405,6 +422,8 @@ def _stream_chat(user_message: str, session_id: str | None = None):
     user_entry = {"role": "user", "content": _date_ctx + "\n\n" + user_message}
     history.append(user_entry)
     turn_start = len(history)
+    cancel_key = session_id or "__legacy__"
+    _clear_cancel_flag(cancel_key)
     if session_id:
         _session_store.append_message(session_id, "user", user_entry["content"])
 
@@ -422,20 +441,29 @@ def _stream_chat(user_message: str, session_id: str | None = None):
     def _sse(obj):
         return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
 
+    cancelled = False
     try:
         if proto == "anthropic":
-            yield from _stream_chat_anthropic(client, model, _agent, MAX_TOOL_ROUNDS, _sse, history)
+            inner = _stream_chat_anthropic(client, model, _agent, MAX_TOOL_ROUNDS, _sse, history)
         else:
-            yield from _stream_chat_openai(client, model, _agent, MAX_TOOL_ROUNDS, _sse, history)
+            inner = _stream_chat_openai(client, model, _agent, MAX_TOOL_ROUNDS, _sse, history)
+
+        for chunk in inner:
+            if _is_cancelled(cancel_key):
+                cancelled = True
+                yield _sse({"cancelled": True})
+                break
+            yield chunk
     except Exception as exc:
         yield _sse({"error": str(exc)})
 
     # 流结束后落盘本轮新增的 assistant 文本（新版会话）。
-    if session_id:
+    if session_id and not cancelled:
         for message in history[turn_start:]:
             if message.get("role") == "assistant" and isinstance(message.get("content"), str):
                 _session_store.append_message(session_id, "assistant", message["content"])
 
+    _clear_cancel_flag(cancel_key)
     yield "data: [DONE]\n\n"
 
 
@@ -910,6 +938,11 @@ class _Handler(BaseHTTPRequestHandler):
             body = self._read_body()
             session = _session_store.create_session(body.get("title") or "")
             self._send_json(session, 201)
+        elif path == "/api/chat/cancel":
+            body = self._read_body()
+            session_id = body.get("session_id") or "__legacy__"
+            _mark_cancelled(session_id)
+            self._send_json({"ok": True})
         elif path == "/api/chat":
             body = self._read_body()
             user_msg = body.get("message", "").strip()
