@@ -58,6 +58,7 @@ from sjtu_agent.feishu.rendering import (
 )
 from sjtu_agent.feishu.conversations import FeishuConversationManager
 from sjtu_agent.logging import get_logger
+from sjtu_agent.commands import CommandResult
 from sjtu_agent.commands.homework import cmd_hw as _shared_cmd_hw
 from sjtu_agent.commands.news import (
     cmd_news as _cmd_news,
@@ -713,10 +714,14 @@ def _handle_commands(open_id: str, text: str) -> str | None:
         return f"未知命令：{cmd}。输入 /help 查看可用命令。"
     # 统一错误处理：任何命令执行出错都返回可读信息，不崩 bot
     try:
-        return handler(open_id, parts)
+        result = handler(open_id, parts)
     except Exception as e:
         import traceback
         return f"[命令错误] `{cmd}` 执行出错：{e}\n```\n{traceback.format_exc()[-300:]}\n```"
+    # 共享执行层返回结构化结果，飞书只消费 Markdown 文本
+    if isinstance(result, CommandResult):
+        return result.text
+    return result
 
 
 def _process_hw_command(sender_open_id: str, message_id: str, text: str) -> None:

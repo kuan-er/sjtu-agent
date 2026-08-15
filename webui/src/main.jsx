@@ -123,6 +123,182 @@ function SpecialResult({ name, result }) {
   return null;
 }
 
+const COMMAND_RESULT_MARKER = '__SJTU_COMMAND_RESULT__';
+const NEWS_SOURCE_LABELS = { jwc: '教务处', shuiyuan: '水源社区', official: '交大新闻网', canvas: 'Canvas' };
+
+function encodeCommandResult(result) {
+  return COMMAND_RESULT_MARKER + JSON.stringify({
+    view: result.view || 'markdown',
+    text: result.text || '',
+    data: result.data || {},
+  });
+}
+
+function tryParseCommandResult(content) {
+  if (typeof content !== 'string' || !content.startsWith(COMMAND_RESULT_MARKER)) return null;
+  try {
+    const payload = JSON.parse(content.slice(COMMAND_RESULT_MARKER.length));
+    return payload && typeof payload === 'object' ? payload : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function CommandText({ text }) {
+  return text ? <div className="markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }} /> : null;
+}
+
+function ResultDetails({ text }) {
+  if (!text) return null;
+  return (
+    <details className="command-details">
+      <summary>查看完整文本</summary>
+      <CommandText text={text} />
+    </details>
+  );
+}
+
+function DiningResult({ data, text, onCommand }) {
+  if (data.mode === 'invalid_campus' || data.mode === 'error' || data.ok === false) return <CommandText text={text} />;
+  const recs = data.recommendations || [];
+  const canteens = data.canteens || [];
+  const campusButtons = ['闵行', '徐汇', '张江'].filter(c => c !== data.campus);
+  return (
+    <div className="command-card-view">
+      <div className="command-card-title">
+        🍽️ {data.meal_type ? data.meal_type + '推荐' : '食堂拥挤度'} · {data.campus}校区
+        <span className="command-card-actions">
+          {campusButtons.map(c => (
+            <button key={c} className="card-chip" onClick={() => onCommand('/eat ' + c)}>{c}</button>
+          ))}
+        </span>
+      </div>
+      {data.summary && <p className="command-card-desc">{data.summary}</p>}
+      <div className="result-cards">
+        {recs.map((r, i) => (
+          <div key={i} className="result-card">
+            <strong>{r.canteen_name} · {r.overall_label}（{r.overall_rate}%）</strong>
+            <span>{r.reasons && r.reasons.join('；')}</span>
+            {r.recommended_sub_areas && <span>推荐窗口：{r.recommended_sub_areas.slice(0, 3).join('、')}</span>}
+          </div>
+        ))}
+        {canteens.map((c, i) => (
+          <div key={'c' + i} className="result-card">
+            <strong>{c.name} · {c.overall_label}（{c.overall_rate}%）</strong>
+          </div>
+        ))}
+      </div>
+      <ResultDetails text={text} />
+    </div>
+  );
+}
+
+function NewsResult({ data, text, onCommand }) {
+  const items = data.items || [];
+  if (items.length === 0) return <CommandText text={text} />;
+  return (
+    <div className="command-card-view">
+      <div className="command-card-title">📰 校园新闻 · {items.length} 条</div>
+      <div className="result-cards">
+        {items.map((item) => {
+          const blockKey = item.category || NEWS_SOURCE_LABELS[item.source] || item.source;
+          return (
+            <a key={item.id} className="result-card" href={item.url} target="_blank" rel="noreferrer">
+              <strong>{item.title}</strong>
+              <span>{NEWS_SOURCE_LABELS[item.source] || item.source}{item.category ? ' · ' + item.category : ''}{item.reason ? ' · ' + item.reason : ''}</span>
+              <span>{item.summary}</span>
+              <button className="card-chip" onClick={(e) => { e.preventDefault(); onCommand('/news_block ' + blockKey); }}>屏蔽该分类</button>
+            </a>
+          );
+        })}
+      </div>
+      <ResultDetails text={text} />
+    </div>
+  );
+}
+
+function HomeworkResult({ data, text, onCommand }) {
+  const items = data.assignments || [];
+  if (!Array.isArray(data.assignments) || items.length === 0) return <CommandText text={text} />;
+  const isPast = data.kind === 'past' || data.kind === 'all' || data.include_past;
+  return (
+    <div className="command-card-view">
+      <div className="command-card-title">📝 作业列表 · {items.length} 项</div>
+      <div className="result-cards">
+        {items.map(h => (
+          <div key={h.index} className="result-card">
+            <strong>[{h.index}] {h.course} — {h.name}</strong>
+            <span>截止：{h.due || '未知'}{h.days_left !== null && h.days_left !== undefined ? ` · ${h.days_left > 0 ? h.days_left + ' 天后' : h.days_left === 0 ? '今天截止' : '已截止'}` : ''}{h.submitted ? ' · 已提交' : ''}</span>
+            <button className="card-chip" onClick={() => onCommand(isPast ? `/hw past do ${h.index}` : `/hw do ${h.index}`)}>分析</button>
+          </div>
+        ))}
+      </div>
+      <ResultDetails text={text} />
+    </div>
+  );
+}
+
+function TemplateResult({ view, data, text, onCommand }) {
+  if (view === 'template_list') {
+    if (!data.templates || data.templates.length === 0) return <CommandText text={text} />;
+    return (
+      <div className="command-card-view">
+        <div className="command-card-title">📚 LaTeX 模板</div>
+        <div className="result-cards">
+          {(data.templates || []).map(t => (
+            <div key={t.name} className="result-card">
+              <strong>{t.name}</strong>
+              <span>{t.description}</span>
+              <button className="card-chip" onClick={() => onCommand('/template ' + t.name)}>套用</button>
+            </div>
+          ))}
+        </div>
+        <ResultDetails text={text} />
+      </div>
+    );
+  }
+  if (view === 'template_compile') {
+    return (
+      <div className="command-card-view">
+        <div className="command-card-title">{data.ok ? '✅ LaTeX 编译成功' : '❌ LaTeX 编译失败'}</div>
+        {data.ok && <p className="command-card-desc">PDF：{data.pdf}（{data.size_kb} KB）</p>}
+        <ResultDetails text={text} />
+      </div>
+    );
+  }
+  if (view === 'template_clone' || view === 'template_apply' || view === 'template_push') {
+    return (
+      <div className="command-card-view">
+        <div className="command-card-title">{data.ok ? '✅' : '❌'} {view === 'template_clone' ? '模板克隆' : view === 'template_push' ? '推送到 Overleaf' : '套用模板'}</div>
+        {data.name && <p className="command-card-desc">{data.name}</p>}
+        <ResultDetails text={text} />
+      </div>
+    );
+  }
+  return <ResultDetails text={text} />;
+}
+
+function NewsPreferenceResult({ data, text }) {
+  if (data.ok === false) return <CommandText text={text} />;
+  return (
+    <div className="command-card-view">
+      <div className="command-card-title">{data.ok ? '✅' : '⚠️'} 新闻偏好</div>
+      {data.category && <p className="command-card-desc">已屏蔽：{data.category}</p>}
+      <ResultDetails text={text} />
+    </div>
+  );
+}
+
+function CommandResultMessage({ result, onCommand }) {
+  const { view, text, data } = result;
+  if (view === 'dining') return <DiningResult data={data || {}} text={text} onCommand={onCommand} />;
+  if (view === 'news') return <NewsResult data={data || {}} text={text} onCommand={onCommand} />;
+  if (view === 'homework') return <HomeworkResult data={data || {}} text={text} onCommand={onCommand} />;
+  if (view.startsWith('template_')) return <TemplateResult view={view} data={data || {}} text={text} onCommand={onCommand} />;
+  if (view === 'news_preference') return <NewsPreferenceResult data={data || {}} text={text} />;
+  return <CommandText text={text} />;
+}
+
 function ToolCard({ event }) {
   const [open, setOpen] = useState(false);
   const status = event.status || 'running';
@@ -528,7 +704,7 @@ function App() {
             setCommandRun(prev => prev ? { ...prev, progress: event.command_progress.message } : prev);
           }
           if (event.command_result) {
-            setMessages(prev => [...prev, { role: 'assistant', content: event.command_result.text }]);
+            setMessages(prev => [...prev, { role: 'assistant', content: encodeCommandResult(event.command_result) }]);
             setCommandRun(null);
           }
           if (event.error) throw new Error(event.error);
@@ -814,13 +990,18 @@ function App() {
             </div>
           ) : (
             <>
-              {messages.map((m, i) => (
-                <React.Fragment key={i}>
-                  {m.role === 'assistant' && m._streaming
-                    ? <div className="message assistant"><div className="avatar">A</div><div className="bubble markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(m.content) }} /></div>
-                    : <Message message={m} />}
-                </React.Fragment>
-              ))}
+              {messages.map((m, i) => {
+                const commandPayload = m.role === 'assistant' ? tryParseCommandResult(m.content) : null;
+                return (
+                  <React.Fragment key={i}>
+                    {m.role === 'assistant' && m._streaming
+                      ? <div className="message assistant"><div className="avatar">A</div><div className="bubble markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(m.content) }} /></div>
+                      : commandPayload
+                        ? <div className="message assistant"><div className="avatar">A</div><div className="bubble"><CommandResultMessage result={commandPayload} onCommand={insertCommandText} /></div></div>
+                        : <Message message={m} />}
+                  </React.Fragment>
+                );
+              })}
               {stream.map((t, i) => <ToolCard key={i} event={t} />)}
               {commandRun && <CommandCard run={commandRun} />}
             </>

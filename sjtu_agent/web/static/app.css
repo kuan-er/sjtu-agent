@@ -221,6 +221,20 @@ body {
 }
 .command-card-body { padding: 0 12px 12px 32px; font-size: 13px; color: var(--text-2); }
 
+.command-card-view { display: flex; flex-direction: column; gap: 8px; }
+.command-card-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-weight: 600; }
+.command-card-desc { margin: 0; color: var(--text-2); font-size: 13px; white-space: pre-wrap; }
+.command-card-actions { display: inline-flex; gap: 6px; }
+.card-chip {
+  border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
+  border-radius: 999px; padding: 3px 10px; font-size: 12px; font-family: inherit; cursor: pointer;
+}
+.card-chip:hover { border-color: var(--accent); color: var(--accent); }
+.result-card .card-chip { align-self: flex-start; margin-top: 2px; }
+.command-details { margin-top: 2px; color: var(--text-2); font-size: 12px; }
+.command-details summary { cursor: pointer; color: var(--text-2); }
+.command-details .markdown { margin-top: 8px; }
+
 .composer-wrap { flex: 0 0 auto; border-top: 1px solid var(--border); padding: 14px 20px; background: var(--panel); }
 
 .quick-chips { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; max-width: 900px; margin: 0 auto 10px; }

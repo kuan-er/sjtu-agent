@@ -123,6 +123,8 @@ def test_command_endpoint_streams_result_and_persists_session(web_httpd):
     assert any("command_progress" in e for e in events)
     result_event = next(e["command_result"] for e in events if "command_result" in e)
     assert result_event["name"] == "/eat"
+    assert result_event["view"] == "dining"
+    assert result_event["data"]["mode"] == "invalid_campus"
     assert "未知校区" in result_event["text"]
 
     _, messages_data = _get(web_httpd, f"/api/sessions/{session_id}/messages")
@@ -130,4 +132,5 @@ def test_command_endpoint_streams_result_and_persists_session(web_httpd):
     assert messages[-2]["role"] == "user"
     assert "/eat 伦敦" in messages[-2]["content"]
     assert messages[-1]["role"] == "assistant"
-    assert "未知校区" in messages[-1]["content"]
+    assert messages[-1]["content"].startswith("__SJTU_COMMAND_RESULT__")
+    assert "invalid_campus" in messages[-1]["content"]

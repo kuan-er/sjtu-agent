@@ -9,11 +9,13 @@ from .dispatch import (
     parse_command,
     run_command,
 )
+from .result import CommandResult
 
 __all__ = [
     "COMMANDS",
     "CommandDef",
     "CORE_COMMAND_REGISTRY",
+    "CommandResult",
     "command_defs",
     "command_prompt",
     "is_core_command",

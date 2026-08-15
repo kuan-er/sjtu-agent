@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from sjtu_agent.commands import (
     CORE_COMMAND_REGISTRY,
+    CommandResult,
     is_core_command,
     parse_command,
     run_command,
@@ -34,17 +35,27 @@ def test_run_command_returns_none_for_non_commands():
 
 def test_run_command_hw_due_invalid():
     """参数校验不依赖真实 homework 数据。"""
-    assert run_command("/hw due abc") == "无效天数：abc。用法：/hw due <N>"
+    result = run_command("/hw due abc")
+    assert isinstance(result, CommandResult)
+    assert result.text == "无效天数：abc。用法：/hw due <N>"
+    assert result.view == "homework"
+    assert result.data["ok"] is False
 
 
 def test_run_command_eat_invalid_campus():
-    assert run_command("/eat 伦敦") == "[eat] 未知校区「伦敦」，可选：闵行 / 徐汇 / 张江"
+    result = run_command("/eat 伦敦")
+    assert isinstance(result, CommandResult)
+    assert result.text == "[eat] 未知校区「伦敦」，可选：闵行 / 徐汇 / 张江"
+    assert result.data["mode"] == "invalid_campus"
+    assert result.data["valid"] == ["闵行", "徐汇", "张江"]
 
 
 def test_run_command_news_block_without_category():
     result = run_command("/news_block")
-    assert result is not None
-    assert "请指定要屏蔽的分类" in result
+    assert isinstance(result, CommandResult)
+    assert "请指定要屏蔽的分类" in result.text
+    assert result.data["action"] == "block"
+    assert result.data["ok"] is False
 
 
 def test_run_command_wraps_exceptions(monkeypatch):
@@ -53,9 +64,10 @@ def test_run_command_wraps_exceptions(monkeypatch):
 
     monkeypatch.setitem(CORE_COMMAND_REGISTRY, "/boom", boom)
     result = run_command("/boom")
-    assert result is not None
-    assert "[命令错误] `/boom`" in result
-    assert "mock boom" in result
+    assert isinstance(result, CommandResult)
+    assert "[命令错误] `/boom`" in result.text
+    assert "mock boom" in result.text
+    assert result.data["error"] == "mock boom"
 
 
 def test_news_block_updates_profile(monkeypatch):
@@ -70,7 +82,8 @@ def test_news_block_updates_profile(monkeypatch):
     monkeypatch.setattr("sjtu_agent.news_aggregator.profile.UserProfile", lambda: profile)
     result = run_command("/news_block 教务处")
     assert profile.blocked == "教务处"
-    assert "教务处" in result
+    assert "教务处" in result.text
+    assert result.data == {"ok": True, "action": "block", "category": "教务处"}
 
 
 def test_fetch_news_digest_without_llm(monkeypatch):
@@ -78,13 +91,50 @@ def test_fetch_news_digest_without_llm(monkeypatch):
         def __init__(self, **kwargs):
             self.kwargs = kwargs
 
-        def run(self, hours, top_k):
+        def run_structured(self, hours, top_k):
             assert top_k == 8
-            return "mock digest", None, None
+            return "mock digest", None, None, [{"title": "测试新闻"}]
 
     fake_module = SimpleNamespace(NewsAggregator=FakeAggregator)
     monkeypatch.setitem(sys.modules, "sjtu_agent.news_aggregator", fake_module)
     assert fetch_news_digest() == "mock digest"
+
+
+def test_cmd_news_returns_structured_items(monkeypatch):
+    class FakeAggregator:
+        def __init__(self, **kwargs):
+            pass
+
+        def run_structured(self, hours, top_k):
+            return "digest", None, None, [
+                {"id": "1", "title": "新闻标题", "source": "jwc", "url": "https://example.com"},
+            ]
+
+    monkeypatch.setitem(
+        sys.modules,
+        "sjtu_agent.news_aggregator",
+        SimpleNamespace(NewsAggregator=FakeAggregator),
+    )
+    result = run_command("/news")
+    assert result is not None
+    assert result.view == "news"
+    assert result.data["digest"] == "digest"
+    assert result.data["items"][0]["title"] == "新闻标题"
+
+
+def test_cmd_hw_list_returns_structured_assignments(monkeypatch):
+    monkeypatch.setattr(
+        "sjtu_agent.homework_agent.fetch_homework_list",
+        lambda **kwargs: (
+            "共 1 个作业",
+            [{"index": 1, "course": "数学分析", "name": "作业 1", "due": "2026-09-01"}],
+        ),
+    )
+    result = run_command("/hw")
+    assert result is not None
+    assert result.view == "homework"
+    assert result.data["kind"] == "list"
+    assert result.data["assignments"][0]["index"] == 1
 
 
 def test_fetch_eat_recommendation_ok(monkeypatch):

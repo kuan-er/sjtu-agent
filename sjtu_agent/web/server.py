@@ -503,6 +503,14 @@ def _get_chat_client():
         return client, model, "openai"
 
 
+_COMMAND_RESULT_MARKER = "__SJTU_COMMAND_RESULT__"
+
+
+def _encode_command_result(result) -> str:
+    """把结构化命令结果编码为 session 消息文本，刷新页面后仍可渲染卡片。"""
+    return _COMMAND_RESULT_MARKER + json.dumps(result.to_dict(), ensure_ascii=False)
+
+
 def _date_context() -> str:
     import datetime as _dt
     now = _dt.datetime.now()
@@ -582,7 +590,7 @@ def _stream_command(command: str, session_id: str | None = None):
     事件类型：
       {command_start: {name, raw}} — 命令开始
       {command_progress: {stage, message}} — 进度
-      {command_result: {name, text}} — 命令结果（Markdown 文本）
+      {command_result: {name, view, text, data}} — 结构化命令结果
       {error: "..."} — 错误
       [DONE] — 结束
     """
@@ -602,12 +610,17 @@ def _stream_command(command: str, session_id: str | None = None):
 
     result = run_command(command, user_id=session_id or "")
     if result is None:
-        result = f"未知命令：{command}"
+        from sjtu_agent.commands import CommandResult
+        result = CommandResult(
+            view="markdown",
+            text=f"未知命令：{command}",
+            data={"ok": False, "command": name, "error": "unknown command"},
+        )
 
     if session_id:
-        _session_store.append_message(session_id, "assistant", result)
+        _session_store.append_message(session_id, "assistant", _encode_command_result(result))
 
-    yield _sse({"command_result": {"name": name, "text": result}})
+    yield _sse({"command_result": {"name": name, **result.to_dict()}})
     yield "data: [DONE]\n\n"
 
 
