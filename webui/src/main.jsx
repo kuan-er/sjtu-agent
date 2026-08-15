@@ -123,6 +123,182 @@ function SpecialResult({ name, result }) {
   return null;
 }
 
+const COMMAND_RESULT_MARKER = '__SJTU_COMMAND_RESULT__';
+const NEWS_SOURCE_LABELS = { jwc: '教务处', shuiyuan: '水源社区', official: '交大新闻网', canvas: 'Canvas' };
+
+function encodeCommandResult(result) {
+  return COMMAND_RESULT_MARKER + JSON.stringify({
+    view: result.view || 'markdown',
+    text: result.text || '',
+    data: result.data || {},
+  });
+}
+
+function tryParseCommandResult(content) {
+  if (typeof content !== 'string' || !content.startsWith(COMMAND_RESULT_MARKER)) return null;
+  try {
+    const payload = JSON.parse(content.slice(COMMAND_RESULT_MARKER.length));
+    return payload && typeof payload === 'object' ? payload : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function CommandText({ text }) {
+  return text ? <div className="markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }} /> : null;
+}
+
+function ResultDetails({ text }) {
+  if (!text) return null;
+  return (
+    <details className="command-details">
+      <summary>查看完整文本</summary>
+      <CommandText text={text} />
+    </details>
+  );
+}
+
+function DiningResult({ data, text, onCommand }) {
+  if (data.mode === 'invalid_campus' || data.mode === 'error' || data.ok === false) return <CommandText text={text} />;
+  const recs = data.recommendations || [];
+  const canteens = data.canteens || [];
+  const campusButtons = ['闵行', '徐汇', '张江'].filter(c => c !== data.campus);
+  return (
+    <div className="command-card-view">
+      <div className="command-card-title">
+        🍽️ {data.meal_type ? data.meal_type + '推荐' : '食堂拥挤度'} · {data.campus}校区
+        <span className="command-card-actions">
+          {campusButtons.map(c => (
+            <button key={c} className="card-chip" onClick={() => onCommand('/eat ' + c)}>{c}</button>
+          ))}
+        </span>
+      </div>
+      {data.summary && <p className="command-card-desc">{data.summary}</p>}
+      <div className="result-cards">
+        {recs.map((r, i) => (
+          <div key={i} className="result-card">
+            <strong>{r.canteen_name} · {r.overall_label}（{r.overall_rate}%）</strong>
+            <span>{r.reasons && r.reasons.join('；')}</span>
+            {r.recommended_sub_areas && <span>推荐窗口：{r.recommended_sub_areas.slice(0, 3).join('、')}</span>}
+          </div>
+        ))}
+        {canteens.map((c, i) => (
+          <div key={'c' + i} className="result-card">
+            <strong>{c.name} · {c.overall_label}（{c.overall_rate}%）</strong>
+          </div>
+        ))}
+      </div>
+      <ResultDetails text={text} />
+    </div>
+  );
+}
+
+function NewsResult({ data, text, onCommand }) {
+  const items = data.items || [];
+  if (items.length === 0) return <CommandText text={text} />;
+  return (
+    <div className="command-card-view">
+      <div className="command-card-title">📰 校园新闻 · {items.length} 条</div>
+      <div className="result-cards">
+        {items.map((item) => {
+          const blockKey = item.category || NEWS_SOURCE_LABELS[item.source] || item.source;
+          return (
+            <a key={item.id} className="result-card" href={item.url} target="_blank" rel="noreferrer">
+              <strong>{item.title}</strong>
+              <span>{NEWS_SOURCE_LABELS[item.source] || item.source}{item.category ? ' · ' + item.category : ''}{item.reason ? ' · ' + item.reason : ''}</span>
+              <span>{item.summary}</span>
+              <button className="card-chip" onClick={(e) => { e.preventDefault(); onCommand('/news_block ' + blockKey); }}>屏蔽该分类</button>
+            </a>
+          );
+        })}
+      </div>
+      <ResultDetails text={text} />
+    </div>
+  );
+}
+
+function HomeworkResult({ data, text, onCommand }) {
+  const items = data.assignments || [];
+  if (!Array.isArray(data.assignments) || items.length === 0) return <CommandText text={text} />;
+  const isPast = data.kind === 'past' || data.kind === 'all' || data.include_past;
+  return (
+    <div className="command-card-view">
+      <div className="command-card-title">📝 作业列表 · {items.length} 项</div>
+      <div className="result-cards">
+        {items.map(h => (
+          <div key={h.index} className="result-card">
+            <strong>[{h.index}] {h.course} — {h.name}</strong>
+            <span>截止：{h.due || '未知'}{h.days_left !== null && h.days_left !== undefined ? ` · ${h.days_left > 0 ? h.days_left + ' 天后' : h.days_left === 0 ? '今天截止' : '已截止'}` : ''}{h.submitted ? ' · 已提交' : ''}</span>
+            <button className="card-chip" onClick={() => onCommand(isPast ? `/hw past do ${h.index}` : `/hw do ${h.index}`)}>分析</button>
+          </div>
+        ))}
+      </div>
+      <ResultDetails text={text} />
+    </div>
+  );
+}
+
+function TemplateResult({ view, data, text, onCommand }) {
+  if (view === 'template_list') {
+    if (!data.templates || data.templates.length === 0) return <CommandText text={text} />;
+    return (
+      <div className="command-card-view">
+        <div className="command-card-title">📚 LaTeX 模板</div>
+        <div className="result-cards">
+          {(data.templates || []).map(t => (
+            <div key={t.name} className="result-card">
+              <strong>{t.name}</strong>
+              <span>{t.description}</span>
+              <button className="card-chip" onClick={() => onCommand('/template ' + t.name)}>套用</button>
+            </div>
+          ))}
+        </div>
+        <ResultDetails text={text} />
+      </div>
+    );
+  }
+  if (view === 'template_compile') {
+    return (
+      <div className="command-card-view">
+        <div className="command-card-title">{data.ok ? '✅ LaTeX 编译成功' : '❌ LaTeX 编译失败'}</div>
+        {data.ok && <p className="command-card-desc">PDF：{data.pdf}（{data.size_kb} KB）</p>}
+        <ResultDetails text={text} />
+      </div>
+    );
+  }
+  if (view === 'template_clone' || view === 'template_apply' || view === 'template_push') {
+    return (
+      <div className="command-card-view">
+        <div className="command-card-title">{data.ok ? '✅' : '❌'} {view === 'template_clone' ? '模板克隆' : view === 'template_push' ? '推送到 Overleaf' : '套用模板'}</div>
+        {data.name && <p className="command-card-desc">{data.name}</p>}
+        <ResultDetails text={text} />
+      </div>
+    );
+  }
+  return <ResultDetails text={text} />;
+}
+
+function NewsPreferenceResult({ data, text }) {
+  if (data.ok === false) return <CommandText text={text} />;
+  return (
+    <div className="command-card-view">
+      <div className="command-card-title">{data.ok ? '✅' : '⚠️'} 新闻偏好</div>
+      {data.category && <p className="command-card-desc">已屏蔽：{data.category}</p>}
+      <ResultDetails text={text} />
+    </div>
+  );
+}
+
+function CommandResultMessage({ result, onCommand }) {
+  const { view, text, data } = result;
+  if (view === 'dining') return <DiningResult data={data || {}} text={text} onCommand={onCommand} />;
+  if (view === 'news') return <NewsResult data={data || {}} text={text} onCommand={onCommand} />;
+  if (view === 'homework') return <HomeworkResult data={data || {}} text={text} onCommand={onCommand} />;
+  if (view.startsWith('template_')) return <TemplateResult view={view} data={data || {}} text={text} onCommand={onCommand} />;
+  if (view === 'news_preference') return <NewsPreferenceResult data={data || {}} text={text} />;
+  return <CommandText text={text} />;
+}
+
 function ToolCard({ event }) {
   const [open, setOpen] = useState(false);
   const status = event.status || 'running';
@@ -143,6 +319,18 @@ function ToolCard({ event }) {
         {status === 'done' && <SpecialResult name={event.name} result={event.result} />}
         <pre>{event.result || (status === 'cancelled' ? '已取消' : '等待中…')}</pre>
       </div>
+    </div>
+  );
+}
+
+function CommandCard({ run }) {
+  return (
+    <div className={'command-card' + (run.status === 'running' ? ' running' : '')}>
+      <div className="command-card-head">
+        {run.status === 'running' ? <span className="tool-spinner" /> : <span className="tool-done">✓</span>}
+        <span className="tool-name">命令：{run.raw}</span>
+      </div>
+      <div className="command-card-body">{run.progress || '正在执行…'}</div>
     </div>
   );
 }
@@ -267,6 +455,10 @@ function App() {
   const [search, setSearch] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
+  const [commands, setCommands] = useState([]);
+  const [cmdIndex, setCmdIndex] = useState(0);
+  const [commandPanelOpen, setCommandPanelOpen] = useState(false);
+  const [commandRun, setCommandRun] = useState(null);
   const [theme, setThemeState] = useState(() => localStorage.getItem('sjtu-agent-theme') || 'dark');
   const [accent, setAccentState] = useState(() => localStorage.getItem('sjtu-agent-accent') || '#3b82f6');
   const abortRef = useRef(null);
@@ -274,6 +466,8 @@ function App() {
   const messagesRef = useRef(null);
   const sessionRef = useRef(null);
   const fileInputRef = useRef(null);
+  const textareaRef = useRef(null);
+  const commandItemRefs = useRef({});
 
   sessionRef.current = sessionId;
 
@@ -312,6 +506,7 @@ function App() {
   useEffect(() => {
     loadSessions();
     api('/api/config').then(data => setModel(data.model || '')).catch(() => {});
+    api('/api/commands').then(data => setCommands(data.commands || [])).catch(() => {});
   }, [loadSessions]);
 
   useEffect(() => {
@@ -392,6 +587,46 @@ function App() {
     setStagedFiles(prev => prev.filter(a => a.id !== attachment.id));
   };
 
+  const focusComposer = () => {
+    requestAnimationFrame(() => {
+      const ta = textareaRef.current;
+      if (ta) {
+        ta.focus();
+        ta.setSelectionRange(ta.value.length, ta.value.length);
+      }
+    });
+  };
+
+  const chooseCommandPrompt = async (text) => {
+    const value = String(text || '').trim();
+    if (!value) return;
+    // 基础命令（无参数）直接用本地元数据，避免一次网络往返
+    const exact = commands.find(c => c.name === value);
+    if (exact) {
+      setInput(exact.prompt || value);
+    } else {
+      try {
+        const data = await api('/api/commands/resolve?text=' + encodeURIComponent(value));
+        setInput(data.prompt || value);
+      } catch (_) {
+        setInput(value);
+      }
+    }
+    setCmdIndex(0);
+    setCommandPanelOpen(false);
+    focusComposer();
+  };
+
+  const insertCommandText = (text) => {
+    const value = String(text || '').trim();
+    if (!value) return;
+    const known = commands.find(c => c.name === value.split(/\s+/)[0].toLowerCase());
+    setInput(known && known.exec !== true && known.prompt ? known.prompt : value);
+    setCmdIndex(0);
+    setCommandPanelOpen(false);
+    focusComposer();
+  };
+
   const parseSSE = (text) => {
     const events = [];
     for (const line of text.split('\n')) {
@@ -403,10 +638,107 @@ function App() {
     return events;
   };
 
+  const commandNameOf = (text) => String(text || '').trim().split(/\s+/)[0].toLowerCase();
+  const isExecutableCommand = (text) => {
+    const name = commandNameOf(text);
+    return name.startsWith('/') && commands.some(c => c.exec === true && c.name === name);
+  };
+
+  const sendCommand = async (commandText) => {
+    if (!commandText || sending) return;
+    setSending(true);
+    setInput('');
+    partialRef.current = '';
+
+    let id = sessionId;
+    let wasNew = false;
+    if (!id) {
+      try {
+        const session = await createSession();
+        id = session.id;
+        wasNew = true;
+        setSessionId(id);
+      } catch (err) { setSending(false); return; }
+    }
+
+    setMessages(prev => [...prev, { role: 'user', content: commandText }]);
+    ensureSessionTitle(id, commandText, wasNew);
+    setStagedFiles([]);
+    setStream([]);
+    setApproval(null);
+    setCommandRun({ raw: commandText, status: 'running', progress: '' });
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+    try {
+      const res = await fetch('/api/command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: commandText, session_id: id }),
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        let message = 'HTTP ' + res.status;
+        try {
+          const data = await res.json();
+          if (data && data.error) message = data.error;
+          if (data && data.prompt) setInput(data.prompt);
+        } catch (_) {}
+        throw new Error(message);
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const event of parseSSE(lines.join('\n'))) {
+          if (event.command_start) {
+            setCommandRun(prev => prev ? { ...prev, name: event.command_start.name } : prev);
+          }
+          if (event.command_progress) {
+            setCommandRun(prev => prev ? { ...prev, progress: event.command_progress.message } : prev);
+          }
+          if (event.command_result) {
+            setMessages(prev => [...prev, { role: 'assistant', content: encodeCommandResult(event.command_result) }]);
+            setCommandRun(null);
+          }
+          if (event.error) throw new Error(event.error);
+        }
+      }
+      setCommandRun(null);
+      await loadSession(id);
+      await loadSessions();
+    } catch (err) {
+      setCommandRun(null);
+      if (err.name === 'AbortError') {
+        setMessages(prev => [...prev, { role: 'assistant', content: '（已停止）' }]);
+      } else {
+        setMessages(prev => [...prev, { role: 'assistant', content: '❌ ' + (err.message || '命令执行失败') }]);
+      }
+    } finally {
+      abortRef.current = null;
+      setSending(false);
+    }
+  };
+
   const send = async () => {
     const rawMessage = input.trim();
     if ((!rawMessage && stagedFiles.length === 0) || sending) return;
-    const message = rawMessage || '请查看我上传的附件';
+    if (rawMessage.startsWith('/') && stagedFiles.length === 0 && isExecutableCommand(rawMessage)) {
+      await sendCommand(rawMessage);
+      return;
+    }
+    let message = rawMessage || '请查看我上传的附件';
+    if (rawMessage.startsWith('/')) {
+      const name = commandNameOf(rawMessage);
+      const known = commands.find(c => c.name === name);
+      if (known && known.exec !== true) message = known.prompt || rawMessage;
+    }
     setSending(true);
     setInput('');
     partialRef.current = '';
@@ -522,6 +854,7 @@ function App() {
     if (abortRef.current) abortRef.current.abort();
     try { await api('/api/chat/cancel', { method: 'POST', body: JSON.stringify({ session_id: id || '' }) }); } catch (_) {}
     setStream(prev => prev.map(t => t.status === 'running' ? { ...t, status: 'cancelled' } : t));
+    setCommandRun(null);
     setApproval(null);
     setMessages(prev => {
       const copy = prev.slice();
@@ -537,10 +870,72 @@ function App() {
   };
 
   const onKeyDown = (e) => {
+    const panelOpen = commandPanelOpen && commandOpen && commandCandidates.length > 0;
+    if (panelOpen) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setCmdIndex(i => Math.min(i + 1, commandCandidates.length - 1));
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setCmdIndex(i => Math.max(i - 1, 0));
+        return;
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const active = Math.min(cmdIndex, commandCandidates.length - 1);
+        if (commandCandidates[active]) insertCommandText(commandCandidates[active].value);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setInput('');
+        setCmdIndex(0);
+        setCommandPanelOpen(false);
+        return;
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
   };
 
   const activeTitle = useMemo(() => sessions.find(s => s.id === sessionId)?.title || '开始新会话', [sessions, sessionId]);
+  const commandQuery = useMemo(() => input.trimStart(), [input]);
+  const commandOpen = commandQuery.startsWith('/');
+  const commandCandidates = useMemo(() => {
+    if (!commandOpen) return [];
+    const q = commandQuery.toLowerCase();
+    const qName = q.split(/\s+/)[0];
+    const seen = new Set();
+    const out = [];
+    const push = (value, command) => {
+      if (!value || seen.has(value)) return;
+      seen.add(value);
+      out.push({
+        value,
+        label: command.label,
+        icon: command.icon,
+        description: command.description,
+        kind: value === command.name ? 'command' : 'example',
+      });
+    };
+    for (const command of commands) {
+      if (command.name.toLowerCase().startsWith(q)) push(command.name, command);
+      // 输入了完整命令名 + 参数时，补全其示例变体（如 /hw d → /hw do 3）
+      if (command.name.toLowerCase() === qName) {
+        for (const example of command.examples || []) {
+          if (example.toLowerCase().startsWith(q)) push(example, command);
+        }
+      }
+    }
+    return out.slice(0, 8);
+  }, [commands, commandOpen, commandQuery]);
+  const activeCmdIndex = commandCandidates.length ? Math.min(cmdIndex, commandCandidates.length - 1) : 0;
+  useEffect(() => {
+    const active = commandCandidates[activeCmdIndex];
+    const el = active && commandItemRefs.current[active.value];
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+  }, [activeCmdIndex, commandCandidates]);
   const filteredSessions = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return sessions;
@@ -595,14 +990,20 @@ function App() {
             </div>
           ) : (
             <>
-              {messages.map((m, i) => (
-                <React.Fragment key={i}>
-                  {m.role === 'assistant' && m._streaming
-                    ? <div className="message assistant"><div className="avatar">A</div><div className="bubble markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(m.content) }} /></div>
-                    : <Message message={m} />}
-                </React.Fragment>
-              ))}
+              {messages.map((m, i) => {
+                const commandPayload = m.role === 'assistant' ? tryParseCommandResult(m.content) : null;
+                return (
+                  <React.Fragment key={i}>
+                    {m.role === 'assistant' && m._streaming
+                      ? <div className="message assistant"><div className="avatar">A</div><div className="bubble markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(m.content) }} /></div>
+                      : commandPayload
+                        ? <div className="message assistant"><div className="avatar">A</div><div className="bubble"><CommandResultMessage result={commandPayload} onCommand={insertCommandText} /></div></div>
+                        : <Message message={m} />}
+                  </React.Fragment>
+                );
+              })}
               {stream.map((t, i) => <ToolCard key={i} event={t} />)}
+              {commandRun && <CommandCard run={commandRun} />}
             </>
           )}
         </div>
@@ -624,10 +1025,44 @@ function App() {
           </div>
         )}
         <div className="composer-wrap">
+          <div className="quick-chips">
+            {commands.filter(c => c.chip !== false).map(c => (
+              <button key={c.name} className="quick-chip" title={c.description} onClick={() => chooseCommandPrompt(c.name)}>
+                <span className="quick-chip-icon">{c.icon}</span>{c.label}
+              </button>
+            ))}
+            <button className="quick-chip" title="外观与模型设置" onClick={() => setShowSettings(true)}>
+              <span className="quick-chip-icon">⚙️</span>配置
+            </button>
+          </div>
           <div className="composer">
+            {commandPanelOpen && commandOpen && commandCandidates.length > 0 && (
+              <div className="command-panel" role="listbox" aria-label="命令补全">
+                {commandCandidates.map((candidate, i) => (
+                  <button
+                    key={candidate.value}
+                    ref={el => { if (el) commandItemRefs.current[candidate.value] = el; }}
+                    role="option"
+                    aria-selected={i === activeCmdIndex}
+                    className={'command-item' + (i === activeCmdIndex ? ' active' : '')}
+                    onMouseDown={e => e.preventDefault()}
+                    onMouseEnter={() => setCmdIndex(i)}
+                    onClick={() => insertCommandText(candidate.value)}
+                  >
+                    <span className="command-item-head">
+                      <span className="command-icon">{candidate.icon}</span>
+                      <span className="command-name">{candidate.value}</span>
+                      <span className="command-label">{candidate.label}</span>
+                    </span>
+                    <span className="command-desc">{candidate.description}</span>
+                  </button>
+                ))}
+                <div className="command-hint">↑↓ 选择 · Enter 填入 · 再按 Enter 执行 · Esc 关闭</div>
+              </div>
+            )}
             <input ref={fileInputRef} type="file" multiple style={{ display: 'none' }} onChange={e => { uploadFiles(Array.from(e.target.files || [])); e.target.value = ''; }} />
             <button className="attach-btn" title="上传附件" onClick={() => fileInputRef.current && fileInputRef.current.click()}>📎</button>
-            <textarea rows="1" value={input} onChange={e => setInput(e.target.value)} onKeyDown={onKeyDown} placeholder="输入消息，Enter 发送，Shift+Enter 换行" />
+            <textarea ref={textareaRef} rows="1" value={input} onChange={e => { const next = e.target.value; setInput(next); setCmdIndex(0); setCommandPanelOpen(next.trimStart().startsWith('/')); }} onKeyDown={onKeyDown} placeholder="输入消息，/ 唤起命令，Enter 发送，Shift+Enter 换行" />
             {sending ? <button className="send-btn stop" onClick={stop}>停止</button> : <button className="send-btn" onClick={send}>发送</button>}
           </div>
         </div>

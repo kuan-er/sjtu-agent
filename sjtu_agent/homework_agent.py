@@ -464,6 +464,45 @@ def _format_list(pending: list[dict], past: bool = False) -> str:
     return "\n".join(lines)
 
 
+def _serialize_homework_item(d: dict, idx: int) -> dict:
+    """把 Canvas 作业 dict 转为 JSON-safe 结构。"""
+    from datetime import datetime, timezone, timedelta
+    CST = timezone(timedelta(hours=8))
+    due = d.get("due")
+    if due and hasattr(due, "timestamp"):
+        due_iso = due.isoformat()
+        days_left = (due - datetime.now(CST)).days
+        due_text = due.strftime("%Y-%m-%d %H:%M")
+    else:
+        due_iso = None
+        days_left = None
+        due_text = str(due or "")
+    return {
+        "index": idx + 1,
+        "course": d.get("course", "未知课程"),
+        "name": d.get("name", "未知作业"),
+        "due": due_text,
+        "due_iso": due_iso,
+        "days_left": days_left,
+        "submitted": bool(d.get("submitted")),
+        "url": d.get("url", ""),
+    }
+
+
+def fetch_homework_list(due_within_days: int = 0,
+                        include_past: bool = False) -> tuple[str, list[dict]]:
+    """返回 (Markdown 列表, JSON-safe 作业列表)，供命令层和 WebUI 共用。"""
+    pending = _fetch_pending(include_past=include_past)
+    if due_within_days > 0:
+        pending = _filter_by_due(pending, due_within_days)
+    if not pending:
+        label = f"{due_within_days} 天内" if due_within_days > 0 else ""
+        return f"[homework] 暂无{label}未提交的 Canvas 作业", []
+    text = _format_list(pending, past=include_past)
+    items = [_serialize_homework_item(d, i) for i, d in enumerate(pending)]
+    return text, items
+
+
 def run_homework_check(due_within_days: int = 0, specific_idx: int | None = None,
                        list_only: bool = False, brief: bool = False,
                        include_past: bool = False, answer_mode: bool = False) -> str:

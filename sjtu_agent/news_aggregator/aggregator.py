@@ -32,11 +32,40 @@ class NewsAggregator:
         self.llm_client = llm_client
         self.model    = model
 
-    def run(self, hours: int = 24, top_k: int = 8) -> tuple[str, str]:
+    def run(self, hours: int = 24, top_k: int = 8) -> tuple[str, str, list]:
         """
         完整聚合流程。
-        返回 (markdown_digest, telegram_html_digest)。
+        返回 (markdown_digest, telegram_html_digest, feishu_paras)。
         """
+        md_digest, html_digest, feishu_paras, _ = self._run(hours=hours, top_k=top_k)
+        return md_digest, html_digest, feishu_paras
+
+    def run_structured(self, hours: int = 24, top_k: int = 8) -> tuple[str, str, list, list[dict]]:
+        """
+        完整聚合流程，并额外返回 JSON-safe 的新闻条目列表。
+
+        返回 (markdown_digest, telegram_html_digest, feishu_paras, items)。
+        """
+        md_digest, html_digest, feishu_paras, ranked = self._run(hours=hours, top_k=top_k)
+        items = []
+        for item, score, reason in ranked:
+            items.append({
+                "id": item.id,
+                "source": item.source,
+                "title": item.title,
+                "summary": item.summary,
+                "url": item.url,
+                "published_at": item.published_at.isoformat() if item.published_at else None,
+                "author": item.author,
+                "category": item.category,
+                "tags": list(item.tags),
+                "score": round(float(score), 4),
+                "reason": reason,
+            })
+        return md_digest, html_digest, feishu_paras, items
+
+    def _run(self, hours: int, top_k: int):
+        """共用采集/排序/落盘流程，返回 (md, html, feishu_paras, ranked)。"""
         # 1. 并发采集
         all_items: list[NewsItem] = []
         with ThreadPoolExecutor(max_workers=len(self.sources)) as pool:
@@ -62,7 +91,7 @@ class NewsAggregator:
         if not all_items:
             empty_msg = "📰 今天没有新的值得关注的内容。"
             empty_post = [[{"tag": "text", "text": empty_msg}]]
-            return empty_msg, empty_msg, empty_post
+            return empty_msg, empty_msg, empty_post, []
 
         # 4. 智能排序
         ranked = self.ranker.rank(
@@ -83,7 +112,7 @@ class NewsAggregator:
         if ranked:
             self.storage.mark_pushed([item.id for item, _, _ in ranked])
 
-        return md_digest, html_digest, feishu_paras
+        return md_digest, html_digest, feishu_paras, ranked
 
     def send_via_telegram(self, html_digest: str) -> bool:
         """通过 Telegram 推送日报。"""
