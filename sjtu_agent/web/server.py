@@ -22,9 +22,11 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from sjtu_agent.paths import ENV_PATH, CONFIG_PATH, AGENT_CONFIG_PATH, _get_or_create_web_token
+from sjtu_agent.web.session_store import SessionStore
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 _WEB_TOKEN = ""
+_session_store = SessionStore()
 
 def _check_auth(handler) -> bool:
     """Check the sjtu_token cookie against the stored web token."""
@@ -292,9 +294,33 @@ def _get_config_values() -> dict:
     }
 
 
-# ── 聊天会话（内存，单用户） ────────────────────────────────────────────────────
+# ── 聊天会话（旧版全局内存 + 新版 SQLite 会话） ────────────────────────────────
 
-_chat_history: list[dict] = []   # [{role, content}, ...]
+_legacy_chat_history: list[dict] = []   # 旧版无 session_id 的全局会话
+
+
+def _system_message(_agent) -> dict:
+    return {"role": "system", "content": _agent.build_system_prompt()}
+
+
+def _build_history(_agent, session_id: str | None) -> list[dict]:
+    """构建本轮要发送的 history。
+
+    新版会话持久化只保存 user/assistant 消息，system 前缀每轮注入；
+    旧版无 session_id 时沿用全局内存列表，行为与之前一致。
+    """
+    if session_id:
+        messages = [
+            {"role": row["role"], "content": row["content"]}
+            for row in _session_store.list_messages(session_id)
+        ]
+        history = [_system_message(_agent), *messages]
+    else:
+        global _legacy_chat_history
+        if not _legacy_chat_history:
+            _legacy_chat_history.append(_system_message(_agent))
+        history = _legacy_chat_history
+    return history
 
 
 def _get_chat_client():
@@ -354,7 +380,7 @@ def _get_chat_client():
         return client, model, "openai"
 
 
-def _stream_chat(user_message: str):
+def _stream_chat(user_message: str, session_id: str | None = None):
     """生成器：将 user_message 发给 LLM，支持完整 tool_use 循环，以 SSE 格式 yield 数据行。
     事件类型：
       {token: "..."} — 正文增量
@@ -364,7 +390,6 @@ def _stream_chat(user_message: str):
       [DONE] — 结束
     """
     import datetime as _dt
-    global _chat_history
 
     # 延迟导入 agent 模块（避免循环依赖 + 启动时间）
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -375,16 +400,19 @@ def _stream_chat(user_message: str):
         f"\n\n## 当前时间\n"
         f"现在：{_now.strftime('%Y年%m月%d日 %H:%M')}，星期{'一二三四五六日'[_now.weekday()]}。"
     )
-    if not _chat_history:
-        # 稳定前缀（含 prompt-only skills）；时间每轮注入用户消息 → 缓存命中
-        _chat_history.append({"role": "system", "content": _agent.build_system_prompt()})
 
-    _chat_history.append({"role": "user", "content": _date_ctx + "\n\n" + user_message})
+    history = _build_history(_agent, session_id)
+    user_entry = {"role": "user", "content": _date_ctx + "\n\n" + user_message}
+    history.append(user_entry)
+    turn_start = len(history)
+    if session_id:
+        _session_store.append_message(session_id, "user", user_entry["content"])
 
     try:
         client, model, proto = _get_chat_client()
     except Exception as exc:
-        _chat_history.pop()
+        if not session_id:
+            history.pop()
         yield f"data: {json.dumps({'error': f'创建客户端失败：{exc}'}, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"
         return
@@ -396,29 +424,34 @@ def _stream_chat(user_message: str):
 
     try:
         if proto == "anthropic":
-            yield from _stream_chat_anthropic(client, model, _agent, MAX_TOOL_ROUNDS, _sse)
+            yield from _stream_chat_anthropic(client, model, _agent, MAX_TOOL_ROUNDS, _sse, history)
         else:
-            yield from _stream_chat_openai(client, model, _agent, MAX_TOOL_ROUNDS, _sse)
+            yield from _stream_chat_openai(client, model, _agent, MAX_TOOL_ROUNDS, _sse, history)
     except Exception as exc:
         yield _sse({"error": str(exc)})
+
+    # 流结束后落盘本轮新增的 assistant 文本（新版会话）。
+    if session_id:
+        for message in history[turn_start:]:
+            if message.get("role") == "assistant" and isinstance(message.get("content"), str):
+                _session_store.append_message(session_id, "assistant", message["content"])
 
     yield "data: [DONE]\n\n"
 
 
-def _stream_chat_anthropic(client, model, _agent, max_rounds, _sse):
+def _stream_chat_anthropic(client, model, _agent, max_rounds, _sse, history):
     """Anthropic Messages API 流式 + tool_use 循环。"""
-    global _chat_history
 
     # 上下文质量管理（web 独立流式不经过 runner._run_one_turn）
     from sjtu_agent.agent.context import trim_session
-    trim_session(_chat_history)
+    trim_session(history)
 
     system_msg = ""
-    for m in _chat_history:
+    for m in history:
         if m["role"] == "system":
             system_msg = m["content"]
             break
-    api_msgs = [m for m in _chat_history if m["role"] != "system"]
+    api_msgs = [m for m in history if m["role"] != "system"]
     tools = _agent._anthropic_tools()
 
     for _round in range(max_rounds):
@@ -462,8 +495,8 @@ def _stream_chat_anthropic(client, model, _agent, max_rounds, _sse):
                             idx = event.index
                             tool_inputs[idx] = tool_inputs.get(idx, "") + delta.partial_json
         except Exception as exc:
-            if _chat_history and _chat_history[-1]["role"] == "user":
-                _chat_history.pop()
+            if history and history[-1]["role"] == "user":
+                history.pop()
             yield _sse({"error": str(exc)})
             return
 
@@ -479,7 +512,7 @@ def _stream_chat_anthropic(client, model, _agent, max_rounds, _sse):
         api_msgs.append({"role": "assistant", "content": content_blocks})
 
         if not has_tool_use:
-            _chat_history.append({"role": "assistant", "content": full_text})
+            history.append({"role": "assistant", "content": full_text})
             return
 
         # 执行工具
@@ -511,20 +544,19 @@ def _stream_chat_anthropic(client, model, _agent, max_rounds, _sse):
                     if getattr(delta, "type", "") == "text_delta":
                         fb_text += delta.text
                         yield _sse({"token": delta.text})
-        _chat_history.append({"role": "assistant", "content": fb_text or full_text})
+        history.append({"role": "assistant", "content": fb_text or full_text})
     except Exception as exc:
         yield _sse({"error": str(exc)})
-        _chat_history.append({"role": "assistant", "content": full_text})
+        history.append({"role": "assistant", "content": full_text})
 
 
-def _stream_chat_openai(client, model, _agent, max_rounds, _sse):
+def _stream_chat_openai(client, model, _agent, max_rounds, _sse, history):
     """OpenAI Chat Completions 流式 + tool_calls 循环。"""
-    global _chat_history
 
     # 上下文质量管理（与 runner._run_one_turn 同钩子，web 独立流式不经过它）
     from sjtu_agent.agent.context import trim_session
-    trim_session(_chat_history)
-    messages = list(_chat_history)
+    trim_session(history)
+    messages = list(history)
 
     for _round in range(max_rounds):
         full_text = ""
@@ -559,13 +591,13 @@ def _stream_chat_openai(client, model, _agent, max_rounds, _sse):
                             if tc.function.arguments:
                                 tool_calls_map[idx]["arguments"] += tc.function.arguments
         except Exception as exc:
-            if _chat_history and _chat_history[-1]["role"] == "user":
-                _chat_history.pop()
+            if history and history[-1]["role"] == "user":
+                history.pop()
             yield _sse({"error": str(exc)})
             return
 
         if not tool_calls_map:
-            _chat_history.append({"role": "assistant", "content": full_text})
+            history.append({"role": "assistant", "content": full_text})
             messages.append({"role": "assistant", "content": full_text})
             return
 
@@ -612,10 +644,10 @@ def _stream_chat_openai(client, model, _agent, max_rounds, _sse):
             if d.content:
                 fb_text += d.content
                 yield _sse({"token": d.content})
-        _chat_history.append({"role": "assistant", "content": fb_text or full_text})
+        history.append({"role": "assistant", "content": fb_text or full_text})
     except Exception as exc:
         yield _sse({"error": str(exc)})
-        _chat_history.append({"role": "assistant", "content": full_text})
+        history.append({"role": "assistant", "content": full_text})
 
 
 def _test_api(api_key: str, base_url: str, model: str) -> dict:
@@ -796,11 +828,12 @@ class _Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
 
-        if path in ("/", "/index.html"):
+        if path in ("/", "/index.html", "/legacy", "/legacy.html"):
             self.send_response(200)
             self.send_header("Set-Cookie", f"sjtu_token={_WEB_TOKEN}; HttpOnly; SameSite=Lax; Path=/; Max-Age=86400")
             self.send_header("Content-Type", "text/html; charset=utf-8")
-            data = (STATIC_DIR / "index.html").read_bytes()
+            index_name = "legacy.html" if path.startswith("/legacy") else "index.html"
+            data = (STATIC_DIR / index_name).read_bytes()
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)
@@ -811,6 +844,23 @@ class _Handler(BaseHTTPRequestHandler):
         elif path == "/api/status":
             if not _check_auth(self): self._send_json({"error":"unauthorized"}, 403); return
             self._send_json(_get_status())
+        elif path == "/api/sessions":
+            if not _check_auth(self): self._send_json({"error":"unauthorized"}, 403); return
+            self._send_json({"sessions": _session_store.list_sessions()})
+        elif path.startswith("/api/sessions/"):
+            if not _check_auth(self): self._send_json({"error":"unauthorized"}, 403); return
+            match = re.fullmatch(r"/api/sessions/([^/]+)/messages", path)
+            if match:
+                session = _session_store.get_session(match.group(1))
+                if not session:
+                    self._send_json({"error": "session not found"}, 404)
+                    return
+                self._send_json({
+                    "session": session,
+                    "messages": _session_store.list_messages(match.group(1)),
+                })
+            else:
+                self._send_json({"error": "not found"}, 404)
         elif path == "/api/wechat/qr_status":
             if not _check_auth(self): self._send_json({"error":"unauthorized"}, 403); return
             from urllib.parse import parse_qs
@@ -856,32 +906,80 @@ class _Handler(BaseHTTPRequestHandler):
                 model=body.get("model", ""),
             )
             self._send_json(result)
+        elif path == "/api/sessions":
+            body = self._read_body()
+            session = _session_store.create_session(body.get("title") or "")
+            self._send_json(session, 201)
         elif path == "/api/chat":
             body = self._read_body()
             user_msg = body.get("message", "").strip()
             if not user_msg:
                 self._send_json({"error": "消息不能为空"}, 400)
                 return
+            session_id = body.get("session_id") or None
+            if session_id and not _session_store.get_session(session_id):
+                self._send_json({"error": "session not found"}, 404)
+                return
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
             self.send_header("Cache-Control", "no-cache")
             self.send_header("X-Accel-Buffering", "no")
             self.end_headers()
-            for chunk in _stream_chat(user_msg):
+            for chunk in _stream_chat(user_msg, session_id=session_id):
                 try:
                     self.wfile.write(chunk.encode("utf-8"))
                     self.wfile.flush()
                 except (BrokenPipeError, ConnectionResetError):
                     break
         elif path == "/api/chat/clear":
-            global _chat_history
-            _chat_history = []
+            body = self._read_body()
+            session_id = body.get("session_id") or None
+            if session_id:
+                if not _session_store.get_session(session_id):
+                    self._send_json({"error": "session not found"}, 404)
+                    return
+                _session_store.clear_messages(session_id)
+            else:
+                global _legacy_chat_history
+                _legacy_chat_history = []
             self._send_json({"ok": True})
         elif path == "/api/feishu/start":
             self._send_json(_start_feishu_bot())
         else:
             self.send_response(404)
             self.end_headers()
+
+    def do_PATCH(self):
+        if not _check_auth(self):
+            self._send_json({"error": "unauthorized"}, status=403)
+            return
+        path = urlparse(self.path).path.rstrip("/")
+        match = re.fullmatch(r"/api/sessions/([^/]+)", path)
+        if not match:
+            self.send_response(404)
+            self.end_headers()
+            return
+        body = self._read_body()
+        session = _session_store.rename_session(match.group(1), body.get("title", ""))
+        if not session:
+            self._send_json({"error": "session not found"}, 404)
+            return
+        self._send_json(session)
+
+    def do_DELETE(self):
+        if not _check_auth(self):
+            self._send_json({"error": "unauthorized"}, status=403)
+            return
+        path = urlparse(self.path).path.rstrip("/")
+        match = re.fullmatch(r"/api/sessions/([^/]+)", path)
+        if not match:
+            self.send_response(404)
+            self.end_headers()
+            return
+        if not _session_store.delete_session(match.group(1)):
+            self._send_json({"error": "session not found"}, 404)
+            return
+        self._send_json({"ok": True})
 
     def _handle_save(self, body: dict) -> None:
         section = body.get("section", "")

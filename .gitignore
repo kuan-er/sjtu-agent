@@ -23,6 +23,7 @@ user_profile.json
 *.html
 *_files/
 !sjtu_agent/web/static/*.html
+!webui/*.html
 
 # Downloaded assignment materials and local test captures
 assignments/

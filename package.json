@@ -1,14 +1,21 @@
 {
-  "name": "sjtu-agent-docs",
+  "name": "sjtu-agent-web",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "scripts": {
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
-    "docs:preview": "vitepress preview docs"
+    "docs:preview": "vitepress preview docs",
+    "build:webui": "node webui/build.mjs",
+    "build:all": "npm run build:webui && npm run docs:build"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "esbuild": "^0.28.1",
     "vitepress": "^1.6.3"
   }
 }

@@ -29,6 +29,7 @@ export default defineConfig({
       {
         text: '设计文档',
         items: [
+          { text: 'Web GUI 重设计', link: '/WEB_GUI_REDESIGN' },
           { text: '安装优化设计', link: '/DEPLOYMENT' },
           { text: 'Agent 架构', link: '/AGENT_ARCHITECTURE' },
           { text: 'MCP / Skills 更新', link: '/MCP_SKILL_UPDATE' },
