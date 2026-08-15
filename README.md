@@ -4,7 +4,7 @@
 
 面向上海交通大学学生的校园助手，提供终端对话、飞书 / Telegram / 微信 / QQ Bot、DDL 聚合、日报推送和 MCP Server。
 
-[English Version](README_EN.md) · [项目展示页](https://kuan-er.github.io/sjtu-agent) · [排错手册](docs/TROUBLESHOOTING.md) · [服务器部署](docs/SERVER_DEPLOYMENT.md)
+[English Version](README_EN.md) · [项目展示页](https://kuan-er.github.io/sjtu-agent) · [文档站](https://kuan-er.github.io/sjtu-agent/docs/) · [排错手册](docs/TROUBLESHOOTING.md) · [服务器部署](docs/SERVER_DEPLOYMENT.md)
 
 如果这个项目对你有帮助，欢迎点一个 ⭐ Star！
 

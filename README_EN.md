@@ -6,7 +6,7 @@ A campus assistant for Shanghai Jiao Tong University students, offering terminal
 
 中文文档: [README.md](README.md)
 
-Docs: [Troubleshooting](docs/TROUBLESHOOTING.md) · [Server Deployment](docs/SERVER_DEPLOYMENT.md)
+Docs: [Documentation Site](https://kuan-er.github.io/sjtu-agent/docs/) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Server Deployment](docs/SERVER_DEPLOYMENT.md)
 
 👉 **[Project Showcase](https://kuan-er.github.io/sjtu-agent)**
 

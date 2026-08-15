@@ -33,6 +33,12 @@ assignments_test_aihaoke/
 build/
 *.egg-info/
 
+# Node / VitePress
+node_modules/
+.npm-cache/
+docs/.vitepress/dist/
+docs/.vitepress/cache/
+
 # LaTeX auxiliary files
 *.aux
 *.out

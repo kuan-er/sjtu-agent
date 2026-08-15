@@ -584,7 +584,11 @@ def _cmd_export_config(args: argparse.Namespace) -> int:
     if getattr(args, "output", None) == "-":
         # --output -：二进制写入 stdout，报告写入 stderr
         try:
-            data = export_bytes(include_state=args.with_state, encrypt_password=encrypt_password)
+            data = export_bytes(
+                include_state=args.with_state,
+                state_files=args.state_file,
+                encrypt_password=encrypt_password,
+            )
             sys.stdout.buffer.write(data)
             sys.stdout.buffer.flush()
         except (OSError, RuntimeError, ValueError) as exc:
@@ -602,6 +606,7 @@ def _cmd_export_config(args: argparse.Namespace) -> int:
         payload = export_to_path(
             destination,
             include_state=args.with_state,
+            state_files=args.state_file,
             encrypt_password=encrypt_password,
             force=args.force,
         )
@@ -671,6 +676,7 @@ def _cmd_import_config(args: argparse.Namespace) -> int:
             target_dir=Path(args.target_dir) if args.target_dir else None,
             decrypt_password=decrypt_password,
             skip_state=args.skip_state,
+            state_files=args.state_file,
             dry_run=args.dry_run,
         )
     except (OSError, RuntimeError, ValueError) as exc:
@@ -915,7 +921,14 @@ def build_parser() -> argparse.ArgumentParser:
     export_config_parser.add_argument(
         "--with-state",
         action="store_true",
-        help="also export reminders/user profile/dining history",
+        help="also export all state files (reminders/user profile/dining history)",
+    )
+    export_config_parser.add_argument(
+        "--state-file",
+        action="append",
+        choices=["reminders.json", "user_profile.json", "dining_history.json"],
+        default=[],
+        help="select a specific state file to export; repeatable",
     )
     export_config_parser.add_argument(
         "--encrypt",
@@ -943,6 +956,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--skip-state",
         action="store_true",
         help="do not import optional state files if present in the archive",
+    )
+    import_config_parser.add_argument(
+        "--state-file",
+        action="append",
+        choices=["reminders.json", "user_profile.json", "dining_history.json"],
+        default=[],
+        help="select a specific state file to import; repeatable",
     )
     import_config_parser.add_argument(
         "--dry-run",

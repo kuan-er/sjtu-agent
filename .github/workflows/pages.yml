@@ -7,6 +7,9 @@ on:
     paths:
       - .github/workflows/pages.yml
       - agent_showcase/**
+      - docs/**
+      - package.json
+      - package-lock.json
   workflow_dispatch:
 
 permissions:
@@ -28,13 +31,33 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install docs dependencies
+        run: npm ci
+
+      - name: Build docs
+        run: npm run docs:build
+
+      - name: Assemble Pages artifact
+        run: |
+          mkdir -p public
+          cp -a agent_showcase/. public/
+          mkdir -p public/docs
+          cp -a docs/.vitepress/dist/. public/docs/
+
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: agent_showcase
+          path: public
 
       - name: Deploy to GitHub Pages
         id: deployment
