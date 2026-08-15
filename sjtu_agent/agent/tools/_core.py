@@ -188,6 +188,20 @@ TOOLS = [
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "save_shuiyuan_cookie",
+            "description": "保存用户从浏览器开发者工具复制的 shuiyuan.sjtu.edu.cn Cookie（完整 Cookie 头或单个 session token），并自动校验。自动登录水源失败时，引导用户复制 Cookie 后调用此工具。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "cookie_text": {"type": "string", "description": "用户粘贴的 Cookie 文本，例如 _forum_session=xxx; _t=yyy"}
+                },
+                "required": ["cookie_text"],
+            },
+        },
+    },
     *_MCP_SKILLS_TOOLS,
     {
         "type": "function",
@@ -1674,6 +1688,68 @@ def tool_setup_shuiyuan() -> dict:
 
     return _setup_shuiyuan_session(cfg, username, password)
 
+
+def _parse_shuiyuan_cookie_text(cookie_text: str) -> list[dict]:
+    """解析用户粘贴的 Cookie。
+
+    支持两种形式：
+      - 完整 Cookie 头：_forum_session=abc; _t=def; ...
+      - 单个 token：直接尝试常见的水源 session cookie 名称
+    """
+    text = (cookie_text or "").strip().strip('"').strip("'")
+    if not text:
+        return []
+
+    pairs: list[dict] = []
+    if "=" in text:
+        for part in text.split(";"):
+            part = part.strip()
+            if not part or "=" not in part:
+                continue
+            name, _, value = part.partition("=")
+            name = name.strip()
+            value = value.strip()
+            if name and value:
+                pairs.append({"name": name, "value": value})
+        return pairs
+
+    return [
+        {"name": name, "value": text}
+        for name in ("_forum_session", "_t", "_discourse_session")
+    ]
+
+
+def tool_save_shuiyuan_cookie(cookie_text: str) -> dict:
+    """保存用户从浏览器复制的 shuiyuan.sjtu.edu.cn session cookie。"""
+    candidates = _parse_shuiyuan_cookie_text(cookie_text)
+    if not candidates:
+        return {"error": "没有收到有效的 Cookie 文本"}
+
+    cfg = {}
+    if CONFIG_PATH.exists():
+        try:
+            cfg = json.loads(CONFIG_PATH.read_text())
+        except Exception as exc:
+            return {"error": f"config.json 读取失败：{exc}"}
+
+    if len(candidates) > 1 or any(c["name"] not in {"_forum_session", "_t", "_discourse_session"} for c in candidates):
+        trial = {c["name"]: c["value"] for c in candidates}
+        if _shuiyuan_session_is_valid(trial):
+            cfg["shuiyuan_cookies"] = trial
+            CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2))
+            return {"success": True, "message": "水源 Cookie 已保存并通过校验。"}
+
+    for candidate in candidates:
+        trial = {candidate["name"]: candidate["value"]}
+        if _shuiyuan_session_is_valid(trial):
+            cfg["shuiyuan_cookies"] = trial
+            CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2))
+            return {"success": True, "message": f"水源 Cookie 已保存（{candidate['name']}）。"}
+
+    return {
+        "error": "Cookie 校验未通过：/session/current.json 未返回当前用户。",
+        "next_action": "请确认复制的是 shuiyuan.sjtu.edu.cn 登录后的完整 Cookie。",
+    }
 
 
 def _setup_shuiyuan_session(cfg: dict, username: str, password: str) -> dict:
@@ -3779,6 +3855,7 @@ _TOOL_REGISTRY = {
     "read_shuiyuan_topic": tool_read_shuiyuan_topic,
     "get_schedule": tool_get_schedule,
     "setup_shuiyuan": _no_args(tool_setup_shuiyuan),
+    "save_shuiyuan_cookie": tool_save_shuiyuan_cookie,
     "add_mcp_server": tool_add_mcp_server,
     "add_skill": tool_add_skill,
     "create_skill": tool_create_skill,

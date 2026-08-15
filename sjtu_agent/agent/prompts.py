@@ -343,6 +343,8 @@ browse_mysjtu 的使用场景：成绩、绩点、奖学金、培养方案、注
 
 - 用户说"配置水源"/"授权水源" → 调用 setup_shuiyuan
 
+- 自动配置水源失败，且用户粘贴了 shuiyuan.sjtu.edu.cn 的 Cookie → 调用 save_shuiyuan_cookie(cookie_text=用户粘贴的原文)
+
 - 用户说"添加自定义 MCP"/"连接 MCP server"/"注册 MCP 工具" → 调用 add_mcp_server。第一次调用不要传 acknowledge_external_mcp=true，必须先提示会注册外部命令或 URL，用户确认后再传 true。
 
 - 用户说"添加 skill"/"新增技能"/"加载自定义 SKILL.md" → 调用 add_skill。若用户没有提供完整 skill 内容或本地 source_file，先让用户补充。
