@@ -10,23 +10,27 @@ sjtu_agent/web/server.py — 本地 Web 配置界面 HTTP Server
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
 import sys
 import time
 import threading
+import uuid
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
 from sjtu_agent.paths import ENV_PATH, CONFIG_PATH, AGENT_CONFIG_PATH, _get_or_create_web_token
+from sjtu_agent.web.attachment_store import AttachmentStore
 from sjtu_agent.web.session_store import SessionStore
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 _WEB_TOKEN = ""
 _session_store = SessionStore()
+_attachment_store = AttachmentStore()
 
 def _check_auth(handler) -> bool:
     """Check the sjtu_token cookie against the stored web token."""
@@ -316,6 +320,65 @@ def _is_cancelled(key: str) -> bool:
         return bool(_cancel_flags.get(key, False))
 
 
+_approval_lock = threading.Lock()
+_approval_states: dict[str, dict] = {}
+
+_WEB_APPROVAL_TOOLS = {
+    "send_email": "会发送真实邮件",
+    "download_assignments": "会下载课程作业文件到本地",
+    "setup_shuiyuan": "会启动浏览器并登录水源社区",
+    "setup_course_community": "会登录选课社区",
+    "setup_qq": "会写入 QQ Bot 配置",
+    "tool_install_parse_backend": "会执行 pip 安装 OCR/ASR 依赖",
+}
+
+
+def _approval_required(tool_name: str) -> bool:
+    return tool_name in _WEB_APPROVAL_TOOLS
+
+
+def _register_approval(key: str, approval_id: str) -> None:
+    event = threading.Event()
+    with _approval_lock:
+        _approval_states[approval_id] = {
+            "key": key,
+            "event": event,
+            "decision": False,
+        }
+
+
+def _wait_for_approval(approval_id: str, timeout: float = 300.0) -> tuple[bool, bool]:
+    with _approval_lock:
+        state = _approval_states.get(approval_id)
+    if not state:
+        return False, False
+    deadline = time.monotonic() + timeout
+    while True:
+        if state["event"].wait(0.2):
+            timed_out = False
+            break
+        if _is_cancelled(state.get("key", "")):
+            timed_out = False
+            break
+        if time.monotonic() >= deadline:
+            timed_out = True
+            break
+    with _approval_lock:
+        decision = bool(state.get("decision", False))
+        _approval_states.pop(approval_id, None)
+    return decision, timed_out
+
+
+def _decide_approval(approval_id: str, approved: bool) -> bool:
+    with _approval_lock:
+        state = _approval_states.get(approval_id)
+    if not state:
+        return False
+    state["decision"] = bool(approved)
+    state["event"].set()
+    return True
+
+
 def _system_message(_agent) -> dict:
     return {"role": "system", "content": _agent.build_system_prompt()}
 
@@ -444,9 +507,9 @@ def _stream_chat(user_message: str, session_id: str | None = None):
     cancelled = False
     try:
         if proto == "anthropic":
-            inner = _stream_chat_anthropic(client, model, _agent, MAX_TOOL_ROUNDS, _sse, history)
+            inner = _stream_chat_anthropic(client, model, _agent, MAX_TOOL_ROUNDS, _sse, history, cancel_key)
         else:
-            inner = _stream_chat_openai(client, model, _agent, MAX_TOOL_ROUNDS, _sse, history)
+            inner = _stream_chat_openai(client, model, _agent, MAX_TOOL_ROUNDS, _sse, history, cancel_key)
 
         for chunk in inner:
             if _is_cancelled(cancel_key):
@@ -467,7 +530,42 @@ def _stream_chat(user_message: str, session_id: str | None = None):
     yield "data: [DONE]\n\n"
 
 
-def _stream_chat_anthropic(client, model, _agent, max_rounds, _sse, history):
+def _web_run_tool(fn_name, fn_args, _agent, cancel_key, _sse):
+    """执行单个工具，负责 tool_start / approval / tool_end SSE 事件。
+
+    危险工具会先等待 Web UI 审批；超时或拒绝时返回结构化错误结果，
+    让 LLM 继续生成解释而不是中断会话。
+    """
+    yield _sse({"tool_start": {"name": fn_name, "input": fn_args}})
+
+    result: str
+    if _approval_required(fn_name):
+        approval_id = uuid.uuid4().hex[:12]
+        _register_approval(cancel_key, approval_id)
+        yield _sse({
+            "approval_required": {
+                "approval_id": approval_id,
+                "tool_name": fn_name,
+                "arguments": fn_args,
+                "risk_hint": _WEB_APPROVAL_TOOLS[fn_name],
+            }
+        })
+        approved, timed_out = _wait_for_approval(approval_id)
+        if timed_out:
+            result = json.dumps({"ok": False, "error": "用户审批超时，已取消该工具执行"}, ensure_ascii=False)
+        elif not approved:
+            result = json.dumps({"ok": False, "error": "用户在 Web UI 中拒绝了该工具执行"}, ensure_ascii=False)
+        else:
+            result = _agent.run_tool(fn_name, fn_args)
+    else:
+        result = _agent.run_tool(fn_name, fn_args)
+
+    result_preview = result[:500] if len(result) > 500 else result
+    yield _sse({"tool_end": {"name": fn_name, "result": result_preview}})
+    return result
+
+
+def _stream_chat_anthropic(client, model, _agent, max_rounds, _sse, history, cancel_key):
     """Anthropic Messages API 流式 + tool_use 循环。"""
 
     # 上下文质量管理（web 独立流式不经过 runner._run_one_turn）
@@ -543,17 +641,14 @@ def _stream_chat_anthropic(client, model, _agent, max_rounds, _sse, history):
             history.append({"role": "assistant", "content": full_text})
             return
 
-        # 执行工具
+        # 执行工具（危险工具会等待 Web UI 审批）
         tool_results = []
         for b in content_blocks:
             if b.get("type") != "tool_use":
                 continue
             fn_name = b["name"]
             fn_args = b["input"] if isinstance(b["input"], dict) else {}
-            yield _sse({"tool_start": {"name": fn_name, "input": fn_args}})
-            result = _agent.run_tool(fn_name, fn_args)
-            result_preview = result[:500] if len(result) > 500 else result
-            yield _sse({"tool_end": {"name": fn_name, "result": result_preview}})
+            result = yield from _web_run_tool(fn_name, fn_args, _agent, cancel_key, _sse)
             tool_results.append({"type": "tool_result", "tool_use_id": b["id"], "content": result})
         api_msgs.append({"role": "user", "content": tool_results})
 
@@ -578,7 +673,7 @@ def _stream_chat_anthropic(client, model, _agent, max_rounds, _sse, history):
         history.append({"role": "assistant", "content": full_text})
 
 
-def _stream_chat_openai(client, model, _agent, max_rounds, _sse, history):
+def _stream_chat_openai(client, model, _agent, max_rounds, _sse, history, cancel_key):
     """OpenAI Chat Completions 流式 + tool_calls 循环。"""
 
     # 上下文质量管理（与 runner._run_one_turn 同钩子，web 独立流式不经过它）
@@ -646,14 +741,11 @@ def _stream_chat_openai(client, model, _agent, max_rounds, _sse, history):
         )
         messages.append(assistant_msg)
 
-        # 执行工具
+        # 执行工具（危险工具会等待 Web UI 审批）
         for tc in tc_objs:
             fn_name = tc.function.name
             fn_args = json.loads(tc.function.arguments or "{}")
-            yield _sse({"tool_start": {"name": fn_name, "input": fn_args}})
-            result = _agent.run_tool(fn_name, fn_args)
-            result_preview = result[:500] if len(result) > 500 else result
-            yield _sse({"tool_end": {"name": fn_name, "result": result_preview}})
+            result = yield from _web_run_tool(fn_name, fn_args, _agent, cancel_key, _sse)
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
 
     # 超出 max_rounds 仍在调工具：强制一次无工具调用合成最终回复
@@ -828,6 +920,10 @@ class _Handler(BaseHTTPRequestHandler):
             ".js": "application/javascript; charset=utf-8",
             ".png": "image/png",
             ".ico": "image/x-icon",
+            ".svg": "image/svg+xml",
+            ".woff": "font/woff",
+            ".woff2": "font/woff2",
+            ".ttf": "font/ttf",
         }.get(ext, "application/octet-stream")
         body = path.read_bytes()
         self.send_response(200)
@@ -875,6 +971,34 @@ class _Handler(BaseHTTPRequestHandler):
         elif path == "/api/sessions":
             if not _check_auth(self): self._send_json({"error":"unauthorized"}, 403); return
             self._send_json({"sessions": _session_store.list_sessions()})
+        elif path.startswith("/api/attachments"):
+            if not _check_auth(self): self._send_json({"error":"unauthorized"}, 403); return
+            if path == "/api/attachments":
+                from urllib.parse import parse_qs
+                qs = parse_qs(urlparse(self.path).query)
+                session_id = (qs.get("session_id") or [""])[0]
+                self._send_json({"attachments": _attachment_store.list_for_session(session_id) if session_id else []})
+            else:
+                match = re.fullmatch(r"/api/attachments/([^/]+)", path)
+                if match:
+                    item = _attachment_store.get(match.group(1))
+                    if not item:
+                        self._send_json({"error": "attachment not found"}, 404)
+                        return
+                    file_path = Path(item["path"])
+                    self.send_response(200)
+                    self.send_header("Content-Type", item["mime_type"])
+                    disposition = "attachment" if "download=1" in urlparse(self.path).query else "inline"
+                    self.send_header(
+                        "Content-Disposition",
+                        f'{disposition}; filename="{item["filename"]}"',
+                    )
+                    data = file_path.read_bytes()
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                else:
+                    self._send_json({"error": "not found"}, 404)
         elif path.startswith("/api/sessions/"):
             if not _check_auth(self): self._send_json({"error":"unauthorized"}, 403); return
             match = re.fullmatch(r"/api/sessions/([^/]+)/messages", path)
@@ -938,6 +1062,54 @@ class _Handler(BaseHTTPRequestHandler):
             body = self._read_body()
             session = _session_store.create_session(body.get("title") or "")
             self._send_json(session, 201)
+        elif path == "/api/attachments":
+            body = self._read_body()
+            session_id = body.get("session_id") or ""
+            filename = body.get("filename") or "file"
+            data_b64 = body.get("data_base64") or ""
+            mime_type = body.get("mime_type") or "application/octet-stream"
+            if not session_id or not _session_store.get_session(session_id):
+                self._send_json({"error": "session not found"}, 404)
+                return
+            if not data_b64:
+                self._send_json({"error": "附件内容为空"}, 400)
+                return
+            try:
+                data = base64.b64decode(data_b64, validate=False)
+            except Exception as exc:
+                self._send_json({"error": f"附件 base64 无效：{exc}"}, 400)
+                return
+            if len(data) > 20 * 1024 * 1024:
+                self._send_json({"error": "附件不能超过 20MB"}, 400)
+                return
+            self._send_json(_attachment_store.save(session_id, filename, data, mime_type), 201)
+        elif path.startswith("/api/approvals/"):
+            match = re.fullmatch(r"/api/approvals/([^/]+)", path)
+            if not match:
+                self._send_json({"error": "not found"}, 404)
+                return
+            body = self._read_body()
+            approved = body.get("decision") in {"approve", True, "true"}
+            if not _decide_approval(match.group(1), approved):
+                self._send_json({"error": "approval not found or expired"}, 404)
+                return
+            self._send_json({"ok": True})
+        elif path.startswith("/api/sessions/") and path.endswith("/messages"):
+            match = re.fullmatch(r"/api/sessions/([^/]+)/messages", path)
+            if not match:
+                self._send_json({"error": "not found"}, 404)
+                return
+            if not _session_store.get_session(match.group(1)):
+                self._send_json({"error": "session not found"}, 404)
+                return
+            body = self._read_body()
+            role = body.get("role")
+            content = str(body.get("content") or "").strip()
+            if role not in {"user", "assistant"} or not content:
+                self._send_json({"error": "role/content 无效"}, 400)
+                return
+            _session_store.append_message(match.group(1), role, content)
+            self._send_json({"ok": True})
         elif path == "/api/chat/cancel":
             body = self._read_body()
             session_id = body.get("session_id") or "__legacy__"
@@ -953,6 +1125,16 @@ class _Handler(BaseHTTPRequestHandler):
             if session_id and not _session_store.get_session(session_id):
                 self._send_json({"error": "session not found"}, 404)
                 return
+            attachment_note = ""
+            for attachment_id in body.get("attachment_ids") or []:
+                item = _attachment_store.get(str(attachment_id))
+                if item and item.get("session_id") == session_id:
+                    attachment_note += (
+                        f"\n[用户已上传附件：{item['filename']} "
+                        f"(id={item['id']}, type={item['mime_type']}, size={item['size']}B)]"
+                    )
+            if attachment_note:
+                user_msg += "\n\n" + attachment_note
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
             self.send_header("Cache-Control", "no-cache")
@@ -1004,6 +1186,11 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json({"error": "unauthorized"}, status=403)
             return
         path = urlparse(self.path).path.rstrip("/")
+        attachment_match = re.fullmatch(r"/api/attachments/([^/]+)", path)
+        if attachment_match:
+            deleted = _attachment_store.delete(attachment_match.group(1))
+            self._send_json({"deleted": deleted}, 200 if deleted else 404)
+            return
         match = re.fullmatch(r"/api/sessions/([^/]+)", path)
         if not match:
             self.send_response(404)
