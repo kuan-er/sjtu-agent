@@ -1,12 +1,25 @@
 # SJTU Agent
 
 [![Test](https://github.com/kuan-er/sjtu-agent/actions/workflows/test.yml/badge.svg)](https://github.com/kuan-er/sjtu-agent/actions/workflows/test.yml)
+[![Pages](https://github.com/kuan-er/sjtu-agent/actions/workflows/pages.yml/badge.svg)](https://github.com/kuan-er/sjtu-agent/actions/workflows/pages.yml)
+[![Release](https://github.com/kuan-er/sjtu-agent/actions/workflows/release.yml/badge.svg)](https://github.com/kuan-er/sjtu-agent/actions/workflows/release.yml)
+[![Python](https://img.shields.io/badge/Python-3.11%20%7C%203.13-blue)](https://www.python.org/)
 
 面向上海交通大学学生的校园助手，提供终端对话、飞书 / Telegram / 微信 / QQ Bot、DDL 聚合、日报推送和 MCP Server。
 
 [English Version](README_EN.md) · [项目展示页](https://kuan-er.github.io/sjtu-agent) · [文档站](https://kuan-er.github.io/sjtu-agent/docs/) · [排错手册](docs/TROUBLESHOOTING.md) · [服务器部署](docs/SERVER_DEPLOYMENT.md)
 
 如果这个项目对你有帮助，欢迎点一个 ⭐ Star！
+
+## 目录
+
+- [快速开始](#快速开始)
+- [常用命令速查](#常用命令速查)
+- [功能](#功能)
+- [配置](#配置)
+- [后台服务](#后台服务)
+- [平台接入](#平台接入)
+- [安全说明](#安全说明)
 
 ---
 
@@ -74,6 +87,22 @@ ZHIYUAN_API_KEY=你的APIKey
    ```
 
 > 视觉模型仅用于识图（一次性调用），不参与对话历史。API Key 仅存本地，输入时不回显、不打印。完整配置模板见 [agent_config.example.json](agent_config.example.json)。
+
+---
+
+## 常用命令速查
+
+| 命令 | 用途 |
+| --- | --- |
+| `sjtu-agent` | 终端对话 |
+| `sjtu-agent doctor` | 检查配置、路径和依赖 |
+| `sjtu-agent update` | 更新代码并自动恢复后台服务 |
+| `sjtu-agent web` | 本地 Web 配置页（`--host 0.0.0.0` 供服务器监听） |
+| `sjtu-agent web-proxy --domain <域名>` | 生成 Nginx / Caddy HTTPS 反代配置 |
+| `sjtu-agent install-daemons` | 安装后台服务；`daemons status/uninstall/resync` 管理服务 |
+| `sjtu-agent export-config / import-config` | 本机配置迁移到服务器（SSH 管道直传） |
+| `sjtu-agent ddl` / `daily-report` / `news-digest` | DDL、日报、校园新闻 |
+| `sjtu-agent feishu-bot` 等 | 启动对应平台 Bot |
 
 ---
 
@@ -260,7 +289,17 @@ sjtu-agent install-parse-backends --backend whisper
 sjtu-agent export-config --output - | ssh user@server "sjtu-agent import-config - --yes"
 ```
 
-详见 [服务器部署](docs/SERVER_DEPLOYMENT.md)。
+归档默认 **24 小时过期**（`--expires-hours` 调整，`--no-expiry` 关闭），导入端默认拒绝过期归档（`--allow-expired` 可放宽）；可选 `--encrypt` 加密。详见 [服务器部署](docs/SERVER_DEPLOYMENT.md)。
+
+### 远程访问 Web UI
+
+默认 `sjtu-agent web` 只监听 `127.0.0.1`。服务器上启用远程访问并生成 HTTPS 反代配置：
+
+```bash
+sjtu-agent web --host 0.0.0.0 --port 7860 --no-browser
+sjtu-agent web-proxy --type nginx --domain sjtu-agent.example.com --output sjtu-agent.conf
+# 或 --type caddy 直接放入 Caddyfile
+```
 
 ### 安全说明
 

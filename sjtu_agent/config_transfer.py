@@ -17,6 +17,7 @@ sjtu_agent/config_transfer.py — 运行时配置的导出 / 导入
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import json
 import os
@@ -24,7 +25,7 @@ import shutil
 import tarfile
 import tempfile
 from collections.abc import Iterable
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -39,7 +40,9 @@ from sjtu_agent.paths import (
 )
 
 _FORMAT_NAME = "sjtu-agent-config"
-_FORMAT_VERSION = 1
+_FORMAT_VERSION = 2
+_DEFAULT_EXPIRY_HOURS = 24
+_MAX_EXPIRY_HOURS = 720
 _MAGIC = b"SJTUAGENTCFG\x00\x01"
 _SALT_LENGTH = 16
 _KDF_ITERATIONS = 600_000
@@ -171,13 +174,41 @@ def _normalise_state_files(state_files: Iterable[str] | None) -> set[str]:
     return selected
 
 
+def _normalise_expiry(expires_hours: int | None) -> int | None:
+    if expires_hours is None:
+        return None
+    try:
+        value = int(expires_hours)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("--expires-hours 必须是整数小时数，或用 --no-expiry 关闭过期") from exc
+    if value < 1 or value > _MAX_EXPIRY_HOURS:
+        raise ValueError(f"--expires-hours 必须在 1-{_MAX_EXPIRY_HOURS} 之间")
+    return value
+
+
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _parse_iso_utc(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
 def export_bytes(
     *,
     include_state: bool = False,
     state_files: Iterable[str] | None = None,
     encrypt_password: str | None = None,
+    expires_hours: int | None = _DEFAULT_EXPIRY_HOURS,
 ) -> bytes:
-    """把运行时配置打包为 tar.gz 字节流。"""
+    """把运行时配置打包为 tar.gz 字节流。
+
+    expires_hours 默认 24 小时；None 表示不设置过期时间（不推荐用于明文归档）。
+    """
+    expiry = _normalise_expiry(expires_hours)
     selected_state = _normalise_state_files(state_files)
     if include_state:
         selected_state = set(_STATE_NAMES)
@@ -197,17 +228,27 @@ def export_bytes(
             "没有可导出的运行时配置。请先运行 sjtu-agent setup 或 sjtu-agent doctor 检查。"
         )
 
-    manifest = {
+    created_at = datetime.now(timezone.utc)
+    manifest: dict[str, Any] = {
         "format": _FORMAT_NAME,
         "version": _FORMAT_VERSION,
-        "files": names,
+        "created_at": created_at.isoformat(),
+        "files": [],
     }
+    if expiry is not None:
+        manifest["expires_at"] = (created_at + timedelta(hours=expiry)).isoformat()
 
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w:gz", format=tarfile.PAX_FORMAT) as tar:
-        _tar_bytes_entry(tar, "manifest.json", json.dumps(manifest, ensure_ascii=False).encode("utf-8"))
         for name in names:
-            _tar_bytes_entry(tar, name, _read_bytes(_PATH_BY_NAME[name]))
+            content = _read_bytes(_PATH_BY_NAME[name])
+            manifest["files"].append({"name": name, "sha256": _sha256(content)})
+            _tar_bytes_entry(tar, name, content)
+        _tar_bytes_entry(
+            tar,
+            "manifest.json",
+            json.dumps(manifest, ensure_ascii=False).encode("utf-8"),
+        )
 
     data = buffer.getvalue()
     if encrypt_password is not None:
@@ -221,6 +262,7 @@ def _parse_archive(
     decrypt_password: str | None = None,
     skip_state: bool = False,
     state_files: Iterable[str] | None = None,
+    allow_expired: bool = False,
 ) -> dict[str, bytes]:
     """解密（如需要）、解包并校验归档，返回 name -> bytes。"""
     selected_state = _normalise_state_files(state_files)
@@ -254,13 +296,34 @@ def _parse_archive(
             if manifest_version > _FORMAT_VERSION:
                 raise ValueError(f"归档版本 {manifest.get('version')} 高于当前支持的版本 {_FORMAT_VERSION}")
 
+            expires_at = manifest.get("expires_at")
+            if isinstance(expires_at, str) and not allow_expired:
+                try:
+                    if _parse_iso_utc(expires_at) < datetime.now(timezone.utc):
+                        raise ValueError(
+                            f"配置归档已过期（{expires_at}）。"
+                            "请重新导出；若确认归档可信，可添加 --allow-expired 导入。"
+                        )
+                except ValueError:
+                    raise
+
             files = manifest.get("files", [])
             if not isinstance(files, list) or not files:
                 raise ValueError("归档 manifest 中没有可导入的文件")
 
             contents: dict[str, bytes] = {}
-            for raw_name in files:
-                name = _tar_member_name(str(raw_name))
+            for entry in files:
+                # v2 文件列表为 [{"name": ..., "sha256": ...}]，兼容 v1 的 [文件名]。
+                if isinstance(entry, str):
+                    raw_name = entry
+                    expected_sha256: str | None = None
+                elif isinstance(entry, dict):
+                    raw_name = entry.get("name")
+                    expected_sha256 = entry.get("sha256")
+                else:
+                    raise ValueError(f"归档 manifest 文件条目格式无效：{entry!r}")
+
+                name = _tar_member_name(str(raw_name or ""))
                 if name is None:
                     raise ValueError(f"归档包含不允许的文件：{raw_name!r}")
                 if skip_state and name in _STATE_NAMES:
@@ -284,6 +347,8 @@ def _parse_archive(
                         json.loads(content.decode("utf-8"))
                     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
                         raise ValueError(f"{name} 不是有效 JSON：{exc}") from exc
+                if expected_sha256 and _sha256(content) != expected_sha256:
+                    raise ValueError(f"{name} 的 SHA-256 校验失败，归档可能已损坏或被篡改")
                 contents[name] = content
 
             if not contents:
@@ -300,12 +365,14 @@ def import_bytes(
     decrypt_password: str | None = None,
     skip_state: bool = False,
     state_files: Iterable[str] | None = None,
+    allow_expired: bool = False,
     dry_run: bool = False,
     backup: bool = True,
 ) -> dict[str, Any]:
     """把导出归档导入到目标运行时目录。
 
     state_files 可精确选择要导入的状态文件；skip_state=True 时忽略所有状态文件。
+    allow_expired=True 允许导入已超过 expires_at 的归档（默认拒绝）。
     返回报告；dry_run 时不写任何文件也不备份。
     """
     target = Path(target_dir or DATA_DIR)
@@ -315,6 +382,7 @@ def import_bytes(
         decrypt_password=decrypt_password,
         skip_state=skip_state,
         state_files=state_files,
+        allow_expired=allow_expired,
     )
 
     report: dict[str, Any] = {
@@ -386,6 +454,7 @@ def export_to_path(
     include_state: bool = False,
     state_files: Iterable[str] | None = None,
     encrypt_password: str | None = None,
+    expires_hours: int | None = _DEFAULT_EXPIRY_HOURS,
     force: bool = False,
 ) -> dict[str, Any]:
     """导出到本地文件，返回报告。"""
@@ -395,6 +464,7 @@ def export_to_path(
         include_state=include_state,
         state_files=state_files,
         encrypt_password=encrypt_password,
+        expires_hours=expires_hours,
     )
     destination.parent.mkdir(parents=True, exist_ok=True)
     _atomic_write_bytes(destination, data)
