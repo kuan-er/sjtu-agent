@@ -50,4 +50,7 @@ sessions/
 # Local runtime test artifacts
 .test_runtime_manual/
 .test_runtime_other/
+.test_runtime_pytest*/
+.test_pytest_tmp*/
+zztest_*/
 .chroma_test/

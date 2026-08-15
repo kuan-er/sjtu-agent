@@ -58,7 +58,7 @@ setup 已按"只问一项"推进。进一步：
 
 ### 非目标（附录：未来延伸）
 
-服务器 24/7 部署（uv+systemd / Docker）不在当前范围。研究结论：Docker 对本项目（单 Python 代码库）偏重，uv+systemd 是更贴的轻量路径；真正的卡点是**头无化 setup + 登录/扫码服务器化**——留待资源充足时再做。
+Docker 部署不在当前范围。研究结论：Docker 对本项目（单 Python 代码库）偏重，uv+systemd 是更贴的轻量路径。**轻量服务器部署（Linux + systemd 用户单元）已提供**，见 [SERVER_DEPLOYMENT.md](SERVER_DEPLOYMENT.md)；剩余卡点是**完全无交互的 jAccount 登录 / 微信扫码服务器化**——登录态仍建议本机配置后同步到服务器。
 
 ## 四、分阶段实施路线
 

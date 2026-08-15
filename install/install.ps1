@@ -208,10 +208,24 @@ if ($CurrentUserPath -notlike "*$VenvScripts*") {
     Write-Host "$VenvScripts is already in PATH."
 }
 
+# 安装/重建 venv 后，按之前的安装清单自动恢复后台服务（Task Scheduler / psmux）。
+# 若项目目录或 Python 路径没有变化，resync 会直接跳过。
+function Invoke-DaemonResync {
+    Write-Log "Restoring previously installed background services"
+    & $VenvPython -m sjtu_agent daemons resync *> $null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  (background service resync skipped or failed; run 'sjtu-agent install-daemons' manually if needed.)"
+    }
+    else {
+        Write-Host "  (background services are up to date, or were restored from the install manifest.)"
+    }
+}
+
 if (-not $NoSetup) {
     Write-Log "Launching sjtu-agent setup"
     & $VenvPython -m sjtu_agent setup
     $SetupExit = $LASTEXITCODE
+    Invoke-DaemonResync
     Write-Host ""
     Write-Host "=========================================="
     Write-Host "If 'sjtu-agent' is not recognized in a new terminal,"
@@ -223,6 +237,7 @@ if (-not $NoSetup) {
     exit $SetupExit
 }
 
+Invoke-DaemonResync
 Write-Host ""
 Write-Host "Installation complete."
 Write-Host ""

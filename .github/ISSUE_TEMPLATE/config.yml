@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 💬 水源社区讨论帖
+    url: https://shuiyuan.sjtu.edu.cn/t/topic/471260
+    about: 非 bug 的交流可以先到水源社区帖子下讨论
+  - name: 📖 排错手册
+    url: https://github.com/kuan-er/sjtu-agent/blob/main/docs/TROUBLESHOOTING.md
+    about: 提 issue 前请先查看常见问题排错手册

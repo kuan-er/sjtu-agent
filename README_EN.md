@@ -6,6 +6,8 @@ A campus assistant for Shanghai Jiao Tong University students, offering terminal
 
 中文文档: [README.md](README.md)
 
+Docs: [Troubleshooting](docs/TROUBLESHOOTING.md) · [Server Deployment](docs/SERVER_DEPLOYMENT.md)
+
 👉 **[Project Showcase](https://kuan-er.github.io/sjtu-agent)**
 
 If this project helps you, please consider giving it a ⭐ Star!
@@ -205,9 +207,13 @@ Windows offers two backend options: **Task Scheduler** (default, for scheduled t
 
 ```powershell
 sjtu-agent install-daemons
+sjtu-agent daemons status      # inspect installed services
+sjtu-agent daemons uninstall   # remove all services
 ```
 
 Daily report at 22:00 + reminder check every 60s + Canvas course monitoring + Telegram/Feishu/WeChat/QQ Bots at logon + Web UI.
+
+> Service installations are recorded in `.daemon_manifest.json` under the runtime data directory. Re-running the installer, moving the repo, or rebuilding `.venv` will automatically run `sjtu-agent daemons resync`, so you no longer need to reconfigure Task Scheduler / psmux manually after a reinstall.
 
 ### psmux for Persistent Processes
 
@@ -554,7 +560,7 @@ Runtime files are stored in platform-specific user data directories, not the rep
 
 - macOS: `~/Library/Application Support/sjtu-agent`
 - Linux: `${XDG_DATA_HOME:-~/.local/share}/sjtu-agent`
-- Windows: `%APPDATA%/sjtu-agent`
+- Windows: see `sjtu-agent doctor` (usually `%LOCALAPPDATA%\sjtu-agent\sjtu-agent`)
 
 Legacy files in the repo root are auto-migrated on first import.
 

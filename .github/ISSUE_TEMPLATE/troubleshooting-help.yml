@@ -1,0 +1,46 @@
+name: 🩺 排错求助
+description: 按排错手册排查后仍未解决，请求帮助
+title: "help: "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请先按 [docs/TROUBLESHOOTING.md](https://github.com/kuan-er/sjtu-agent/blob/main/docs/TROUBLESHOOTING.md) 排查。描述越具体，解决越快。
+  - type: input
+    id: platform
+    attributes:
+      label: 操作系统
+      placeholder: 例如 Windows 11 / Ubuntu 24.04 / macOS 15
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: 问题领域
+      options:
+        - 安装 / 更新
+        - 后台服务（Task Scheduler / psmux / launchd / systemd）
+        - 大模型 API / setup
+        - jAccount / 水源授权
+        - 飞书 Bot
+        - Telegram Bot
+        - 微信 / QQ Bot
+        - DDL / Canvas / 日报
+        - Web UI
+        - 其他
+    validations:
+      required: true
+  - type: textarea
+    id: detail
+    attributes:
+      label: 已做过的排查与现象
+      placeholder: "运行了什么命令，期望什么，实际看到什么"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志 / doctor 输出
+      description: 注意脱敏，不要粘贴凭据。
+      render: shell

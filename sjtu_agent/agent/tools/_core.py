@@ -1608,16 +1608,54 @@ def tool_setup_canvas(open_browser: bool = True, auto_create: bool = False, toke
     }
 
 
+def _cookies_header(cookies: dict) -> str:
+    return "; ".join(f"{k}={v}" for k, v in (cookies or {}).items())
+
+
+def _shuiyuan_session_is_valid(cookies: dict) -> bool:
+    """用 Discourse 当前用户接口验证 shuiyuan session cookie 是否仍登录。"""
+    if not cookies:
+        return False
+    try:
+        r = requests.get(
+            "https://shuiyuan.sjtu.edu.cn/session/current.json",
+            headers={
+                "Cookie": _cookies_header(cookies),
+                "User-Agent": "Mozilla/5.0",
+                "Accept": "application/json",
+            },
+            timeout=10,
+        )
+        if r.status_code != 200:
+            return False
+        data = r.json()
+        return bool(data.get("current_user"))
+    except Exception:
+        return False
+
+
 def tool_setup_shuiyuan() -> dict:
-    """用 Playwright 登录水源社区，保存 session cookie（User API Key 方案已废弃）。"""
-    username = os.environ.get("JACCOUNT_USERNAME", "").strip()
-    password = os.environ.get("JACCOUNT_PASSWORD", "").strip()
+    """授权水源社区：优先复用已保存且仍有效的 session cookie。
+
+    User API Key 方案已废弃，当前方案为 Playwright 登录后保存 session cookie。
+    每次调用前先验证旧 cookie，避免无谓登录触发 jAccount 异地登录风控。
+    """
     cfg = {}
     if CONFIG_PATH.exists():
         try:
             cfg = json.loads(CONFIG_PATH.read_text())
         except Exception:
             pass
+
+    existing = cfg.get("shuiyuan_cookies") or {}
+    if _shuiyuan_session_is_valid(existing):
+        return {
+            "success": True,
+            "message": "水源社区 session 仍然有效，已跳过重新登录。",
+        }
+
+    username = os.environ.get("JACCOUNT_USERNAME", "").strip()
+    password = os.environ.get("JACCOUNT_PASSWORD", "").strip()
 
     if not username and not cfg.get("jaccount_cookies"):
         return {
@@ -1698,9 +1736,16 @@ def _setup_shuiyuan_session(cfg: dict, username: str, password: str) -> dict:
     if not new_session:
         return _shuiyuan_session_error("未能获取水源社区 session，请检查账号")
 
+    # 不能只看域名 cookie：即使没有登录也可能拿到游客 cookie。
+    # 必须通过 Discourse 当前用户接口确认 session 真的已登录。
+    if not _shuiyuan_session_is_valid(new_session):
+        return _shuiyuan_session_error(
+            "已拿到水源社区 cookie，但当前用户接口校验未通过（可能仍未登录）。"
+        )
+
     cfg["shuiyuan_cookies"] = new_session
     CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2))
-    return {"success": True, "message": f"水源社区 session 登录成功（需定期更新）"}
+    return {"success": True, "message": "水源社区 session 登录成功（需定期更新）"}
 
 
 # ── 选课社区 course.sjtu.plus ────────────────────────────────────────────────

@@ -5,6 +5,7 @@ sjtu_agent/web/server.py — 本地 Web 配置界面 HTTP Server
     sjtu-agent web                # 启动后自动打开浏览器
     sjtu-agent web --port 8080    # 自定义端口
     sjtu-agent web --no-browser   # 不自动打开浏览器
+    sjtu-agent web --host 0.0.0.0 --no-browser  # 服务器监听所有网卡
 """
 
 from __future__ import annotations
@@ -1064,21 +1065,24 @@ class _Handler(BaseHTTPRequestHandler):
 
 # ── 启动入口 ──────────────────────────────────────────────────────────────────
 
-def start(port: int = 7860, open_browser: bool = True) -> None:
+def start(port: int = 7860, open_browser: bool = True, host: str = "127.0.0.1") -> None:
     global _WEB_TOKEN
     _WEB_TOKEN = _get_or_create_web_token()
 
-    server = ThreadingHTTPServer(("127.0.0.1", port), _Handler)
-    url = f"http://127.0.0.1:{port}"
+    server = ThreadingHTTPServer((host, port), _Handler)
+    url = f"http://{host}:{port}"
     print(f"\n🌐  SJTU Agent 配置界面已启动：{url}")
     print(f"     访问令牌（自动通过 Cookie 传递）：{_WEB_TOKEN}")
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        print("     [!] 正在监听非回环地址，请勿在无 HTTPS 反代的情况下直接暴露公网。")
     print("     按 Ctrl+C 关闭\n")
 
     if open_browser:
         # 延迟 0.5s 再打开，确保 server 已就绪
+        browser_url = f"http://127.0.0.1:{port}"
         def _open():
             time.sleep(0.5)
-            webbrowser.open(url)
+            webbrowser.open(browser_url)
         threading.Thread(target=_open, daemon=True).start()
 
     try:

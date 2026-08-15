@@ -8,7 +8,15 @@ from pathlib import Path
 
 from sjtu_agent import __version__
 from sjtu_agent.paths import describe_runtime_paths
-from sjtu_agent.scheduler import available_service_names, current_platform_name, daemon_status, install_daemons, uninstall_daemons
+from sjtu_agent.scheduler import (
+    available_service_names,
+    current_platform_name,
+    daemon_status,
+    install_daemons,
+    list_deployments,
+    resync_daemons,
+    uninstall_daemons,
+)
 from sjtu_agent.setup_wizard import register_setup_parser
 from sjtu_agent.terminal_ui import print_json
 
@@ -107,19 +115,32 @@ def _cmd_update(args: argparse.Namespace) -> int:
 
     # ── 1.5 检测已安装的后台服务 ───────────────────────────────────────────
     # 后台 daemon 在 git pull + reinstall 后仍引用旧模块路径，会导致
-    # ModuleNotFoundError（issue #113）。检测到后，在更新前停止、更新后重启。
-    _installed_daemons: list[tuple[str, list[str]]] = []  # [(backend, [names])]
-    for _backend in ("taskschd", "psmux"):
-        try:
-            _st = daemon_status(backend=_backend)
-            _names = [
-                s["name"] for s in (_st.get("services") or [])
-                if isinstance(s, dict) and s.get("installed")
-            ]
-            if _names:
-                _installed_daemons.append((_backend, _names))
-        except Exception:
-            pass
+    # ModuleNotFoundError（issue #113）。从安装清单读取所有平台的部署记录，
+    # 更新前停止、更新后按原参数恢复。
+    _installed_daemons = list_deployments()
+
+    def _restore_installed_daemons() -> None:
+        """按更新前的清单重启后台服务。"""
+        for _deployment in _installed_daemons:
+            _backend = _deployment["backend"]
+            _names = _deployment["services"]
+            print(f"[i] 重启后台服务（{_backend}）: {', '.join(_names)}")
+            try:
+                kwargs: dict = {
+                    "daily_report_time": tuple(_deployment.get("daily_report_time") or (22, 0)),
+                    "remind_interval": int(_deployment.get("remind_interval") or 60),
+                    "telegram_throttle": int(_deployment.get("telegram_throttle") or 10),
+                }
+                if _deployment.get("output_dir"):
+                    kwargs["output_dir"] = Path(_deployment["output_dir"])
+                install_daemons(
+                    service_names=tuple(_names),
+                    python_executable=Path(sys.executable),
+                    backend=_backend,
+                    **kwargs,
+                )
+            except Exception as e:
+                print(f"[!] 重启后台服务失败: {e}")
 
     # ── 1. 显示待更新内容 ──────────────────────────────────────────────────
     if not args.skip_git:
@@ -179,10 +200,15 @@ def _cmd_update(args: argparse.Namespace) -> int:
 
     # ── 2. git pull ────────────────────────────────────────────────────────
     # 确认要更新后，先停后台服务（避免更新后旧模块引用报错）
-    for _backend, _names in _installed_daemons:
+    for _deployment in _installed_daemons:
+        _backend = _deployment["backend"]
+        _names = _deployment["services"]
         print(f"[i] 更新前停止后台服务（{_backend}）: {', '.join(_names)}")
         try:
-            uninstall_daemons(service_names=tuple(_names), backend=_backend)
+            kwargs: dict = {}
+            if _deployment.get("output_dir"):
+                kwargs["output_dir"] = Path(_deployment["output_dir"])
+            uninstall_daemons(service_names=tuple(_names), backend=_backend, **kwargs)
         except Exception as e:
             print(f"[!] 停止后台服务失败（可忽略）: {e}")
     if not args.skip_git:
@@ -212,6 +238,7 @@ def _cmd_update(args: argparse.Namespace) -> int:
                 print("    git log --oneline -5   # 查看本地提交")
                 print("    如有未推送的本地提交，可尝试: git pull --rebase")
                 print("    或放弃本地修改: git reset --hard origin/main")
+                _restore_installed_daemons()
                 return 1
 
     # ── 3. pip install -e . ────────────────────────────────────────────────
@@ -222,6 +249,7 @@ def _cmd_update(args: argparse.Namespace) -> int:
     result = subprocess.run(pip_cmd)
     if result.returncode != 0:
         print("[!] 依赖安装失败，请手动运行: pip install -e " + str(PROJECT_ROOT))
+        _restore_installed_daemons()
         return 1
 
     # ── 4. 可选：更新 Playwright Chromium ─────────────────────────────────
@@ -243,12 +271,7 @@ def _cmd_update(args: argparse.Namespace) -> int:
 
     # ── 5.5 重启后台服务 ──────────────────────────────────────────────────
     if _installed_daemons:
-        for _backend, _names in _installed_daemons:
-            print(f"[i] 更新后重启后台服务（{_backend}）: {', '.join(_names)}")
-            try:
-                install_daemons(service_names=tuple(_names), backend=_backend)
-            except Exception as e:
-                print(f"[!] 重启后台服务失败: {e}")
+        _restore_installed_daemons()
 
     # ── 6. 打印新版本 ────────────────────────────────────────────────────
     try:
@@ -414,7 +437,7 @@ def _cmd_manage_skill(args: argparse.Namespace) -> int:
 
 def _cmd_web(args: argparse.Namespace) -> int:
     from sjtu_agent.web.server import start
-    start(port=args.port, open_browser=not args.no_browser)
+    start(host=args.host, port=args.port, open_browser=not args.no_browser)
     return 0
 
 
@@ -471,6 +494,36 @@ def _cmd_install_daemons(args: argparse.Namespace) -> int:
             except Exception:
                 time.sleep(1)
         webbrowser.open(url)
+    return 0
+
+
+def _cmd_daemons_status(args: argparse.Namespace) -> int:
+    payload = daemon_status(
+        service_names=tuple(args.services) if args.services else None,
+        backend=args.backend,
+    )
+    print_json(payload)
+    return 0 if payload.get("all_installed", payload.get("all_running", True)) else 1
+
+
+def _cmd_daemons_uninstall(args: argparse.Namespace) -> int:
+    try:
+        payload = uninstall_daemons(
+            service_names=tuple(args.services) if args.services else None,
+            backend=args.backend,
+        )
+    except (RuntimeError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    print_json(payload)
+    return 0
+
+
+def _cmd_daemons_resync(args: argparse.Namespace) -> int:
+    payload = resync_daemons(
+        python_executable=Path(args.python_executable) if args.python_executable else None,
+    )
+    print_json(payload)
     return 0
 
 
@@ -574,6 +627,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     web_parser = subparsers.add_parser("web", help="open the local web configuration UI in your browser")
     web_parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="host/interface to bind (default: 127.0.0.1; use 0.0.0.0 for remote access)",
+    )
+    web_parser.add_argument(
         "--port",
         type=int,
         default=7860,
@@ -637,6 +695,55 @@ def build_parser() -> argparse.ArgumentParser:
         help="(Windows) 后端选择：taskschd（任务计划程序，默认）或 psmux（分离会话）",
     )
     install_daemons_parser.set_defaults(func=_cmd_install_daemons)
+
+    daemons_parser = subparsers.add_parser(
+        "daemons",
+        help="inspect, uninstall, or resync previously installed background services",
+    )
+    daemons_sub = daemons_parser.add_subparsers(dest="daemons_action", required=True)
+
+    daemons_status_parser = daemons_sub.add_parser("status", help="show background service status")
+    daemons_status_parser.add_argument(
+        "--services",
+        nargs="+",
+        choices=available_service_names(),
+        help="subset of services to query",
+    )
+    daemons_status_parser.add_argument(
+        "--backend",
+        choices=["taskschd", "psmux"],
+        default="taskschd",
+        help="(Windows) 后端选择：taskschd 或 psmux",
+    )
+    daemons_status_parser.set_defaults(func=_cmd_daemons_status)
+
+    daemons_uninstall_parser = daemons_sub.add_parser(
+        "uninstall", help="stop and uninstall background services"
+    )
+    daemons_uninstall_parser.add_argument(
+        "--services",
+        nargs="+",
+        choices=available_service_names(),
+        help="subset of services to uninstall (default: all)",
+    )
+    daemons_uninstall_parser.add_argument(
+        "--backend",
+        choices=["taskschd", "psmux"],
+        default="taskschd",
+        help="(Windows) 后端选择：taskschd 或 psmux",
+    )
+    daemons_uninstall_parser.set_defaults(func=_cmd_daemons_uninstall)
+
+    daemons_resync_parser = daemons_sub.add_parser(
+        "resync",
+        help="restore background services recorded in the install manifest after a reinstall",
+    )
+    daemons_resync_parser.add_argument(
+        "--python-executable",
+        default=None,
+        help="python executable to use (default: current interpreter)",
+    )
+    daemons_resync_parser.set_defaults(func=_cmd_daemons_resync)
 
     doctor = subparsers.add_parser("doctor", help="print runtime paths and setup status")
     doctor.set_defaults(func=_cmd_doctor)
