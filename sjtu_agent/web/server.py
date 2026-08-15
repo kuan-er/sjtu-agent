@@ -1130,8 +1130,12 @@ class _Handler(BaseHTTPRequestHandler):
                 item = _attachment_store.get(str(attachment_id))
                 if item and item.get("session_id") == session_id:
                     attachment_note += (
-                        f"\n[用户已上传附件：{item['filename']} "
-                        f"(id={item['id']}, type={item['mime_type']}, size={item['size']}B)]"
+                        f"\n[用户上传了附件：{item['filename']} "
+                        f"(id={item['id']}, type={item['mime_type']}, size={item['size']}B)"
+                    )
+                    attachment_note += (
+                        f" 本地文件路径：{item['path']}。"
+                        "如需读取图片/PDF/文档内容，请调用 parse_local_file(file_path=该路径)。]\n"
                     )
             if attachment_note:
                 user_msg += "\n\n" + attachment_note
