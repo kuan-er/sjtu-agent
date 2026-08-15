@@ -405,15 +405,97 @@ if TEXTUAL_AVAILABLE:
 
             event.input.value = ""
             attachment_items = self.staged_attachment_items()
-            attachment_note = build_attachment_note(attachment_items)
-            message = (text or "请查看我上传的附件") + attachment_note
-            command_mode = (
-                not attachment_items
-                and text.startswith("/")
-                and is_core_command(text)
-            )
+            if not attachment_items:
+                await self.start_turn(
+                    text,
+                    command_mode=text.startswith("/") and is_core_command(text),
+                )
+                return
+
+            # 有附件：解析在后台线程执行，UI 先显示进度，避免视觉模型 / OCR 阻塞。
+            base_message = text or "请查看我上传的附件"
+            if self.session_id is None:
+                session = self.model.create_session("新会话")
+                await self.refresh_sessions(select_id=session.get("id"))
+            turn_session = self.model.ensure_for_message(base_message)
             self.staged_attachment_ids = []
-            await self.start_turn(message, command_mode=command_mode)
+            self.busy = True
+            try:
+                await self.messages.mount(
+                    Markdown(
+                        f"> 📎 正在解析附件（{len(attachment_items)} 个）…",
+                        id="attach-progress",
+                    )
+                )
+                self.messages.scroll_end(animate=False)
+            except Exception:
+                pass
+            threading.Thread(
+                target=self._prepare_attachment_message,
+                args=(base_message, attachment_items, turn_session),
+                daemon=True,
+            ).start()
+
+        def _prepare_attachment_message(
+            self,
+            base_message: str,
+            attachment_items: list[dict[str, Any]],
+            turn_session: str,
+        ) -> None:
+            try:
+                note = build_attachment_note(attachment_items)
+                error = None
+            except Exception as exc:
+                note = ""
+                error = str(exc)
+            self.post_thread_event(
+                self.attachment_prepare_done,
+                base_message,
+                note,
+                error,
+                turn_session,
+            )
+
+        def attachment_prepare_done(
+            self,
+            base_message: str,
+            note: str,
+            error: str | None,
+            turn_session: str,
+        ) -> None:
+            if turn_session != self.session_id:
+                return
+            if error:
+                self.schedule_worker(
+                    self.attachment_prepare_failed(error),
+                    group="attachment-send",
+                )
+                return
+            self.schedule_worker(
+                self.send_after_attachment(base_message + note, turn_session),
+                group="attachment-send",
+            )
+
+        async def attachment_prepare_failed(self, error: str) -> None:
+            try:
+                progress = self.query_one("#attach-progress", Markdown)
+                await progress.remove()
+            except Exception:
+                pass
+            await self.messages.mount(Markdown(f"> ❌ 附件解析失败：{error}"))
+            self.messages.scroll_end(animate=False)
+            self.busy = False
+
+        async def send_after_attachment(self, message: str, turn_session: str) -> None:
+            if turn_session != self.session_id:
+                return
+            try:
+                progress = self.query_one("#attach-progress", Markdown)
+                await progress.remove()
+            except Exception:
+                pass
+            self.busy = False
+            await self.start_turn(message, command_mode=False)
 
         def schedule_worker(self, work, group: str, *, exclusive: bool = False) -> None:
             """启动 UI worker；任何刷新错误都不允许让 App 闪退。"""

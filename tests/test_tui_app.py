@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from pathlib import Path
 
 import pytest
@@ -276,6 +277,69 @@ def test_attach_command_uses_whitelisted_store_and_preparses(tmp_path, monkeypat
             assert sent_messages
             assert "预解析出的作业内容" in sent_messages[-1]
             assert str(source) not in sent_messages[-1]
+
+    _run(scenario())
+
+
+def test_attachment_parsing_runs_off_the_ui_thread(tmp_path, monkeypatch):
+    from sjtu_agent.tui.attachments import TuiAttachments
+    from sjtu_agent.web.attachment_store import AttachmentStore
+
+    store = SessionStore(tmp_path / "web_sessions.sqlite3")
+    model = TuiSessionModel(store)
+    model.create_session("新会话")
+    source = tmp_path / "image.png"
+    source.write_bytes(b"fake-image")
+
+    started = threading.Event()
+    release = threading.Event()
+    sent_messages = []
+
+    def fake_parse(path, **kwargs):
+        started.set()
+        release.wait(timeout=10)
+        return {"ok": True, "content": "图片解析内容"}
+
+    def fake_stream(session_id, user_message):
+        sent_messages.append(user_message)
+        yield {"kind": "done"}
+
+    monkeypatch.setattr("sjtu_agent.parsing.parse_file", fake_parse)
+    monkeypatch.setattr("sjtu_agent.tui.app.iter_chat_events", fake_stream)
+
+    async def scenario():
+        app = build_app()
+        app.model = model
+        app.attachments = TuiAttachments(AttachmentStore(tmp_path / "web_attachments"))
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            prompt = app.query_one("#prompt", Input)
+
+            prompt.focus()
+            prompt.value = f"/attach {source}"
+            await pilot.press("enter")
+            await pilot.pause()
+
+            prompt.focus()
+            prompt.value = "看图"
+            await pilot.press("enter")
+            for _ in range(50):
+                if started.is_set():
+                    break
+                await pilot.pause(0.05)
+
+            assert started.is_set()
+            assert app.busy is True
+            assert app.query_one("#attach-progress", Markdown) is not None
+
+            release.set()
+            for _ in range(50):
+                if not app.busy:
+                    break
+                await pilot.pause(0.05)
+
+            assert sent_messages
+            assert "图片解析内容" in sent_messages[-1]
 
     _run(scenario())
 
