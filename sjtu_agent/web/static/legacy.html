@@ -1,0 +1,1646 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SJTU Agent · 配置中心</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0%25' stop-color='%235c6ef0'/><stop offset='100%25' stop-color='%238b5cf6'/></linearGradient></defs><rect width='64' height='64' rx='14' fill='url(%23g)'/><text x='32' y='43' text-anchor='middle' font-family='-apple-system,SF Pro Display,sans-serif' font-size='30' font-weight='700' fill='white'>S</text></svg>">
+  <!-- KaTeX -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+    onload="window._katexReady=true"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #222535;
+      --border: #2e3147;
+      --border-focus: #5c6ef0;
+      --text: #e4e6f0;
+      --text2: #9098b8;
+      --text3: #5a6180;
+      --accent: #5c6ef0;
+      --accent-hover: #6e7ef8;
+      --green: #34d399;
+      --red: #f87171;
+      --yellow: #fbbf24;
+      --radius: 10px;
+      --radius-sm: 6px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.6;
+    }
+
+    /* ── Layout ── */
+    .layout {
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      min-height: 100vh;
+    }
+
+    /* ── Sidebar ── */
+    .sidebar {
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      padding: 24px 0;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+    }
+
+    .sidebar-brand {
+      padding: 0 20px 20px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 12px;
+    }
+
+    .sidebar-brand .mark { color: var(--accent); font-weight: 700; font-size: 15px; }
+    .sidebar-brand .sub { color: var(--text2); font-size: 12px; }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 20px;
+      cursor: pointer;
+      border-radius: 0;
+      color: var(--text2);
+      font-size: 14px;
+      transition: background .15s, color .15s;
+      border-left: 3px solid transparent;
+      user-select: none;
+    }
+
+    .nav-item:hover { background: var(--surface2); color: var(--text); }
+    .nav-item.active { color: var(--accent); border-left-color: var(--accent); background: rgba(92,110,240,.08); }
+
+    .nav-icon { font-size: 16px; width: 20px; text-align: center; }
+
+    .status-list {
+      padding: 16px 20px 8px;
+      border-top: 1px solid var(--border);
+      margin-top: 16px;
+    }
+
+    .status-list-title { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 10px; }
+
+    .status-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--text2);
+      padding: 3px 0;
+    }
+
+    .dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .dot.ok { background: var(--green); }
+    .dot.miss { background: var(--border); }
+
+    /* ── Main ── */
+    .main {
+      padding: 32px 40px;
+      width: 100%;
+      min-width: 0;
+    }
+
+    /* 配置类页面限制阅读宽度（chat 页面单独覆盖） */
+    .page.active:not(#page-chat) {
+      max-width: 860px;
+      margin: 0 auto;
+    }
+
+    .page { display: none; }
+    .page.active { display: block; }
+
+    /* ── Page header ── */
+    .page-header { margin-bottom: 28px; }
+    .page-title { font-size: 22px; font-weight: 600; }
+    .page-desc { color: var(--text2); font-size: 14px; margin-top: 4px; }
+
+    /* ── Card ── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      margin-bottom: 20px;
+    }
+
+    .card-title {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 18px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* ── Form ── */
+    .field { margin-bottom: 16px; }
+    .field:last-child { margin-bottom: 0; }
+
+    label {
+      display: block;
+      font-size: 13px;
+      color: var(--text2);
+      margin-bottom: 6px;
+    }
+
+    .label-hint {
+      font-size: 11px;
+      color: var(--text3);
+      margin-left: 6px;
+    }
+
+    input[type="text"],
+    input[type="password"],
+    input[type="url"],
+    select,
+    textarea {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      font-size: 14px;
+      padding: 9px 12px;
+      outline: none;
+      transition: border-color .15s;
+      font-family: inherit;
+    }
+
+    input:focus, select:focus, textarea:focus {
+      border-color: var(--border-focus);
+    }
+
+    select { cursor: pointer; }
+    select option { background: var(--surface2); }
+
+    textarea { resize: vertical; min-height: 60px; }
+
+    .input-row {
+      display: flex;
+      gap: 8px;
+      align-items: stretch;
+    }
+
+    .input-row input,
+    .input-row select { flex: 1; }
+
+    /* ── Buttons ── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 9px 18px;
+      border-radius: var(--radius-sm);
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+      transition: background .15s, opacity .15s;
+      white-space: nowrap;
+      font-family: inherit;
+    }
+
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+    }
+    .btn-primary:not(:disabled):hover { background: var(--accent-hover); }
+
+    .btn-secondary {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:not(:disabled):hover { background: #2a2e42; }
+
+    .btn-sm { padding: 6px 12px; font-size: 13px; }
+
+    .btn-group {
+      display: flex;
+      gap: 8px;
+      margin-top: 20px;
+      align-items: center;
+    }
+
+    /* ── Test result ── */
+    .test-result {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      padding: 8px 12px;
+      border-radius: var(--radius-sm);
+      margin-top: 12px;
+    }
+
+    .test-result.show { display: flex; }
+    .test-result.ok { background: rgba(52,211,153,.1); color: var(--green); border: 1px solid rgba(52,211,153,.2); }
+    .test-result.err { background: rgba(248,113,113,.1); color: var(--red); border: 1px solid rgba(248,113,113,.2); }
+    .test-result.loading { background: rgba(92,110,240,.1); color: var(--accent); border: 1px solid rgba(92,110,240,.2); }
+
+    /* ── Toast ── */
+    .toast-container {
+      position: fixed;
+      bottom: 28px;
+      right: 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 1000;
+    }
+
+    .toast {
+      padding: 10px 16px;
+      border-radius: var(--radius-sm);
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      opacity: 0;
+      transform: translateY(8px);
+      transition: opacity .2s, transform .2s;
+      max-width: 320px;
+    }
+
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .toast.success { background: rgba(52,211,153,.15); color: var(--green); border: 1px solid rgba(52,211,153,.3); }
+    .toast.error { background: rgba(248,113,113,.15); color: var(--red); border: 1px solid rgba(248,113,113,.3); }
+
+    /* ── Password toggle ── */
+    .pass-wrap { position: relative; }
+    .pass-wrap input { padding-right: 38px; }
+    .pass-toggle {
+      position: absolute;
+      right: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--text3);
+      font-size: 15px;
+      padding: 2px;
+      line-height: 1;
+    }
+    .pass-toggle:hover { color: var(--text2); }
+
+    /* ── Info box ── */
+    .info-box {
+      background: rgba(92,110,240,.08);
+      border: 1px solid rgba(92,110,240,.2);
+      border-radius: var(--radius-sm);
+      padding: 10px 14px;
+      font-size: 13px;
+      color: var(--text2);
+      margin-bottom: 16px;
+      line-height: 1.6;
+    }
+
+    .info-box a { color: var(--accent); text-decoration: none; }
+    .info-box a:hover { text-decoration: underline; }
+
+    /* ── Spinner ── */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner {
+      width: 14px; height: 14px;
+      border: 2px solid currentColor;
+      border-right-color: transparent;
+      border-radius: 50%;
+      animation: spin .6s linear infinite;
+      flex-shrink: 0;
+    }
+
+    /* ── Sections ── */
+    .section-divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 20px 0;
+    }
+
+    /* ── Toggle switch ── */
+    .toggle-wrap {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-left: auto;
+    }
+    .toggle-wrap label {
+      font-size: 13px;
+      color: var(--text2);
+      margin: 0;
+    }
+    .toggle-switch {
+      position: relative;
+      width: 40px;
+      height: 22px;
+      flex-shrink: 0;
+    }
+    .toggle-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .toggle-slider {
+      position: absolute;
+      cursor: pointer;
+      inset: 0;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      transition: background .2s, border-color .2s;
+    }
+    .toggle-slider::before {
+      position: absolute;
+      content: "";
+      height: 16px;
+      width: 16px;
+      left: 2px;
+      bottom: 2px;
+      background: var(--text2);
+      border-radius: 50%;
+      transition: transform .2s, background .2s;
+    }
+    .toggle-switch input:checked + .toggle-slider {
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+    .toggle-switch input:checked + .toggle-slider::before {
+      transform: translateX(18px);
+      background: #fff;
+    }
+    .card.disabled-channel {
+      opacity: .6;
+      border-color: var(--border);
+    }
+
+    /* ── Chat ── */
+    #page-chat {
+      display: none;
+      flex-direction: column;
+      height: calc(100vh - 64px);
+      width: 100%;
+    }
+    #page-chat.active { display: flex; }
+
+    .chat-messages,
+    .chat-toolbar,
+    .chat-input-area {
+      max-width: 960px;
+      width: 100%;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .chat-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 4px 0 14px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 8px;
+    }
+    .chat-toolbar .title { font-size: 17px; font-weight: 600; }
+    .chat-toolbar .chat-model-tag {
+      font-size: 12px;
+      color: var(--text2);
+      background: var(--surface);
+      padding: 4px 10px;
+      border-radius: 99px;
+      border: 1px solid var(--border);
+    }
+
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px 4px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      scroll-behavior: smooth;
+    }
+
+    .msg {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+    }
+    .msg.user { flex-direction: row-reverse; }
+
+    .avatar {
+      width: 30px; height: 30px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      font-weight: 600;
+      user-select: none;
+    }
+    .msg.user .avatar { background: var(--accent); color: #fff; }
+    .msg.assistant .avatar {
+      background: linear-gradient(135deg, #5c6ef0, #8b5cf6);
+      color: #fff;
+    }
+
+    .bubble {
+      max-width: calc(100% - 50px);
+      padding: 12px 16px;
+      border-radius: 14px;
+      font-size: 14.5px;
+      line-height: 1.7;
+      word-break: break-word;
+    }
+    .msg.user .bubble {
+      background: var(--accent);
+      color: #fff;
+      border-bottom-right-radius: 4px;
+      white-space: pre-wrap;
+    }
+    .msg.assistant .bubble {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-bottom-left-radius: 4px;
+    }
+
+    /* markdown 正文样式 */
+    .bubble.md > :first-child { margin-top: 0; }
+    .bubble.md > :last-child { margin-bottom: 0; }
+    .bubble.md p { margin: 0.5em 0; }
+    .bubble.md h1, .bubble.md h2, .bubble.md h3, .bubble.md h4 {
+      margin: 0.8em 0 0.4em;
+      line-height: 1.3;
+    }
+    .bubble.md h1 { font-size: 1.25em; }
+    .bubble.md h2 { font-size: 1.15em; }
+    .bubble.md h3 { font-size: 1.05em; }
+    .bubble.md ul, .bubble.md ol { margin: 0.4em 0; padding-left: 1.5em; }
+    .bubble.md li { margin: 0.2em 0; }
+    .bubble.md a { color: var(--accent); text-decoration: none; }
+    .bubble.md a:hover { text-decoration: underline; }
+    .bubble.md code {
+      background: rgba(0,0,0,.35);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.88em;
+      font-family: "SF Mono", "JetBrains Mono", Menlo, monospace;
+    }
+    .bubble.md pre {
+      background: #0a0b10;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      overflow-x: auto;
+      margin: 0.6em 0;
+    }
+    .bubble.md pre code {
+      background: transparent;
+      padding: 0;
+      font-size: 0.85em;
+      line-height: 1.55;
+    }
+    .bubble.md table {
+      border-collapse: collapse;
+      margin: 0.6em 0;
+      width: 100%;
+      font-size: 0.92em;
+    }
+    .bubble.md th, .bubble.md td {
+      border: 1px solid var(--border);
+      padding: 6px 10px;
+      text-align: left;
+    }
+    .bubble.md th { background: var(--surface2); font-weight: 600; }
+    .bubble.md blockquote {
+      border-left: 3px solid var(--border);
+      padding-left: 12px;
+      color: var(--text2);
+      margin: 0.6em 0;
+    }
+    .bubble .cursor {
+      display: inline-block;
+      width: 2px;
+      background: currentColor;
+      height: 1em;
+      vertical-align: -0.15em;
+      margin-left: 1px;
+      animation: blink 1s step-end infinite;
+      opacity: .6;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    /* 工具调用卡片 */
+    .tool-card {
+      align-self: flex-start;
+      max-width: calc(100% - 50px);
+      margin-left: 42px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 13px;
+      color: var(--text2);
+    }
+    .tool-card .tool-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .tool-card .tool-icon {
+      width: 14px; height: 14px;
+      border: 2px solid var(--text3);
+      border-right-color: transparent;
+      border-radius: 50%;
+      animation: spin .6s linear infinite;
+      flex-shrink: 0;
+    }
+    .tool-card.done .tool-icon {
+      border: none;
+      animation: none;
+      background: var(--green);
+      width: 14px; height: 14px;
+      position: relative;
+    }
+    .tool-card.done .tool-icon::after {
+      content: "✓";
+      color: #0a0b10;
+      font-size: 10px;
+      font-weight: 700;
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .tool-card.error .tool-icon {
+      border: none;
+      animation: none;
+      background: var(--red);
+    }
+    .tool-card .tool-name {
+      font-family: "SF Mono", "JetBrains Mono", Menlo, monospace;
+      color: var(--text);
+      font-size: 12.5px;
+    }
+    .tool-card .tool-caret {
+      margin-left: auto;
+      color: var(--text3);
+      font-size: 11px;
+      transition: transform .15s;
+    }
+    .tool-card.expanded .tool-caret { transform: rotate(90deg); }
+    .tool-card .tool-body {
+      display: none;
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px dashed var(--border);
+    }
+    .tool-card.expanded .tool-body { display: block; }
+    .tool-card pre {
+      background: #0a0b10;
+      border-radius: 6px;
+      padding: 8px 10px;
+      margin: 4px 0;
+      overflow-x: auto;
+      font-family: "SF Mono", "JetBrains Mono", Menlo, monospace;
+      font-size: 11.5px;
+      line-height: 1.5;
+      color: var(--text2);
+      max-height: 240px;
+      overflow-y: auto;
+    }
+    .tool-card .tool-label {
+      color: var(--text3);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      margin: 6px 0 2px;
+    }
+
+    .chat-input-area {
+      display: flex;
+      gap: 10px;
+      padding: 12px 0;
+      border-top: 1px solid var(--border);
+      align-items: flex-end;
+    }
+    .chat-input-area textarea {
+      flex: 1;
+      min-height: 44px;
+      max-height: 180px;
+      resize: none;
+      line-height: 1.55;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 14px;
+    }
+    .chat-input-area textarea:focus {
+      border-color: var(--border-focus);
+      outline: none;
+    }
+    .chat-input-area .btn-primary {
+      border-radius: 10px;
+      padding: 10px 18px;
+    }
+    .chat-input-area .btn-primary:disabled {
+      opacity: .5;
+      cursor: not-allowed;
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 600px) {
+      .layout { grid-template-columns: 1fr; }
+      .sidebar { position: static; height: auto; display: flex; flex-wrap: wrap; gap: 4px; padding: 12px; }
+      .sidebar-brand { padding: 0; border: none; margin: 0 8px 0 0; }
+      .status-list { display: none; }
+      .main { padding: 20px 16px; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="layout">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <div class="mark">SJTU Agent</div>
+      <div class="sub">配置中心</div>
+    </div>
+
+    <nav>
+      <div class="nav-item active" data-page="api">
+        <span class="nav-icon">🔑</span>
+        <span>大模型 API</span>
+      </div>
+      <div class="nav-item" data-page="credentials">
+        <span class="nav-icon">🎓</span>
+        <span>校园凭据</span>
+      </div>
+      <div class="nav-item" data-page="push">
+        <span class="nav-icon">📲</span>
+        <span>推送配置</span>
+      </div>
+      <div class="nav-item" data-page="chat">
+        <span class="nav-icon">💬</span>
+        <span>与 Agent 聊天</span>
+      </div>
+    </nav>
+
+    <div class="status-list">
+      <div class="status-list-title">配置状态</div>
+      <div class="status-item"><div class="dot miss" id="st-api"></div><span>大模型 API</span></div>
+      <div class="status-item"><div class="dot miss" id="st-canvas"></div><span>Canvas</span></div>
+      <div class="status-item"><div class="dot miss" id="st-jaccount"></div><span>jAccount</span></div>
+      <div class="status-item"><div class="dot miss" id="st-aihaoke"></div><span>AI 好课</span></div>
+      <div class="status-item"><div class="dot miss" id="st-mooc"></div><span>中国大学MOOC</span></div>
+      <div class="status-item"><div class="dot miss" id="st-wechat"></div><span>微信 Bot</span></div>
+      <div class="status-item"><div class="dot miss" id="st-telegram"></div><span>Telegram</span></div>
+      <div class="status-item"><div class="dot miss" id="st-feishu"></div><span>飞书</span></div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+
+    <!-- ── Page: API ── -->
+    <div class="page active" id="page-api">
+      <div class="page-header">
+        <div class="page-title">大模型 API 配置</div>
+        <div class="page-desc">配置用于对话和工具调用的 LLM API。推荐使用交大官方的致远一号。</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">🔑 API 配置</div>
+
+        <div class="info-box">
+          💡 <strong>推荐使用致远一号</strong>：交大师生可在
+          <a href="https://zhiyuan.sjtu.edu.cn" target="_blank">zhiyuan.sjtu.edu.cn</a>
+          免费申请 API Key，支持 DeepSeek、GLM 等多个模型。
+        </div>
+
+        <div class="field">
+          <label>API 提供商</label>
+          <select id="provider">
+            <option value="zhiyuan">致远一号（交大官方 · 推荐）</option>
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic (Claude)</option>
+            <option value="custom">自定义</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label>API Key</label>
+          <div class="pass-wrap">
+            <input type="password" id="api-key" placeholder="粘贴你的 API Key…" autocomplete="off">
+            <button class="pass-toggle" onclick="togglePass('api-key', this)" title="显示/隐藏">👁</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Base URL <span class="label-hint">选择预设后自动填充</span></label>
+          <input type="url" id="base-url" placeholder="https://…">
+        </div>
+
+        <div class="field" id="zhiyuan-model-field" style="display:none">
+          <label>致远一号模型 <span class="label-hint">选择后自动填入下方模型名</span></label>
+          <select id="zhiyuan-model-select">
+            <option value="deepseek-chat">DeepSeek V3.2（常规）— deepseek-chat · 通用 · 32k</option>
+            <option value="deepseek-reasoner">DeepSeek V3.2（思考）— deepseek-reasoner · 深度推理 · 32k</option>
+            <option value="minimax-m2.7">MiniMax-M2.7 — minimax-m2.7 · 智能体 · 192k</option>
+            <option value="glm-5.1">GLM-5.1 — glm-5.1 · 代码/长程 · 128k</option>
+            <option value="qwen3.5-27b">Qwen3.5-27B — qwen3.5-27b · 多模态 · 256k</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label>模型名 <span class="label-hint">也可直接手动填写</span></label>
+          <input type="text" id="model" placeholder="例如 deepseek-chat">
+        </div>
+
+        <!-- 测试连接 -->
+        <div id="test-result" class="test-result"></div>
+
+        <div class="btn-group">
+          <button class="btn btn-secondary" id="btn-test" onclick="testApi()">
+            🔍 测试连接
+          </button>
+          <button class="btn btn-primary" onclick="saveApi()">
+            保存 API 配置
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Page: Credentials ── -->
+    <div class="page" id="page-credentials">
+      <div class="page-header">
+        <div class="page-title">校园凭据</div>
+        <div class="page-desc">配置 jAccount 账号、Canvas Token 等。所有凭据仅保存在本机，不上传。</div>
+      </div>
+
+      <!-- jAccount -->
+      <div class="card">
+        <div class="card-title">🎓 jAccount</div>
+        <div class="info-box">
+          用于自动登录 AI 好课（aihaoke）、物理实验系统（phycai），并通过 Canvas SSO 自动创建 Token。
+        </div>
+        <div class="field">
+          <label>jAccount 用户名 <span class="label-hint">英文用户名，非学号</span></label>
+          <input type="text" id="jaccount-username" placeholder="例如 zhangsan" autocomplete="username">
+        </div>
+        <div class="field">
+          <label>jAccount 密码</label>
+          <div class="pass-wrap">
+            <input type="password" id="jaccount-password" placeholder="••••••••" autocomplete="current-password">
+            <button class="pass-toggle" onclick="togglePass('jaccount-password', this)" title="显示/隐藏">👁</button>
+          </div>
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-primary" onclick="saveCredentials()">保存</button>
+          <span id="cred-save-msg" style="font-size:13px;color:var(--text3)"></span>
+        </div>
+      </div>
+
+      <!-- MOOC -->
+      <div class="card">
+        <div class="card-title">📖 中国大学MOOC</div>
+        <div class="field">
+          <label>MOOC 手机号</label>
+          <input type="text" id="mooc-username" placeholder="绑定手机号" autocomplete="username">
+        </div>
+        <div class="field">
+          <label>MOOC 密码</label>
+          <div class="pass-wrap">
+            <input type="password" id="mooc-password" placeholder="••••••••" autocomplete="current-password">
+            <button class="pass-toggle" onclick="togglePass('mooc-password', this)" title="显示/隐藏">👁</button>
+          </div>
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-primary" onclick="saveMooc()">保存</button>
+        </div>
+      </div>
+
+      <!-- Canvas Token（可选，放最下方） -->
+      <div class="card" style="border-color: rgba(92,110,240,.2); opacity: .9;">
+        <div class="card-title">📚 Canvas Token <span style="font-size:12px;font-weight:400;color:var(--text3);margin-left:6px;">可选 · 通常由 jAccount 自动配置</span></div>
+        <div class="info-box" style="background:rgba(251,191,36,.06);border-color:rgba(251,191,36,.2);color:var(--text2);">
+          ⚡ 填写上方 jAccount 账号密码后，运行 <code>sjtu-agent login</code> 可自动创建 Canvas Token，<strong>无需手动填写。</strong><br><br>
+          仅当自动配置失败时，才需手动获取：登录
+          <a href="https://oc.sjtu.edu.cn/profile/settings" target="_blank">oc.sjtu.edu.cn/profile/settings</a>
+          → 页面下方「已批准的集成」→「+ 新增访问令牌」→ 复制后粘贴到此处。
+        </div>
+        <div class="field">
+          <label>Canvas Token <span class="label-hint">留空则使用自动配置的 Token</span></label>
+          <div class="pass-wrap">
+            <input type="password" id="canvas-token" placeholder="粘贴 Canvas Token…（可留空）" autocomplete="off">
+            <button class="pass-toggle" onclick="togglePass('canvas-token', this)" title="显示/隐藏">👁</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>Canvas 服务器地址 <span class="label-hint">通常无需修改</span></label>
+          <input type="url" id="canvas-base-url" value="https://oc.sjtu.edu.cn">
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-secondary" onclick="saveCanvas()">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Page: Push ── -->
+    <div class="page" id="page-push">
+      <div class="page-header">
+        <div class="page-title">推送配置</div>
+        <div class="page-desc">配置消息推送渠道，接收 DDL 提醒和日报。至少配置其中一种。</div>
+      </div>
+
+      <!-- 微信 ilink Bot -->
+      <div class="card" id="wechat-card">
+        <div class="card-title" id="wechat-card-title">
+          💬 微信 Bot（ilink）
+          <div class="toggle-wrap">
+            <label class="toggle-switch">
+              <input type="checkbox" id="wechat-enabled" checked onchange="savePushChannels()">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+        <div id="wechat-unconfigured">
+          <div class="info-box">
+            基于 ilink 协议，无需第三方微信框架。配置步骤：<br>
+            1. 在终端运行 <code>sjtu-agent wechat-bot --login</code><br>
+            2. 用微信扫码授权后，Token 将自动保存到 config.json<br>
+            3. 刷新此页面即可看到【已配置】状态
+          </div>
+          <div style="font-size:13px;color:var(--text3);padding:4px 0;">
+            完成扫码后刷新此页面查看状态。
+          </div>
+        </div>
+        <div id="wechat-configured" style="display:none">
+          <div class="info-box" style="background:rgba(52,211,153,.08);border-color:rgba(52,211,153,.2);color:var(--green);">
+            ✅ 微信 Bot 已配置（Token 已保存）。<br>
+            若需重新扫码登录，在终端运行：<code>sjtu-agent wechat-bot --login</code>
+          </div>
+        </div>
+      </div>
+
+      <!-- Telegram Bot -->
+      <div class="card" id="telegram-card">
+        <div class="card-title" id="telegram-card-title">
+          ✈️ Telegram Bot
+          <div class="toggle-wrap">
+            <label class="toggle-switch">
+              <input type="checkbox" id="telegram-enabled" checked onchange="savePushChannels()">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+        <div class="info-box">
+          <strong>如何获取 Bot Token：</strong>在 Telegram 中搜索 <code>@BotFather</code>，
+          发送 <code>/newbot</code>，按提示创建后复制 Token。<br><br>
+          <strong>如何获取你的用户 ID：</strong>搜索 <code>@userinfobot</code>，发送任意消息即可看到你的 ID。
+        </div>
+        <div class="field">
+          <label>Bot Token</label>
+          <div class="pass-wrap">
+            <input type="password" id="telegram-token" placeholder="1234567890:ABCdefGHI…" autocomplete="off">
+            <button class="pass-toggle" onclick="togglePass('telegram-token', this)" title="显示/隐藏">👁</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>允许的用户 ID <span class="label-hint">多个 ID 用逗号或空格分隔，留空则所有人均可使用</span></label>
+          <input type="text" id="telegram-allowed-ids" placeholder="例如 123456789, 987654321">
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-primary" onclick="saveTelegram()">保存</button>
+        </div>
+      </div>
+
+      <!-- Feishu Bot -->
+      <div class="card" id="feishu-card">
+        <div class="card-title" id="feishu-card-title">
+          🪶 飞书 Bot（Lark）
+          <div class="toggle-wrap">
+            <label class="toggle-switch">
+              <input type="checkbox" id="feishu-enabled" checked onchange="savePushChannels()">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+        <div class="info-box">
+          <strong>如何获取 App ID / App Secret：</strong>
+          打开 <code>open.feishu.cn</code> → 开发者后台 → 自建应用 → 凭证与基础信息。<br><br>
+          <strong>必要前置（在飞书开放平台完成）：</strong><br>
+          1. 应用添加「机器人」能力<br>
+          2. 权限管理勾选 <code>im:message</code>、<code>im:message.p2p_msg:readonly</code>、<code>im:message:send_as_bot</code><br>
+          3. 「事件与回调」切换到「使用长连接接收事件」并订阅 <code>im.message.receive_v1</code><br>
+          4. 创建版本并发布<br><br>
+          <strong>白名单留空：</strong>所有用户可对话。建议先留空跑起来，bot 会在日志中回显发送者的 open_id，
+          再粘进白名单后重启 bot 即可锁定使用者。
+        </div>
+        <div class="field">
+          <label>App ID</label>
+          <input type="text" id="feishu-app-id" placeholder="cli_xxxxxxxxxx" autocomplete="off">
+        </div>
+        <div class="field">
+          <label>App Secret</label>
+          <div class="pass-wrap">
+            <input type="password" id="feishu-app-secret" placeholder="App Secret" autocomplete="off">
+            <button class="pass-toggle" onclick="togglePass('feishu-app-secret', this)" title="显示/隐藏">👁</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>允许的用户 open_id <span class="label-hint">多个用逗号或空格分隔，留空则所有人均可使用</span></label>
+          <input type="text" id="feishu-allowed-open-ids" placeholder="例如 ou_xxx, ou_yyy">
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-primary" onclick="saveFeishu()">保存</button>
+          <button class="btn btn-secondary" onclick="startFeishuBot()">🚀 启动飞书 Bot</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Page: Chat ── -->
+    <div class="page" id="page-chat">
+      <div class="chat-toolbar">
+        <span class="title">💬 与 Agent 聊天</span>
+        <span class="chat-model-tag" id="chat-model-tag">…</span>
+        <button class="btn btn-secondary btn-sm" onclick="clearChat()" style="margin-left:auto">🗑 清空对话</button>
+      </div>
+
+      <div class="chat-messages" id="chat-messages">
+        <div class="msg assistant">
+          <div class="avatar">A</div>
+          <div class="bubble md">
+            <p>👋 你好！我是 SJTU Agent。我接入了完整工具链，可以帮你：</p>
+            <ul>
+              <li>查 DDL、课表、成绩、物理实验安排</li>
+              <li>下载 Canvas 作业材料</li>
+              <li>搜索水源、教务处、传承交大</li>
+              <li>读/发邮件、管理提醒事项</li>
+              <li>办理 my.sjtu.edu.cn 上的业务</li>
+            </ul>
+            <p>有什么需要帮忙的？</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="chat-input-area">
+        <textarea id="chat-input" placeholder="输入消息，Enter 发送，Shift+Enter 换行…" rows="1"></textarea>
+        <button class="btn btn-primary" id="btn-send" onclick="sendChat()">发送</button>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<div class="toast-container" id="toasts"></div>
+
+<script>
+// ── Navigation ───────────────────────────────────────────────────────────────
+document.querySelectorAll('.nav-item').forEach(el => {
+  el.addEventListener('click', () => {
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    el.classList.add('active');
+    const pageId = 'page-' + el.dataset.page;
+    document.getElementById(pageId).classList.add('active');
+  });
+});
+
+// ── Provider presets ─────────────────────────────────────────────────────────
+const PRESETS = {
+  zhiyuan:   { base_url: 'https://models.sjtu.edu.cn/api/v1', model: 'deepseek-chat' },
+  openai:    { base_url: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+  anthropic: { base_url: 'https://api.anthropic.com', model: 'claude-sonnet-4-5' },
+  custom:    { base_url: '', model: '' },
+};
+
+function updateProviderUI(provider) {
+  const preset = PRESETS[provider];
+  if (!preset) return;
+  if (preset.base_url) document.getElementById('base-url').value = preset.base_url;
+  if (preset.model)    document.getElementById('model').value = preset.model;
+  // 显示/隐藏致远一号快捷模型选择器
+  const zhiyuanField = document.getElementById('zhiyuan-model-field');
+  if (provider === 'zhiyuan') {
+    zhiyuanField.style.display = '';
+    // 同步 select → model input
+    const sel = document.getElementById('zhiyuan-model-select');
+    document.getElementById('model').value = sel.value;
+  } else {
+    zhiyuanField.style.display = 'none';
+  }
+}
+
+document.getElementById('provider').addEventListener('change', function() {
+  document.getElementById('api-key').value = '';
+  updateProviderUI(this.value);
+});
+
+// 致远一号模型快捷选择 → 同步到 model 输入框
+document.getElementById('zhiyuan-model-select').addEventListener('change', function() {
+  document.getElementById('model').value = this.value;
+});
+
+// ── Toggle password visibility ───────────────────────────────────────────────
+function togglePass(inputId, btn) {
+  const el = document.getElementById(inputId);
+  if (el.type === 'password') {
+    el.type = 'text';
+    btn.textContent = '🙈';
+  } else {
+    el.type = 'password';
+    btn.textContent = '👁';
+  }
+}
+
+// ── Toast ────────────────────────────────────────────────────────────────────
+function showToast(msg, type = 'success') {
+  const container = document.getElementById('toasts');
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.innerHTML = `<span>${type === 'success' ? '✅' : '❌'}</span><span>${msg}</span>`;
+  container.appendChild(toast);
+  requestAnimationFrame(() => { requestAnimationFrame(() => toast.classList.add('show')); });
+  setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
+}
+
+// ── API Test ─────────────────────────────────────────────────────────────────
+async function testApi() {
+  const apiKey  = document.getElementById('api-key').value.trim();
+  const baseUrl = document.getElementById('base-url').value.trim();
+  const model   = document.getElementById('model').value.trim();
+  const resultEl = document.getElementById('test-result');
+  const btn = document.getElementById('btn-test');
+
+  if (!apiKey) { showToast('请先填写 API Key', 'error'); return; }
+
+  btn.disabled = true;
+  resultEl.className = 'test-result show loading';
+  resultEl.innerHTML = '<div class="spinner"></div><span>正在连接…</span>';
+
+  try {
+    const res = await fetch('/api/test/api', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_key: apiKey, base_url: baseUrl, model }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      resultEl.className = 'test-result show ok';
+      resultEl.innerHTML = `✅ 连接成功，响应 ${data.latency_ms}ms`;
+    } else {
+      resultEl.className = 'test-result show err';
+      resultEl.innerHTML = `❌ ${data.error}`;
+    }
+  } catch (e) {
+    resultEl.className = 'test-result show err';
+    resultEl.innerHTML = '❌ 请求失败，请确认服务器正在运行';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ── Save helpers ─────────────────────────────────────────────────────────────
+async function postSave(payload) {
+  const res = await fetch('/api/config/save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return res.json();
+}
+
+async function saveApi() {
+  const data = await postSave({
+    section: 'api',
+    provider: document.getElementById('provider').value,
+    api_key:  document.getElementById('api-key').value.trim(),
+    base_url: document.getElementById('base-url').value.trim(),
+    model:    document.getElementById('model').value.trim(),
+  });
+  if (data.ok) { showToast('API 配置已保存'); refreshStatus(); }
+  else showToast(data.error || '保存失败', 'error');
+}
+
+async function saveCredentials() {
+  const data = await postSave({
+    section: 'credentials',
+    jaccount_username: document.getElementById('jaccount-username').value,
+    jaccount_password: document.getElementById('jaccount-password').value,
+  });
+  if (data.ok) { showToast('jAccount 凭据已保存'); refreshStatus(); }
+  else showToast(data.error || '保存失败', 'error');
+}
+
+async function saveCanvas() {
+  const data = await postSave({
+    section: 'credentials',
+    canvas_token:    document.getElementById('canvas-token').value,
+    canvas_base_url: document.getElementById('canvas-base-url').value,
+  });
+  if (data.ok) { showToast('Canvas Token 已保存'); refreshStatus(); }
+  else showToast(data.error || '保存失败', 'error');
+}
+
+async function saveMooc() {
+  const data = await postSave({
+    section: 'credentials',
+    mooc_username: document.getElementById('mooc-username').value,
+    mooc_password: document.getElementById('mooc-password').value,
+  });
+  if (data.ok) { showToast('MOOC 凭据已保存'); refreshStatus(); }
+  else showToast(data.error || '保存失败', 'error');
+}
+
+async function saveTelegram() {
+  const data = await postSave({
+    section: 'telegram',
+    telegram_token:       document.getElementById('telegram-token').value,
+    telegram_allowed_ids: document.getElementById('telegram-allowed-ids').value,
+  });
+  if (data.ok) { showToast('Telegram 配置已保存'); refreshStatus(); }
+  else showToast(data.error || '保存失败', 'error');
+}
+
+async function saveFeishu() {
+  const data = await postSave({
+    section: 'feishu',
+    feishu_app_id:              document.getElementById('feishu-app-id').value,
+    feishu_app_secret:          document.getElementById('feishu-app-secret').value,
+    feishu_allowed_open_ids:    document.getElementById('feishu-allowed-open-ids').value,
+  });
+  if (data.ok) { showToast('飞书配置已保存'); refreshStatus(); }
+  else showToast(data.error || '保存失败', 'error');
+}
+
+let _pushChannelState = { telegram: true, wechat: true, feishu: true };
+
+async function savePushChannels() {
+  const telegramEnabled = document.getElementById('telegram-enabled').checked;
+  const wechatEnabled   = document.getElementById('wechat-enabled').checked;
+  const feishuEnabled   = document.getElementById('feishu-enabled').checked;
+
+  document.getElementById('telegram-card').classList.toggle('disabled-channel', !telegramEnabled);
+  document.getElementById('wechat-card').classList.toggle('disabled-channel', !wechatEnabled);
+  document.getElementById('feishu-card').classList.toggle('disabled-channel', !feishuEnabled);
+
+  const payload = { section: 'push_channels' };
+  if (telegramEnabled !== _pushChannelState.telegram) payload.telegram_enabled = telegramEnabled;
+  if (wechatEnabled   !== _pushChannelState.wechat)   payload.wechat_enabled   = wechatEnabled;
+  if (feishuEnabled   !== _pushChannelState.feishu)   payload.feishu_enabled   = feishuEnabled;
+
+  if (Object.keys(payload).length <= 1) {
+    showToast('推送配置已保存');
+    return;
+  }
+
+  const data = await postSave(payload);
+  if (data.ok) {
+    _pushChannelState = { telegram: telegramEnabled, wechat: wechatEnabled, feishu: feishuEnabled };
+    showToast('推送配置已保存');
+  } else {
+    showToast(data.error || '保存失败', 'error');
+  }
+}
+
+async function startFeishuBot() {
+  showToast('正在启动飞书 bot…');
+  try {
+    const r = await fetch('/api/feishu/start', { method: 'POST' });
+    const data = await r.json();
+    if (data.ok) showToast(data.message || '飞书 bot 已启动');
+    else showToast(data.error || '启动失败', 'error');
+  } catch (e) {
+    showToast('启动请求失败：' + e, 'error');
+  }
+}
+
+// ── Load & Status ─────────────────────────────────────────────────────────────
+function setDot(id, ok) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.className = 'dot ' + (ok ? 'ok' : 'miss');
+}
+
+async function refreshStatus() {
+  try {
+    const res = await fetch('/api/status');
+    const s = await res.json();
+    setDot('st-api',      s.api);
+    setDot('st-canvas',   s.canvas);
+    setDot('st-jaccount', s.jaccount);
+    setDot('st-aihaoke',  s.aihaoke);
+    setDot('st-mooc',     s.mooc);
+    setDot('st-wechat',   s.wechat);
+    setDot('st-telegram', s.telegram);
+    setDot('st-feishu',   s.feishu);
+  } catch (e) {}
+}
+
+async function loadConfig() {
+  try {
+    const res = await fetch('/api/config');
+    const c = await res.json();
+
+    // API page
+    const provider = c.provider || 'zhiyuan';
+    document.getElementById('provider').value = provider;
+    updateProviderUI(provider);
+    if (c.base_url) document.getElementById('base-url').value = c.base_url;
+    if (c.model)    document.getElementById('model').value = c.model;
+    // sync zhiyuan model select if applicable
+    if (provider === 'zhiyuan' && c.model) {
+      const sel = document.getElementById('zhiyuan-model-select');
+      const opt = [...sel.options].find(o => o.value === c.model);
+      if (opt) sel.value = c.model;
+    }
+    // API key 显示脱敏占位符（已设置时显示掩码占位，让用户知道已配置）
+    if (c.api_key_set) {
+      document.getElementById('api-key').placeholder = c.api_key_masked + ' （已配置，粘贴新值以覆盖）';
+    }
+
+    // Credentials page
+    if (c.jaccount_username) document.getElementById('jaccount-username').value = c.jaccount_username;
+    if (c.jaccount_password_set) document.getElementById('jaccount-password').placeholder = '••••••• （已配置）';
+    if (c.canvas_token_set)  document.getElementById('canvas-token').placeholder = c.canvas_token_masked + ' （已配置）';
+    if (c.canvas_base_url)   document.getElementById('canvas-base-url').value = c.canvas_base_url;
+    if (c.mooc_username)     document.getElementById('mooc-username').value = c.mooc_username;
+    if (c.mooc_password_set) document.getElementById('mooc-password').placeholder = '••••••• （已配置）';
+
+    // Push page — WeChat
+    if (c.wechat_set) {
+      document.getElementById('wechat-unconfigured').style.display = 'none';
+      document.getElementById('wechat-configured').style.display = '';
+      let title = document.getElementById('wechat-card-title');
+      if (!title.querySelector('.cfg-status')) {
+        let sp = document.createElement('span');
+        sp.className = 'cfg-status';
+        sp.style.cssText = 'font-size:12px;font-weight:400;color:var(--green);margin-left:6px;';
+        sp.textContent = '✅ 已配置';
+        title.insertBefore(sp, title.querySelector('.toggle-wrap'));
+      }
+      document.getElementById('wechat-card').style.borderColor = 'rgba(52,211,153,.25)';
+    }
+
+    // Push page — Telegram
+    if (c.telegram_token_set) {
+      document.getElementById('telegram-token').placeholder = c.telegram_token_masked + ' （已配置）';
+      let title = document.getElementById('telegram-card-title');
+      if (!title.querySelector('.cfg-status')) {
+        let sp = document.createElement('span');
+        sp.className = 'cfg-status';
+        sp.style.cssText = 'font-size:12px;font-weight:400;color:var(--green);margin-left:6px;';
+        sp.textContent = '✅ 已配置';
+        title.insertBefore(sp, title.querySelector('.toggle-wrap'));
+      }
+      document.getElementById('telegram-card').style.borderColor = 'rgba(52,211,153,.25)';
+    }
+    if (c.telegram_allowed_ids && c.telegram_allowed_ids.length) {
+      document.getElementById('telegram-allowed-ids').value = c.telegram_allowed_ids.join(', ');
+    }
+
+    // Push page — Feishu
+    if (c.feishu_app_id) {
+      document.getElementById('feishu-app-id').value = c.feishu_app_id;
+    }
+    if (c.feishu_app_secret_set) {
+      document.getElementById('feishu-app-secret').placeholder = c.feishu_app_secret_masked + ' （已配置）';
+    }
+    if (c.feishu_app_id_set && c.feishu_app_secret_set) {
+      let title = document.getElementById('feishu-card-title');
+      if (!title.querySelector('.cfg-status')) {
+        let sp = document.createElement('span');
+        sp.className = 'cfg-status';
+        sp.style.cssText = 'font-size:12px;font-weight:400;color:var(--green);margin-left:6px;';
+        sp.textContent = '✅ 已配置';
+        title.insertBefore(sp, title.querySelector('.toggle-wrap'));
+      }
+      document.getElementById('feishu-card').style.borderColor = 'rgba(52,211,153,.25)';
+    }
+    if (c.feishu_allowed_open_ids && c.feishu_allowed_open_ids.length) {
+      document.getElementById('feishu-allowed-open-ids').value = c.feishu_allowed_open_ids.join(', ');
+    }
+
+    // Push channel toggles
+    if (typeof c.telegram_enabled === 'boolean') {
+      document.getElementById('telegram-enabled').checked = c.telegram_enabled;
+      document.getElementById('telegram-card').classList.toggle('disabled-channel', !c.telegram_enabled);
+      _pushChannelState.telegram = c.telegram_enabled;
+    }
+    if (typeof c.wechat_enabled === 'boolean') {
+      document.getElementById('wechat-enabled').checked = c.wechat_enabled;
+      document.getElementById('wechat-card').classList.toggle('disabled-channel', !c.wechat_enabled);
+      _pushChannelState.wechat = c.wechat_enabled;
+    }
+    if (typeof c.feishu_enabled === 'boolean') {
+      document.getElementById('feishu-enabled').checked = c.feishu_enabled;
+      document.getElementById('feishu-card').classList.toggle('disabled-channel', !c.feishu_enabled);
+      _pushChannelState.feishu = c.feishu_enabled;
+    }
+  } catch (e) {}
+  refreshStatus();
+}
+
+// 支持 Enter 触发测试
+document.getElementById('api-key').addEventListener('keydown', e => {
+  if (e.key === 'Enter') testApi();
+});
+
+// ── Chat ─────────────────────────────────────────────────────────────────────
+// markdown-it 动态加载
+let md = null;
+(function loadMarkdownIt() {
+  const s = document.createElement('script');
+  s.src = 'https://cdn.jsdelivr.net/npm/markdown-it@14/dist/markdown-it.min.js';
+  s.onload = () => { md = window.markdownit({ html: false, linkify: true, breaks: true }); };
+  document.head.appendChild(s);
+})();
+
+function renderMd(text) {
+  if (md) {
+    const html = md.render(text);
+    // 延迟 KaTeX 渲染
+    setTimeout(() => {
+      if (window._katexReady && window.renderMathInElement) {
+        document.querySelectorAll('.bubble.md').forEach(el => {
+          renderMathInElement(el, {
+            delimiters: [
+              {left: '$$', right: '$$', display: true},
+              {left: '$', right: '$', display: false},
+              {left: '\\(', right: '\\)', display: false},
+              {left: '\\[', right: '\\]', display: true},
+            ],
+            throwOnError: false,
+          });
+        });
+      }
+    }, 50);
+    return html;
+  }
+  const escaped = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return '<p>' + escaped.replace(/\n/g, '<br>') + '</p>';
+}
+
+let isSending = false;
+const TOOL_LABELS = {
+  get_ddls: '获取 DDL',
+  get_all: '获取全部信息',
+  get_next_lab: '获取实验安排',
+  get_schedule: '获取课表',
+  query_grades: '查询成绩',
+  check_setup: '检查配置',
+  download_assignments: '下载作业',
+  search_campus: '搜索校园',
+  browse_mysjtu: '浏览交大门户',
+  list_reminders: '查看提醒',
+  read_emails: '读取邮件',
+  send_email: '发送邮件',
+};
+
+function appendMsg(role, html) {
+  const msgs = document.getElementById('chat-messages');
+  const wrap = document.createElement('div');
+  wrap.className = 'msg ' + role;
+  const avatar = document.createElement('div');
+  avatar.className = 'avatar';
+  avatar.textContent = role === 'user' ? 'U' : 'A';
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble' + (role === 'assistant' ? ' md' : '');
+  bubble.innerHTML = html;
+  wrap.appendChild(avatar);
+  wrap.appendChild(bubble);
+  msgs.appendChild(wrap);
+  msgs.scrollTop = msgs.scrollHeight;
+  return bubble;
+}
+
+function appendToolCard(name, input) {
+  const msgs = document.getElementById('chat-messages');
+  const card = document.createElement('div');
+  card.className = 'tool-card';
+  const rawLabel = TOOL_LABELS[name] || name;
+  const label = rawLabel.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  card.innerHTML = `
+    <div class="tool-head" onclick="this.parentElement.classList.toggle('expanded')">
+      <div class="tool-icon"></div>
+      <span class="tool-name">${label}</span>
+      <span class="tool-caret">▶</span>
+    </div>
+    <div class="tool-body">
+      <div class="tool-label">参数</div>
+      <pre>${JSON.stringify(input, null, 2) || '(无)'}</pre>
+      <div class="tool-label">结果</div>
+      <pre class="tool-result">等待中…</pre>
+    </div>
+  `;
+  msgs.appendChild(card);
+  msgs.scrollTop = msgs.scrollHeight;
+  return card;
+}
+
+async function sendChat() {
+  if (isSending) return;
+  const input = document.getElementById('chat-input');
+  const msg = input.value.trim();
+  if (!msg) return;
+
+  isSending = true;
+  input.value = '';
+  input.style.height = 'auto';
+  document.getElementById('btn-send').disabled = true;
+
+  appendMsg('user', msg.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>'));
+
+  // 立即显示"正在思考"气泡，不等第一个 token
+  let bubble = appendMsg('assistant', '<span style="color:var(--text3);font-style:italic">⏳ 正在思考…</span>');
+  let fullText = '';
+  let firstToken = true;
+  let currentToolCard = null;
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg }),
+    });
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const payload = line.slice(6).trim();
+        if (payload === '[DONE]') break;
+        let evt;
+        try { evt = JSON.parse(payload); } catch { continue; }
+
+        if (evt.error) {
+          bubble.textContent = '❌ ' + evt.error;
+          break;
+        }
+
+        if (evt.token) {
+          if (firstToken) { fullText = ''; firstToken = false; }
+          fullText += evt.token;
+          bubble.innerHTML = renderMd(fullText) + '<span class="cursor"></span>';
+          document.getElementById('chat-messages').scrollTop =
+            document.getElementById('chat-messages').scrollHeight;
+        }
+
+        if (evt.tool_start) {
+          currentToolCard = appendToolCard(evt.tool_start.name, evt.tool_start.input);
+        }
+
+        if (evt.tool_end) {
+          if (currentToolCard) {
+            currentToolCard.classList.add('done');
+            const pre = currentToolCard.querySelector('.tool-result');
+            if (pre) {
+              try {
+                const parsed = JSON.parse(evt.tool_end.result);
+                // 检查是否有二维码
+                if (parsed.qr_base64 && parsed.qrcode_key) {
+                  _showWechatQR(parsed);
+                } else {
+                  pre.textContent = JSON.stringify(parsed, null, 2);
+                }
+              } catch {
+                pre.textContent = evt.tool_end.result;
+              }
+            }
+            currentToolCard = null;
+          }
+        }
+      }
+    }
+
+    // 移除光标，清除占位文字
+    const cursor = bubble.querySelector('.cursor');
+    if (cursor) cursor.remove();
+    if (fullText) {
+      bubble.innerHTML = renderMd(fullText);
+    } else if (firstToken) {
+      // 没有收到任何 token（纯工具调用无文本回复）
+      bubble.innerHTML = '<p style="color:var(--text3)">(已完成)</p>';
+    }
+  } catch (e) {
+    bubble.textContent = '❌ 请求失败：' + e.message;
+  } finally {
+    isSending = false;
+    document.getElementById('btn-send').disabled = false;
+    input.focus();
+  }
+}
+
+function _showWechatQR(data) {
+  const msgs = document.getElementById('chat-messages');
+  const card = document.createElement('div');
+  card.className = 'msg assistant';
+  card.innerHTML = `
+    <div class="avatar">A</div>
+    <div class="bubble md" id="wechat-qr-card">
+      <p>📱 请用微信扫描下方二维码登录：</p>
+      <img src="data:image/png;base64,${data.qr_base64}" style="width:200px;height:200px;display:block;margin:12px 0;border-radius:8px;">
+      <p id="wechat-qr-status" style="color:var(--text2)">⏳ 等待扫码…</p>
+    </div>
+  `;
+  msgs.appendChild(card);
+  msgs.scrollTop = msgs.scrollHeight;
+
+  // 每 2 秒轮询一次扫码状态
+  const timer = setInterval(async () => {
+    try {
+      const r = await fetch(`/api/wechat/qr_status?key=${encodeURIComponent(data.qrcode_key)}&ilink_base=${encodeURIComponent(data.ilink_base || 'https://ilinkai.weixin.qq.com')}`);
+      const s = await r.json();
+      const statusEl = document.getElementById('wechat-qr-status');
+      if (s.status === 'success') {
+        clearInterval(timer);
+        if (statusEl) statusEl.innerHTML = '✅ 扫码成功！微信 Bot 已登录' + (s.daemon_started ? '，守护进程已启动。' : '，请运行 sjtu-agent wechat-bot。');
+        // 刷新状态点
+        loadStatus();
+      } else if (s.status === 'expired') {
+        clearInterval(timer);
+        if (statusEl) statusEl.innerHTML = '❌ 二维码已过期，请重新发送「配置微信」。';
+      }
+    } catch (e) {}
+  }, 2000);
+
+  // 5 分钟后停止轮询
+  setTimeout(() => clearInterval(timer), 300000);
+}
+
+async function clearChat() {
+  await fetch('/api/chat/clear', { method: 'POST' });
+  const msgs = document.getElementById('chat-messages');
+  msgs.innerHTML = `
+    <div class="msg assistant">
+      <div class="avatar">A</div>
+      <div class="bubble md"><p>👋 对话已清空。有什么需要帮忙的？</p></div>
+    </div>`;
+  // 重置正在思考状态
+  isSending = false;
+  document.getElementById('btn-send').disabled = false;
+}
+
+// textarea 自动增高 + Enter 发送
+const chatInput = document.getElementById('chat-input');
+chatInput.addEventListener('input', function() {
+  this.style.height = 'auto';
+  this.style.height = Math.min(this.scrollHeight, 180) + 'px';
+});
+chatInput.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendChat();
+  }
+});
+
+// 进入聊天页面时更新模型标签
+document.querySelectorAll('.nav-item').forEach(el => {
+  if (el.dataset.page === 'chat') {
+    el.addEventListener('click', () => {
+      const model = document.getElementById('model').value || '未配置';
+      document.getElementById('chat-model-tag').textContent = '模型：' + model;
+    });
+  }
+});
+
+// 初始化
+loadConfig();
+</script>
+</body>
+</html>

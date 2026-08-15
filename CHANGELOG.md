@@ -2,6 +2,9 @@
 
 本文件记录各版本的用户可见变化。Agent 通过 `get_recent_updates` 读取（问「最近更新了什么」时），不写入 system prompt。
 
+## Unreleased
+- 🖥 Web GUI Phase 1：新增 React 多会话界面（会话列表 / 新建 / 重命名 / 删除 / 清空），SQLite 持久化消息；旧版配置页保留在 `/legacy`
+
 ## v0.12.0 (2026-08-15)
 - 🌐 新增 `sjtu-agent web-proxy`：生成 Nginx / Caddy HTTPS 反向代理配置（SSE 长连接参数、HTTP→HTTPS 跳转）
 - ⏳ 配置归档增加过期与校验策略：默认 24 小时过期、SHA-256 校验、拒绝过期归档（`--allow-expired` 放宽）

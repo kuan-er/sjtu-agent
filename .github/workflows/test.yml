@@ -32,3 +32,27 @@ jobs:
 
       - name: Run tests
         run: pytest
+
+  webui:
+    name: Web UI build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build Web UI and check committed artifacts
+        run: |
+          npm run build:webui
+          git diff --exit-code -- \
+            sjtu_agent/web/static/index.html \
+            sjtu_agent/web/static/app.js \
+            sjtu_agent/web/static/app.css
