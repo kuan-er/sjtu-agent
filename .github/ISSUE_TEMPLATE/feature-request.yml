@@ -1,0 +1,38 @@
+name: 💡 功能建议
+description: 提议一个新功能或界面改进
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: 功能领域
+      options:
+        - Web GUI
+        - TUI / 终端
+        - Bot（飞书 / Telegram / 微信 / QQ）
+        - DDL / Canvas
+        - 校园信息源（新闻 / 水源）
+        - 部署 / 服务器
+        - 文档
+        - 其他
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: 要解决什么问题
+      description: 描述现在的体验和你的使用场景
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 期望的方案
+      description: 可以附参考项目链接、截图或交互描述
+  - type: checkboxes
+    id: willing_to_pr
+    attributes:
+      label: 是否愿意参与实现
+      options:
+        - label: 我可以提交 PR

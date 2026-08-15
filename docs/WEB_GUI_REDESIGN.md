@@ -33,13 +33,14 @@ browser
 - [x] 旧版页面迁移到 `/legacy`，保持现有 API 兼容
 - [x] CI 校验 `npm run build:webui` 产物与仓库一致
 
-## Phase 2
+## Phase 2（当前）
 
-- Markdown / 代码高亮 / KaTeX 渲染
-- 工具卡片：耗时、状态、折叠、重试
-- 停止生成（abort）按钮
-- 主题 / 强调色持久化
-- 移动端会话抽屉
+- [x] Markdown / 代码高亮 / KaTeX 渲染
+- [x] 工具卡片：耗时、状态、折叠
+- [ ] 工具调用重试（留到 Phase 3）
+- [x] 停止生成（客户端 abort + 服务端取消标记）
+- [x] 主题 / 强调色持久化
+- [x] 移动端会话抽屉
 
 ## Phase 3
 

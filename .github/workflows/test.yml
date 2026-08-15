@@ -55,4 +55,5 @@ jobs:
           git diff --exit-code -- \
             sjtu_agent/web/static/index.html \
             sjtu_agent/web/static/app.js \
-            sjtu_agent/web/static/app.css
+            sjtu_agent/web/static/app.css \
+            sjtu_agent/web/static/fonts
