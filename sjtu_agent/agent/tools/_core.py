@@ -1934,7 +1934,7 @@ def tool_save_shuiyuan_cookie(cookie_text: str) -> dict:
         except Exception as exc:
             return {"error": f"config.json 读取失败：{exc}"}
 
-    if len(candidates) > 1 or any(c["name"] not in {"_forum_session", "_t", "_discourse_session"} for c in candidates):
+    if "=" in cookie_text and len(candidates) > 1:
         trial = {c["name"]: c["value"] for c in candidates}
         if _shuiyuan_session_is_valid(trial):
             cfg["shuiyuan_cookies"] = trial
