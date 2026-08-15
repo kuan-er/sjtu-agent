@@ -5,6 +5,7 @@
 ## Unreleased
 - 🔧 水源自动登录修复：jAccount 落在 Welcome 首页/登录框未加载时清 cookie 重新发起 SSO；`_fill_jaccount` 对缺失登录框给出明确错误而不是干等 30 秒
 - 🍪 新增 `save_shuiyuan_cookie` 工具：自动登录失败时可直接粘贴浏览器 Cookie 恢复水源会话
+- 🔑 恢复 User API Key 授权流程：`start_shuiyuan_api_key` 生成授权链接并复用 client_id，`submit_shuiyuan_api_key` 解密校验 payload 后保存
 - 🖥 Web GUI 改为视口内固定布局：消息区独立滚动，输入框始终可见，切换会话无需回到页面顶部
 
 ## v0.15.1 (2026-08-15)
