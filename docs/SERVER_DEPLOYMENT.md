@@ -38,19 +38,29 @@ bash install/install.sh --no-setup --skip-playwright
 - `--no-setup`：服务器上不走交互向导，配置手工写入或从本机复制。
 - `--skip-playwright`：暂时不需要自动登录；之后需要刷新 cookie 时再 `uv run playwright install chromium`（或在有桌面依赖的机器上安装）。
 
-## 2. 准备配置（推荐：从本机复制）
+## 2. 准备配置（推荐：export-config / import-config）
 
-在**你平时使用的电脑**上跑通一次 setup 后，把运行时数据目录整个复制到服务器：
+在**你平时使用的电脑**上跑通一次 setup 后，用专用命令导出核心配置，而不是手工复制整个运行时目录：
 
 ```bash
-# 本机（macOS 示例）
-scp -r ~/Library/Application\ Support/sjtu-agent user@server:.sjtu-agent-local
+# 本机：导出核心凭据（config.json / .env / agent_config.json）
+sjtu-agent export-config --output sjtu-agent-config.tar.gz
 
-# 服务器
-mkdir -p ~/.local/share
-mv ~/.sjtu-agent-local ~/.local/share/sjtu-agent
-chmod 700 ~/.local/share/sjtu-agent
+# 安全传到服务器（scp 走 SSH 加密）
+scp sjtu-agent-config.tar.gz user@server:
+
+# 服务器：导入；同名文件会先自动备份
+sjtu-agent import-config ~/sjtu-agent-config.tar.gz --yes
+sjtu-agent doctor
 ```
+
+也可以不走中间文件，直接 SSH 管道直传：
+
+```bash
+sjtu-agent export-config --output - | ssh user@server "sjtu-agent import-config - --yes"
+```
+
+需要同时迁移提醒/用户画像/食堂偏好时，导出端加 `--with-state`。归档文件本身包含明文凭据，请**只在 SSH/scp 中传输，用后删除**；需要落到共享磁盘时使用 `--encrypt`（PBKDF2 + Fernet 加密，密码可设置 `SJTU_AGENT_CONFIG_PASSWORD`）。
 
 默认路径：
 
@@ -59,7 +69,7 @@ chmod 700 ~/.local/share/sjtu-agent
 | Linux 服务器 | `~/.local/share/sjtu-agent` |
 | 自定义 | 设置 `SJTU_AGENT_HOME=/opt/sjtu-agent` |
 
-如果服务器和本机用同一套路径，`scp` 时注意不要覆盖服务器上已有的配置。也可以只复制三个核心文件：
+导入的三个核心文件：
 
 - `config.json`：平台 Token、Bot 凭据、Cookie
 - `.env`：jAccount、LLM API Key

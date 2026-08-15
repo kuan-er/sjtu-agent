@@ -564,6 +564,14 @@ Runtime files are stored in platform-specific user data directories, not the rep
 
 Legacy files in the repo root are auto-migrated on first import.
 
+To migrate credentials to another machine (e.g. a server):
+
+```bash
+sjtu-agent export-config --output - | ssh user@server "sjtu-agent import-config - --yes"
+```
+
+See [Server Deployment](docs/SERVER_DEPLOYMENT.md).
+
 ## Robustness
 
 The Feishu Bot self-checks credentials, ChromaDB, and Agent API connectivity on startup; writes a heartbeat file every 30s for the launcher to monitor (no heartbeat for >90s → unresponsive); and cleans up thread pools and temp files on exit.

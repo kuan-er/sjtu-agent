@@ -240,6 +240,18 @@ Windows 若下载超时，可以设置代理后重试，或从安装脚本加 `-
 
 运行时数据目录独立于代码仓库，普通重装不会删除。只有手动删除该目录或更换用户才会丢配置。项目目录移动后，Windows 后台服务需要 `sjtu-agent daemons resync`（安装脚本会自动做）。
 
+### 怎么把本机配置搬到服务器？
+
+```bash
+# 本机
+sjtu-agent export-config --output sjtu-agent-config.tar.gz
+
+# 服务器
+sjtu-agent import-config sjtu-agent-config.tar.gz --yes
+```
+
+推荐直接走 SSH 管道：`sjtu-agent export-config --output - | ssh server "sjtu-agent import-config - --yes"`。导入前会备份同名文件到运行时目录 `backups/`。详见 [SERVER_DEPLOYMENT.md](SERVER_DEPLOYMENT.md)。
+
 ### 仍然无法解决？
 
 到 [GitHub Issues](https://github.com/kuan-er/sjtu-agent/issues) 用对应模板提交，附上脱敏后的 `sjtu-agent doctor` 输出和 `logs/` 中相关日志。
