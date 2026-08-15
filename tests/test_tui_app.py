@@ -129,10 +129,48 @@ def test_ui_workers_never_exit_app(tmp_path, monkeypatch):
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
             monkeypatch.setattr(app, "run_worker", fake_run_worker)
-            app.render_event({"kind": "token", "text": "hello"}, app.session_id)
+            app.schedule_worker(app.flush_stream(), group="test")
             assert calls
             assert calls[-1]["exit_on_error"] is False
-            assert calls[-1]["exclusive"] is True
+
+            app.render_event({"kind": "token", "text": "hello"}, app.session_id)
+            assert app.stream_flush_timer is not None
+
+    _run(scenario())
+
+
+def test_high_frequency_stream_does_not_crash_app(tmp_path, monkeypatch):
+    store = SessionStore(tmp_path / "web_sessions.sqlite3")
+    model = TuiSessionModel(store)
+    model.create_session("新会话")
+
+    def fake_stream(user_message, session_id=None):
+        for index in range(200):
+            yield {"kind": "token", "text": f"token-{index} "}
+            if index % 20 == 0:
+                import time
+                time.sleep(0.005)
+        yield {"kind": "done"}
+
+    monkeypatch.setattr("sjtu_agent.tui.app.iter_chat_events", fake_stream)
+
+    async def scenario():
+        app = build_app()
+        app.model = model
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            prompt = app.query_one("#prompt", Input)
+            prompt.focus()
+            prompt.value = "stress"
+            await pilot.press("enter")
+            for _ in range(200):
+                if not app.busy:
+                    break
+                await pilot.pause(0.05)
+
+            assert app.busy is False
+            stream = app.query_one("#stream-markdown", Markdown)
+            assert "token-199" in stream.source
 
     _run(scenario())
 

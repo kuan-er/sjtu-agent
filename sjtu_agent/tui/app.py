@@ -72,6 +72,7 @@ if TEXTUAL_AVAILABLE:
             self.suggestion_index = 0
             self.stream_text = ""
             self.turn_session: str | None = None
+            self.stream_flush_timer = None
 
         @property
         def session_id(self) -> str | None:
@@ -232,8 +233,17 @@ if TEXTUAL_AVAILABLE:
                     exclusive=exclusive,
                     exit_on_error=False,
                 )
-            except RuntimeError:
+            except Exception:
                 pass
+
+        def schedule_stream_flush(self) -> None:
+            """节流刷新流式 Markdown：最多每 80ms 更新一次，避免 worker 互斥取消。"""
+            if self.stream_flush_timer is not None:
+                return
+            try:
+                self.stream_flush_timer = self.set_timer(0.08, self.flush_stream)
+            except Exception:
+                self.stream_flush_timer = None
 
         def handle_approval(self, text: str) -> None:
             approval = self.pending_approval
@@ -242,14 +252,14 @@ if TEXTUAL_AVAILABLE:
             if not approved and text.lower() not in {"deny", "no", "n", "拒绝"}:
                 self.pending_approval = approval
                 self.stream_text += "\n\n> 请输入 approve 或 deny。"
-                self.schedule_worker(self.flush_stream(), group="stream", exclusive=True)
+                self.schedule_stream_flush()
                 return
             decide_approval(str(approval.get("approval_id", "")), approved)
             self.stream_text += (
                 f"\n\n_{'已批准' if approved else '已拒绝'}："
                 f"{approval.get('tool_name', '')}_"
             )
-            self.schedule_worker(self.flush_stream(), group="stream", exclusive=True)
+            self.schedule_stream_flush()
 
         async def start_turn(self, text: str) -> None:
             if self.session_id is None:
@@ -303,7 +313,7 @@ if TEXTUAL_AVAILABLE:
             """从 worker 线程安全地投递 UI 回调；app 关闭后静默丢弃。"""
             try:
                 self.call_from_thread(callback, *args)
-            except RuntimeError:
+            except Exception:
                 pass
 
         # ── 渲染（App 线程）─────────────────────────────────────────────
@@ -334,9 +344,10 @@ if TEXTUAL_AVAILABLE:
                 self.stream_text += f"\n\n❌ **错误：{event.get('text', '')}**"
             elif kind == "cancelled":
                 self.stream_text += "\n\n_已取消_"
-            self.schedule_worker(self.flush_stream(), group="stream", exclusive=True)
+            self.schedule_stream_flush()
 
         async def flush_stream(self) -> None:
+            self.stream_flush_timer = None
             try:
                 markdown = self.query_one("#stream-markdown", Markdown)
                 await markdown.update(self.stream_text)
@@ -349,6 +360,14 @@ if TEXTUAL_AVAILABLE:
             if turn_session == self.session_id:
                 self.busy = False
                 self.pending_approval = None
+            if self.stream_flush_timer is not None:
+                try:
+                    self.stream_flush_timer.stop()
+                except Exception:
+                    pass
+                self.stream_flush_timer = None
+            # 最后一次刷新用普通 worker（非 exclusive），完成后刷新会话列表。
+            self.schedule_worker(self.flush_stream(), group="stream-final")
             self.schedule_worker(
                 self.refresh_sessions(select_id=turn_session),
                 group="sessions-refresh",
