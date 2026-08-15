@@ -2,7 +2,7 @@
 
 本文件记录各版本的用户可见变化。Agent 通过 `get_recent_updates` 读取（问「最近更新了什么」时），不写入 system prompt。
 
-## Unreleased
+## v0.15.0 (2026-08-15)
 - 🖥 Web GUI Phase 3：附件上传/下载/图片与 PDF 预览、危险工具审批、Canvas/水源结果卡片、会话搜索、复制按钮、流式中断历史回写
 
 ## v0.14.0 (2026-08-15)
