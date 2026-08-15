@@ -2,6 +2,14 @@
 
 本文件记录各版本的用户可见变化。Agent 通过 `get_recent_updates` 读取（问「最近更新了什么」时），不写入 system prompt。
 
+## v0.17.0 (2026-08-16)
+- 🧭 斜杠命令统一为共享执行层：新增 `sjtu_agent.commands`（元数据 / dispatch / homework / news / dining / template），飞书 Bot 与 WebUI 共用同一份 `/hw` `/news*` `/eat` `/template` 逻辑；飞书文本输出保持不变
+- 🖥 WebUI 命令体验：输入框上方快捷 chips（作业 / 新闻 / 食堂 / 模板 / DDL / 配置）、`/` 命令补全面板（↑↓ 选择、Enter 填入、Esc 关闭）
+- ⚡ 新增 `POST /api/command`：命令经共享层执行并通过 SSE 推送 `command_start` / `command_progress` / `command_result`，进度与结果写入 Web 会话
+- 🃏 命令结果结构化：服务端返回 `{view, text, data}`，WebUI 按视图渲染卡片（食堂推荐 / 新闻条目 / 作业列表 / LaTeX 模板 / 新闻偏好），Markdown 兜底；刷新页面后卡片仍可渲染
+- 🧠 内部配套：`NewsAggregator.run_structured` 输出结构化新闻条目；`homework_agent.fetch_homework_list` 输出结构化作业列表
+- 📝 文档清理：README 中英文同步 Web GUI 能力说明，设计文档标注归档状态
+
 ## v0.16.0 (2026-08-15)
 - 🔧 水源自动登录修复：jAccount 落在 Welcome 首页/登录框未加载时清 cookie 重新发起 SSO；`_fill_jaccount` 对缺失登录框给出明确错误而不是干等 30 秒
 - 🍪 新增 `save_shuiyuan_cookie` 工具：自动登录失败时可直接粘贴浏览器 Cookie 恢复水源会话

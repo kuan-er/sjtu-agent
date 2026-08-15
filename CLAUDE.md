@@ -46,7 +46,7 @@ pytest tests/test_config.py     # run a single test file
 pytest -k "test_function_name"  # run tests matching a pattern
 ```
 
-Tests live in `tests/`, discovered via `pytest.ini`. Configuration is minimal — coverage is not configured yet. A CI workflow runs the suite on GitHub (`.github/workflows/test.yml`, 310 tests).
+Tests live in `tests/`, discovered via `pytest.ini`. Configuration is minimal — coverage is not configured yet. A CI workflow runs the suite on GitHub (`.github/workflows/test.yml`, currently ~478 tests).
 
 ## Environment variables
 
@@ -101,9 +101,11 @@ sjtu_agent/
     storage.py        # news storage and deduplication
     sources/          # per-platform scrapers (jwc, shuiyuan, official, canvas)
 
-  web/                # local web config UI
-    server.py         # pure-Python HTTP server (no framework, ~43KB)
-    static/index.html # SPA frontend (~60KB)
+  web/                # local Web GUI + legacy config page
+    server.py         # pure stdlib HTTP server: SSE chat (/api/chat), command SSE (/api/command), config APIs
+    session_store.py  # SQLite-backed Web sessions/messages
+    attachment_store.py  # uploaded attachment metadata/files
+    static/           # built React bundle (source in webui/src/, rebuild with npm run build:webui)
 ```
 
 ### Key design patterns
@@ -137,8 +139,8 @@ New code should go into `sjtu_agent/`, not these root or script files.
 
 ### Refactoring status
 
-Refactoring status (as of v0.8.0):
-- **Done**: Phase 2.1 (agent.py split into `sjtu_agent/agent/`), tools.py split into `agent/tools/` subpackage (7 domain-specific submodules + `_report_prefs.py`, `_core.py` ~3700 lines)
-- **Partial**: Phase 1 (ConfigStore) — 类已实现 + 测试，纯读取点已迁移（20 处）；受保护的读写路径（setup/save + P0 凭据保护）保留直接文件操作。`run_tool` 已注册表化（`_TOOL_REGISTRY`）
-- **Not done**: Phase 2.2 (BotRunner base class to deduplicate telegram/wechat ~65% shared code), Phase 3 (Notifier abstraction, BasePlatform for DDL scrapers), Phase 4 (unified logging)
-- CI workflow exists (`.github/workflows/test.yml`, 310 tests) but coverage is thin
+Refactoring status (as of v0.17.0):
+- **Done**: agent.py split into `sjtu_agent/agent/`; tools split into `agent/tools/` subpackage; ConfigStore + protected write path; `run_tool` registry; Notifier abstraction; unified logging; Web GUI (multi-session, attachments, approvals); shared slash-command layer (`sjtu_agent/commands/`) used by Feishu + WebUI
+- **Partial/deferred**: full BaseBotRunner transport abstraction to deduplicate all bot glue; BasePlatform for DDL scrapers; `/hw do` fine-grained progress callbacks
+- **Next**: Textual TUI (`sjtu-agent tui`), reusing the Web SQLite session store so CLI and Web progress stay in sync
+- CI workflow exists (`.github/workflows/test.yml`) but coverage is thin

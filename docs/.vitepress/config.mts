@@ -21,19 +21,18 @@ export default defineConfig({
         text: '开始',
         items: [
           { text: '文档首页', link: '/' },
+          { text: 'Web GUI', link: '/WEB_GUI_REDESIGN' },
           { text: '服务器部署', link: '/SERVER_DEPLOYMENT' },
           { text: '排错手册', link: '/TROUBLESHOOTING' },
           { text: '飞书 Bot 排错', link: '/feishu-bot-troubleshooting' },
+          { text: '代码修改后重载', link: '/reload-after-code-changes' },
         ],
       },
       {
-        text: '设计文档',
+        text: '历史设计归档',
         items: [
-          { text: 'Web GUI 重设计', link: '/WEB_GUI_REDESIGN' },
           { text: '安装优化设计', link: '/DEPLOYMENT' },
           { text: 'Agent 架构', link: '/AGENT_ARCHITECTURE' },
-          { text: 'MCP / Skills 更新', link: '/MCP_SKILL_UPDATE' },
-          { text: '代码修改后重载', link: '/reload-after-code-changes' },
         ],
       },
     ],

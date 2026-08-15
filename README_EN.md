@@ -4,7 +4,7 @@
 [![Pages](https://github.com/kuan-er/sjtu-agent/actions/workflows/pages.yml/badge.svg)](https://github.com/kuan-er/sjtu-agent/actions/workflows/pages.yml)
 [![Release](https://github.com/kuan-er/sjtu-agent/actions/workflows/release.yml/badge.svg)](https://github.com/kuan-er/sjtu-agent/actions/workflows/release.yml)
 
-A campus assistant for Shanghai Jiao Tong University students, offering terminal chat, Telegram / Feishu (Lark) / WeChat / QQ bots, DDL aggregation, daily reports, campus news, canteen recommendations, and an MCP server.
+A campus assistant for Shanghai Jiao Tong University students, offering terminal chat, a local Web GUI, Telegram / Feishu (Lark) / WeChat / QQ bots, DDL aggregation, daily reports, campus news, canteen recommendations, and an MCP server.
 
 中文文档: [README.md](README.md)
 
@@ -18,6 +18,7 @@ If this project helps you, please consider giving it a ⭐ Star!
 
 - [Installation](#installation)
 - [Common Commands](#common-commands)
+- [Web GUI](#web-gui)
 - [Configuration](#configuration)
 - [Background Services](#background-services)
 - [Runtime Data](#runtime-data)
@@ -162,6 +163,22 @@ sjtu-agent setup
 sjtu-agent setup --yes --skip-cookie-import --skip-launchd
 sjtu-agent setup --yes --write-daemons-only --output-dir /tmp/sjtu-agent-launchd
 ```
+
+## Web GUI
+
+```bash
+sjtu-agent web          # start the local Web GUI (default http://127.0.0.1:7860)
+sjtu-agent web --host 0.0.0.0 --no-browser   # listen on a server
+```
+
+A browser-based chat interface with persistent, synchronized conversations:
+
+- **Multi-session**: create / rename / clear / delete / search sessions; messages persisted in SQLite
+- **Rich messages**: streaming output, Markdown + KaTeX + code highlighting, tool-call cards (arguments / result / duration)
+- **Attachments**: upload images / PDFs; content is pre-parsed into context with preview and staged-attachment management
+- **Safety**: destructive tools (send email, write config, install dependencies, etc.) require in-browser confirmation
+- **Slash commands**: quick chips above the input (homework / news / dining / template / DDL / settings), a `/` completion panel, and structured result cards per command type
+- The legacy config page remains at `/legacy`
 
 ## MCP & Skills
 
@@ -514,7 +531,7 @@ Three key runtime files:
 
 ### Security Note
 
-Credentials (API keys, passwords, tokens) are stored in plaintext in local files. The Web UI requires a `?token=xxx` access token (printed to the terminal on first launch). The `execute_python` tool strips sensitive environment variables while running. Keep the runtime data directory private (macOS/Linux set it to `0o600` automatically).
+Credentials (API keys, passwords, tokens) are stored in plaintext in local files. The Web GUI access token is delivered automatically as an HttpOnly cookie when the page is first opened (the token is still printed in the launch log); there is no need to append `?token=xxx` manually. The `execute_python` tool strips sensitive environment variables while running. Keep the runtime data directory private (macOS/Linux set it to `0o600` automatically).
 
 For Canvas, `sjtu-agent setup` tries to create and save an API token automatically when Playwright and jAccount credentials are available. If that fails, it opens `https://oc.sjtu.edu.cn/profile/settings` and falls back to manual confirmation.
 
@@ -594,7 +611,7 @@ The Feishu Bot self-checks credentials, ChromaDB, and Agent API connectivity on 
 
 ## Version
 
-Current version: **v0.16.0**. Release history: [Releases](https://github.com/kuan-er/sjtu-agent/releases).
+Current version: **v0.17.0**. Release history: [Releases](https://github.com/kuan-er/sjtu-agent/releases).
 
 ## Release Notes
 

@@ -5,7 +5,7 @@
 [![Release](https://github.com/kuan-er/sjtu-agent/actions/workflows/release.yml/badge.svg)](https://github.com/kuan-er/sjtu-agent/actions/workflows/release.yml)
 [![Python](https://img.shields.io/badge/Python-3.11%20%7C%203.13-blue)](https://www.python.org/)
 
-面向上海交通大学学生的校园助手，提供终端对话、飞书 / Telegram / 微信 / QQ Bot、DDL 聚合、日报推送和 MCP Server。
+面向上海交通大学学生的校园助手，提供终端对话、本地 Web GUI、飞书 / Telegram / 微信 / QQ Bot、DDL 聚合、日报推送和 MCP Server。
 
 [English Version](README_EN.md) · [项目展示页](https://kuan-er.github.io/sjtu-agent) · [文档站](https://kuan-er.github.io/sjtu-agent/docs/) · [排错手册](docs/TROUBLESHOOTING.md) · [服务器部署](docs/SERVER_DEPLOYMENT.md)
 
@@ -16,6 +16,7 @@
 - [快速开始](#快速开始)
 - [常用命令速查](#常用命令速查)
 - [功能](#功能)
+  - [Web GUI](#web-gui)
 - [配置](#配置)
 - [后台服务](#后台服务)
 - [平台接入](#平台接入)
@@ -97,7 +98,7 @@ ZHIYUAN_API_KEY=你的APIKey
 | `sjtu-agent` | 终端对话 |
 | `sjtu-agent doctor` | 检查配置、路径和依赖 |
 | `sjtu-agent update` | 更新代码并自动恢复后台服务 |
-| `sjtu-agent web` | 本地 Web 配置页（`--host 0.0.0.0` 供服务器监听） |
+| `sjtu-agent web` | 本地 Web GUI：聊天、会话、附件、斜杠命令、配置（`--host 0.0.0.0` 供服务器监听） |
 | `sjtu-agent web-proxy --domain <域名>` | 生成 Nginx / Caddy HTTPS 反代配置 |
 | `sjtu-agent install-daemons` | 安装后台服务；`daemons status/uninstall/resync` 管理服务 |
 | `sjtu-agent export-config / import-config` | 本机配置迁移到服务器（SSH 管道直传） |
@@ -115,6 +116,22 @@ sjtu-agent              # 交互式对话
 sjtu-agent doctor       # 查看配置和运行时路径
 sjtu-agent update       # 一键更新到最新版本
 ```
+
+### Web GUI
+
+```bash
+sjtu-agent web          # 启动本地 Web GUI（默认 http://127.0.0.1:7860）
+sjtu-agent web --host 0.0.0.0 --no-browser   # 服务器监听
+```
+
+浏览器版对话界面，与聊天记录同步持久化：
+
+- **多会话**：新建 / 重命名 / 清空 / 删除 / 搜索，SQLite 持久化消息
+- **富消息**：流式输出、Markdown + KaTeX + 代码高亮、工具调用卡片（参数 / 结果 / 耗时）
+- **附件**：上传图片 / PDF 等，自动预解析进上下文，支持预览与待发送管理
+- **安全**：危险工具（发送邮件、写配置、安装依赖等）在浏览器中二次确认
+- **斜杠命令**：输入框上方快捷 chips（作业 / 新闻 / 食堂 / 模板 / DDL / 配置），输入 `/` 打开命令补全面板；命令结果按类型渲染为卡片
+- **旧版配置页**保留在 `/legacy`
 
 ### 多平台 Bot
 
@@ -303,7 +320,7 @@ sjtu-agent web-proxy --type nginx --domain sjtu-agent.example.com --output sjtu-
 
 ### 安全说明
 
-凭据（API Key、密码、Token）以明文存储在本地文件中。Web UI 需要 `?token=xxx` 访问令牌（首次启动打印在终端）。`execute_python` 工具执行时会自动剥离敏感环境变量。建议保持运行时数据目录为私有（macOS/Linux 已自动设为 `0o600`）。
+凭据（API Key、密码、Token）以明文存储在本地文件中。Web GUI 的访问令牌在首次打开页面时自动通过 HttpOnly Cookie 下发（令牌仍可在启动日志中看到），无需手动拼接 `?token=xxx`。`execute_python` 工具执行时会自动剥离敏感环境变量。建议保持运行时数据目录为私有（macOS/Linux 已自动设为 `0o600`）。
 
 ### 环境变量
 
@@ -391,4 +408,4 @@ sjtu-agent install-daemons       # 服务器无桌面环境时加 --no-browser
 
 ## 版本
 
-当前版本：**v0.16.0**。发布历史见 [Releases](https://github.com/kuan-er/sjtu-agent/releases)。
+当前版本：**v0.17.0**。发布历史见 [Releases](https://github.com/kuan-er/sjtu-agent/releases)。
