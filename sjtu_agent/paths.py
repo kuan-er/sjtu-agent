@@ -57,6 +57,7 @@ CONVERSATION_LOG_PATH = DATA_DIR / "conversation_log.jsonl"
 WEB_TOKEN_PATH        = DATA_DIR / ".web_token"
 DAEMON_MANIFEST_PATH  = DATA_DIR / ".daemon_manifest.json"
 SHUIYUAN_PROFILE_DIR  = DATA_DIR / "shuiyuan_browser_profile"
+SHUIYUAN_API_PENDING_PATH = DATA_DIR / ".shuiyuan_api_key_pending.json"
 DINING_HISTORY_PATH   = DATA_DIR / "dining_history.json"
 CANTEEN_KNOWLEDGE_PATH = PACKAGE_ROOT / "data" / "canteen_knowledge.json"
 
@@ -185,6 +186,7 @@ def describe_runtime_paths() -> dict[str, str]:
         "dining_history_path": str(DINING_HISTORY_PATH),
         "daemon_manifest_path": str(DAEMON_MANIFEST_PATH),
         "shuiyuan_profile_dir": str(SHUIYUAN_PROFILE_DIR),
+        "shuiyuan_api_pending_path": str(SHUIYUAN_API_PENDING_PATH),
         "canteen_knowledge_path": str(CANTEEN_KNOWLEDGE_PATH),
     }
 

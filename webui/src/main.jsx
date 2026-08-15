@@ -404,8 +404,9 @@ function App() {
   };
 
   const send = async () => {
-    const message = input.trim();
-    if (!message || sending) return;
+    const rawMessage = input.trim();
+    if ((!rawMessage && stagedFiles.length === 0) || sending) return;
+    const message = rawMessage || '请查看我上传的附件';
     setSending(true);
     setInput('');
     partialRef.current = '';
@@ -606,10 +607,20 @@ function App() {
           )}
         </div>
         {approval && <ApprovalBanner approval={approval} onDecision={decideApproval} />}
-        {(stagedFiles.length > 0 || attachments.length > 0) && (
+        {stagedFiles.length > 0 && (
           <div className="attachment-strip">
-            {attachments.map(a => <AttachmentChip key={a.id} attachment={a} onPreview={() => setPreviewAttachment(a)} />)}
-            {stagedFiles.length > 0 && <span className="attachment-staged">已选 {stagedFiles.length} 个附件</span>}
+            <span className="attachment-staged">待发送：</span>
+            {stagedFiles.map(a => (
+              <AttachmentChip key={a.id} attachment={a} onPreview={() => setPreviewAttachment(a)} onRemove={() => removeStaged(a)} />
+            ))}
+          </div>
+        )}
+        {attachments.length > 0 && (
+          <div className="attachment-strip compact">
+            <span className="attachment-staged">本会话附件：</span>
+            {attachments.slice(-6).map(a => (
+              <AttachmentChip key={a.id} attachment={a} onPreview={() => setPreviewAttachment(a)} />
+            ))}
           </div>
         )}
         <div className="composer-wrap">

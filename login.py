@@ -192,9 +192,20 @@ def _fill_jaccount(page: Page, username: str, password: str) -> bool:
     支持：图形验证码（自动识别）+ 短信/二步验证码（终端提示手动输入）。
     成功（跳出 jaccount.sjtu.edu.cn）返回 True，否则 False。
     """
-    # 切换到密码登录模式（默认可能是短信）
+    # 先切换到密码登录模式（默认可能是短信）
     page.evaluate("if (typeof switchLoginType === 'function') switchLoginType('password')")
     page.wait_for_timeout(400)
+
+    # jAccount 偶尔会落到 / 首页（只显示 Welcome），页面没有登录框。
+    # 这里明确等待登录框，失败时给出可诊断的错误，而不是让 page.fill 干等 30 秒。
+    try:
+        page.wait_for_selector("#input-login-user", state="visible", timeout=10_000)
+    except Exception as exc:
+        raise RuntimeError(
+            f"jAccount 登录框未加载（当前页面：{page.url}）。"
+            "请确认能访问 https://jaccount.sjtu.edu.cn/jaccount/jalogin "
+            "且页面显示了用户名输入框。"
+        ) from exc
 
     page.fill("#input-login-user", username)
     page.fill("#input-login-pass", password)

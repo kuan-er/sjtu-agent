@@ -24,14 +24,17 @@ import requests
 
 from sjtu_agent.paths import (
     AGENT_CONFIG_PATH,
+    ASSIGNMENTS_DIR,
     CARE_STATE_PATH,
     CONFIG_PATH,
+    DATA_DIR,
     DDL_CACHE_PATH,
     ENV_PATH,
     MYSJTU_CATALOG_PATH,
     PACKAGE_ROOT,
     PROJECT_ROOT,
     REMINDERS_PATH,
+    SHUIYUAN_API_PENDING_PATH,
     SHUIYUAN_PROFILE_DIR,
     USER_PROFILE_PATH,
     atomic_write_json,
@@ -186,6 +189,52 @@ TOOLS = [
             "name": "setup_shuiyuan",
             "description": "配置或刷新水源社区登录态。当前版本保存 session cookie，无需 User API Key；已有有效 cookie 时不会重新登录。用户说'配置水源'/'授权水源'/'设置水源'时调用。",
             "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "start_shuiyuan_api_key",
+            "description": "启动水源 User API Key 授权流程：生成授权链接并打开浏览器。适合自动登录 cookie 触发 jAccount 二次验证失败时使用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "scopes": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "授权范围，默认 read；可选 read/write/push/notifications/session_info/bookmarks_calendar/user_status 等",
+                    }
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "submit_shuiyuan_api_key",
+            "description": "接收用户从水源 User API Key 授权页面复制回来的 payload，解密校验并保存 key。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "payload": {"type": "string", "description": "用户粘贴的 base64 payload 原文"}
+                },
+                "required": ["payload"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "save_shuiyuan_cookie",
+            "description": "保存用户从浏览器开发者工具复制的 shuiyuan.sjtu.edu.cn Cookie（完整 Cookie 头或单个 session token），并自动校验。自动登录水源失败时，引导用户复制 Cookie 后调用此工具。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "cookie_text": {"type": "string", "description": "用户粘贴的 Cookie 文本，例如 _forum_session=xxx; _t=yyy"}
+                },
+                "required": ["cookie_text"],
+            },
         },
     },
     *_MCP_SKILLS_TOOLS,
@@ -1646,8 +1695,9 @@ def _shuiyuan_session_is_valid(cookies: dict) -> bool:
 def tool_setup_shuiyuan() -> dict:
     """授权水源社区：优先复用已保存且仍有效的 session cookie。
 
-    User API Key 方案已废弃，当前方案为 Playwright 登录后保存 session cookie。
-    每次调用前先验证旧 cookie，避免无谓登录触发 jAccount 异地登录风控。
+    自动登录失败时，另有两条路径：
+      - start_shuiyuan_api_key / submit_shuiyuan_api_key（浏览器授权 User API Key）
+      - save_shuiyuan_cookie（手动粘贴浏览器 Cookie）
     """
     cfg = {}
     if CONFIG_PATH.exists():
@@ -1675,6 +1725,234 @@ def tool_setup_shuiyuan() -> dict:
     return _setup_shuiyuan_session(cfg, username, password)
 
 
+_SHUIYUAN_ALL_SCOPES = [
+    "read",
+    "write",
+    "message_bus",
+    "push",
+    "one_time_password",
+    "notifications",
+    "session_info",
+    "bookmarks_calendar",
+    "user_status",
+]
+
+
+def tool_start_shuiyuan_api_key(scopes: list | None = None) -> dict:
+    """启动水源 User API Key 授权流程。
+
+    生成 RSA key + client_id + nonce，把私钥暂存在运行时目录，打开授权页。
+    用户在自己的浏览器授权后会得到一个 payload，再调用 submit_shuiyuan_api_key。
+    """
+    import base64 as _b64
+    import secrets as _secrets
+    import uuid as _uuid
+    import webbrowser as _webbrowser
+
+    try:
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+    except ImportError:
+        return {"error": "需要 cryptography 依赖，请先 pip install cryptography"}
+
+    scopes_list = list(scopes or ["read"])
+    invalid = [s for s in scopes_list if s not in _SHUIYUAN_ALL_SCOPES]
+    if invalid:
+        return {"error": f"无效的 scope：{', '.join(invalid)}"}
+
+    cfg = {}
+    if CONFIG_PATH.exists():
+        try:
+            cfg = json.loads(CONFIG_PATH.read_text())
+        except Exception as exc:
+            return {"error": f"config.json 读取失败：{exc}"}
+
+    # 同一应用复用 client_id：申请新 key 时 Discourse 会自动销毁旧 key。
+    client_id = str(cfg.get("shuiyuan_user_api_client_id") or "") or str(_uuid.uuid4())
+    nonce = _secrets.token_urlsafe(32)
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=4096)
+    public_key_pem = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode("ascii")
+    private_key_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    ).decode("ascii")
+
+    pending = {
+        "client_id": client_id,
+        "nonce": nonce,
+        "private_key_pem": private_key_pem,
+        "scopes": scopes_list,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    atomic_write_json(SHUIYUAN_API_PENDING_PATH, pending)
+
+    params_dict = {
+        "application_name": "SJTU Agent",
+        "client_id": client_id,
+        "scopes": ",".join(scopes_list),
+        "public_key": public_key_pem,
+        "nonce": nonce,
+    }
+    params_str = "&".join(
+        f"{k}={urllib.parse.quote(v, safe='')}" for k, v in params_dict.items()
+    )
+    url = f"https://shuiyuan.sjtu.edu.cn/user-api-key/new?{params_str}"
+
+    try:
+        _webbrowser.open(url)
+        opened = True
+    except Exception:
+        opened = False
+
+    return {
+        "success": True,
+        "url": url,
+        "opened_browser": opened,
+        "client_id": client_id,
+        "scopes": scopes_list,
+        "next_action": "请在浏览器中完成授权，把页面返回的 payload 原样发给我。",
+    }
+
+
+def tool_submit_shuiyuan_api_key(payload: str) -> dict:
+    """接收用户粘贴的水源 API Key 授权 payload，解密校验并保存。"""
+    import base64 as _b64
+
+    pending = read_json_safe(SHUIYUAN_API_PENDING_PATH, default=None)
+    if not isinstance(pending, dict) or not pending.get("private_key_pem"):
+        return {
+            "error": "没有待完成的授权请求",
+            "next_action": "请先调用 start_shuiyuan_api_key 生成授权链接。",
+        }
+
+    try:
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import padding
+    except ImportError:
+        return {"error": "需要 cryptography 依赖，请先 pip install cryptography"}
+
+    private_key = serialization.load_pem_private_key(
+        pending["private_key_pem"].encode("ascii"),
+        password=None,
+    )
+    try:
+        decrypted = private_key.decrypt(_b64.b64decode(payload.strip()), padding.PKCS1v15())
+        data = json.loads(decrypted)
+    except Exception as exc:
+        return {"error": f"payload 解密失败：{exc}"}
+
+    if data.get("nonce") != pending.get("nonce"):
+        return {"error": "Nonce mismatch：payload 与当前授权请求不匹配"}
+
+    key = data.get("key") or ""
+    if not key:
+        return {"error": "payload 中没有 key 字段"}
+
+    cfg = {}
+    if CONFIG_PATH.exists():
+        try:
+            cfg = json.loads(CONFIG_PATH.read_text())
+        except Exception as exc:
+            return {"error": f"config.json 读取失败：{exc}"}
+    cfg["shuiyuan_user_api_key"] = key
+    cfg["shuiyuan_user_api_client_id"] = pending.get("client_id", "")
+    CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2))
+
+    try:
+        SHUIYUAN_API_PENDING_PATH.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+    test_ok = False
+    test_detail = ""
+    try:
+        r = requests.get(
+            "https://shuiyuan.sjtu.edu.cn/search.json",
+            params={"q": "tags:水源开发者"},
+            headers={"User-Api-Key": key},
+            timeout=8,
+        )
+        test_ok = r.status_code == 200
+        test_detail = f"HTTP {r.status_code}"
+    except Exception as exc:
+        test_detail = str(exc)
+
+    return {
+        "success": True,
+        "api_key_saved": True,
+        "client_id": pending.get("client_id", ""),
+        "api_test_ok": test_ok,
+        "api_test_detail": test_detail,
+        "message": "水源 User API Key 已保存。" if test_ok else "Key 已保存，但测试请求未成功，请稍后在对话中重试搜索。",
+    }
+
+
+def _parse_shuiyuan_cookie_text(cookie_text: str) -> list[dict]:
+    """解析用户粘贴的 Cookie。
+
+    支持两种形式：
+      - 完整 Cookie 头：_forum_session=abc; _t=def; ...
+      - 单个 token：直接尝试常见的水源 session cookie 名称
+    """
+    text = (cookie_text or "").strip().strip('"').strip("'")
+    if not text:
+        return []
+
+    pairs: list[dict] = []
+    if "=" in text:
+        for part in text.split(";"):
+            part = part.strip()
+            if not part or "=" not in part:
+                continue
+            name, _, value = part.partition("=")
+            name = name.strip()
+            value = value.strip()
+            if name and value:
+                pairs.append({"name": name, "value": value})
+        return pairs
+
+    return [
+        {"name": name, "value": text}
+        for name in ("_forum_session", "_t", "_discourse_session")
+    ]
+
+
+def tool_save_shuiyuan_cookie(cookie_text: str) -> dict:
+    """保存用户从浏览器复制的 shuiyuan.sjtu.edu.cn session cookie。"""
+    candidates = _parse_shuiyuan_cookie_text(cookie_text)
+    if not candidates:
+        return {"error": "没有收到有效的 Cookie 文本"}
+
+    cfg = {}
+    if CONFIG_PATH.exists():
+        try:
+            cfg = json.loads(CONFIG_PATH.read_text())
+        except Exception as exc:
+            return {"error": f"config.json 读取失败：{exc}"}
+
+    if "=" in cookie_text and len(candidates) > 1:
+        trial = {c["name"]: c["value"] for c in candidates}
+        if _shuiyuan_session_is_valid(trial):
+            cfg["shuiyuan_cookies"] = trial
+            CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2))
+            return {"success": True, "message": "水源 Cookie 已保存并通过校验。"}
+
+    for candidate in candidates:
+        trial = {candidate["name"]: candidate["value"]}
+        if _shuiyuan_session_is_valid(trial):
+            cfg["shuiyuan_cookies"] = trial
+            CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2))
+            return {"success": True, "message": f"水源 Cookie 已保存（{candidate['name']}）。"}
+
+    return {
+        "error": "Cookie 校验未通过：/session/current.json 未返回当前用户。",
+        "next_action": "请确认复制的是 shuiyuan.sjtu.edu.cn 登录后的完整 Cookie。",
+    }
+
 
 def _setup_shuiyuan_session(cfg: dict, username: str, password: str) -> dict:
     """Playwright 登录水源并保存 session cookie。
@@ -1683,8 +1961,9 @@ def _setup_shuiyuan_session(cfg: dict, username: str, password: str) -> dict:
     或不可用时回退到新的浏览器上下文，并把 config 中的 jAccount cookie 合并进去。
     """
     manual_note = (
-        "水源社区没有固定的 API 设置页面；不要去偏好设置里找 API。"
-        "如果 User API Key 授权不可用，session cookie 就是当前的降级方案。"
+        "自动登录保存 session cookie；若 jAccount 触发二次验证，"
+        "可改用 User API Key 授权流程（start_shuiyuan_api_key），"
+        "或手动粘贴浏览器 Cookie（save_shuiyuan_cookie）。"
     )
 
     def _shuiyuan_session_error(message: str) -> dict:
@@ -1768,11 +2047,32 @@ def _setup_shuiyuan_session(cfg: dict, username: str, password: str) -> dict:
 
         page = ctx.new_page()
         try:
-            page.goto("https://shuiyuan.sjtu.edu.cn/", wait_until="networkidle", timeout=20_000)
+            # jAccount SSO 页资源较多，networkidle 容易超时；先等 DOM 再按需等待。
+            page.goto("https://shuiyuan.sjtu.edu.cn/", wait_until="domcontentloaded", timeout=20_000)
         except Exception:
             pass
 
         if "jaccount" in page.url:
+            # 正常情况应停在 /jaccount/jalogin?... 登录页。若落在 /（只显示
+            # Welcome to SJTU jAccount）或登录框未渲染，说明重定向被旧 cookie
+            # 干扰。清除 cookie 后重新从水源发起 SSO。
+            for _attempt in range(2):
+                if "/jaccount/jalogin" in page.url and page.locator("#input-login-user").count():
+                    break
+                try:
+                    ctx.clear_cookies()
+                except Exception:
+                    pass
+                try:
+                    page.goto(
+                        "https://shuiyuan.sjtu.edu.cn/",
+                        wait_until="domcontentloaded",
+                        timeout=20_000,
+                    )
+                    page.wait_for_url("**/jaccount/jalogin**", timeout=15_000)
+                except Exception:
+                    pass
+
             if not username or not password:
                 _close()
                 return {"error": "需要 jAccount 凭据，请先用 save_credentials 配置"}
@@ -3117,15 +3417,31 @@ def tool_list_assignment_files(
     return {"tree": tree, "base_dir": str(base.resolve())}
 
 
+def _resolve_allowed_local_file(file_path: str) -> Path | None:
+    """把用户给的文件路径解析到允许读取的根目录内。
+
+    允许：仓库目录、SJTU_HOMEWORK_DIR / assignments、Web GUI 上传目录。
+    不允许读取运行时目录中的 .env / config.json 等凭据文件。
+    """
+    raw = Path(file_path)
+    path = raw.resolve() if raw.is_absolute() else (ROOT / raw).resolve()
+    allowed_roots = (
+        ROOT.resolve(),
+        Path(ASSIGNMENTS_DIR).resolve(),
+        (Path(DATA_DIR) / "web_attachments").resolve(),
+    )
+    if any(path.is_relative_to(root) for root in allowed_roots):
+        return path
+    return None
+
+
 def tool_read_assignment_file(
     file_path: str,
     max_chars: int = 8000,
     start_page: int = 1,
 ) -> dict:
-    path = Path(file_path).resolve()
-    if not path.is_relative_to(ROOT.resolve()):
-        path = (ROOT / file_path).resolve()
-    if not path.is_relative_to(ROOT.resolve()):
+    path = _resolve_allowed_local_file(file_path)
+    if path is None:
         return {"error": f"路径越权: {file_path}"}
     if not path.exists():
         return {"error": f"文件不存在: {file_path}，请用 list_assignment_files 确认正确路径"}
@@ -3315,10 +3631,8 @@ def tool_parse_local_file(
     Keeps read_assignment_file unchanged as fallback when strategy asks for legacy
     or when auto parse fails on PDF/HTML.
     """
-    path = Path(file_path).resolve()
-    if not path.is_relative_to(ROOT.resolve()):
-        path = (ROOT / file_path).resolve()
-    if not path.is_relative_to(ROOT.resolve()):
+    path = _resolve_allowed_local_file(file_path)
+    if path is None:
         return {"error": f"路径越权: {file_path}"}
     if not path.exists():
         return {"error": f"文件不存在: {file_path}，请确认路径"}
@@ -3758,6 +4072,9 @@ _TOOL_REGISTRY = {
     "read_shuiyuan_topic": tool_read_shuiyuan_topic,
     "get_schedule": tool_get_schedule,
     "setup_shuiyuan": _no_args(tool_setup_shuiyuan),
+    "start_shuiyuan_api_key": tool_start_shuiyuan_api_key,
+    "submit_shuiyuan_api_key": tool_submit_shuiyuan_api_key,
+    "save_shuiyuan_cookie": tool_save_shuiyuan_cookie,
     "add_mcp_server": tool_add_mcp_server,
     "add_skill": tool_add_skill,
     "create_skill": tool_create_skill,

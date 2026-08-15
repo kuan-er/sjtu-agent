@@ -2,6 +2,15 @@
 
 本文件记录各版本的用户可见变化。Agent 通过 `get_recent_updates` 读取（问「最近更新了什么」时），不写入 system prompt。
 
+## Unreleased
+- 🔧 水源自动登录修复：jAccount 落在 Welcome 首页/登录框未加载时清 cookie 重新发起 SSO；`_fill_jaccount` 对缺失登录框给出明确错误而不是干等 30 秒
+- 🍪 新增 `save_shuiyuan_cookie` 工具：自动登录失败时可直接粘贴浏览器 Cookie 恢复水源会话
+- 🔑 恢复 User API Key 授权流程：`start_shuiyuan_api_key` 生成授权链接并复用 client_id，`submit_shuiyuan_api_key` 解密校验 payload 后保存
+- 🖥 Web GUI 改为视口内固定布局：消息区独立滚动，输入框始终可见，切换会话无需回到页面顶部
+- 📎 附件可随文字一起发送或单独发送；待发送附件可预览/取消；上传后后端预解析内容并注入对话上下文
+- 🧠 Web 附件解析复用飞书链路：图片先视觉模型、再 OCR，其他文件走 parse_file，不再让主模型重复询问安装 OCR
+- 🔐 `parse_local_file` / `read_assignment_file` 白名单增加 Web GUI 上传目录（`web_attachments/`），仍拒绝读取运行时目录凭据文件
+
 ## v0.15.1 (2026-08-15)
 - 🖥 GUI 细节修复：新会话按首条消息自动命名、收紧主页行距、legacy 页增加返回入口
 - 💧 修正水源状态提示：session cookie 已足够搜索/读帖，不再提示需要 User API Key
