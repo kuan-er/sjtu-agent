@@ -2,7 +2,7 @@
 
 本文件记录各版本的用户可见变化。Agent 通过 `get_recent_updates` 读取（问「最近更新了什么」时），不写入 system prompt。
 
-## Unreleased
+## v0.11.2 (2026-08-15)
 - 📦 新增 `sjtu-agent export-config / import-config`：核心凭据打包迁移、SSH 管道直传、可选 PBKDF2+ Fernet 加密、导入前自动备份
 - 🗂 `export-config` / `import-config` 新增 `--state-file`，可按需选择 reminders / user_profile / dining_history 状态文件
 - 📚 新增 VitePress 文档站（GitHub Pages `/docs/`），与项目展示页一起自动构建部署
