@@ -344,4 +344,4 @@ sjtu-agent install-daemons       # 服务器无桌面环境时加 --no-browser
 
 ## 版本
 
-当前版本：**v0.11.0**。发布历史见 [Releases](https://github.com/kuan-er/sjtu-agent/releases)。
+当前版本：**v0.11.1**。发布历史见 [Releases](https://github.com/kuan-er/sjtu-agent/releases)。

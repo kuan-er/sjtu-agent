@@ -2,6 +2,9 @@
 
 本文件记录各版本的用户可见变化。Agent 通过 `get_recent_updates` 读取（问「最近更新了什么」时），不写入 system prompt。
 
+## Unreleased
+- 🧬 水源 Playwright 登录复用持久化浏览器 profile（`shuiyuan_browser_profile/`），降低 jAccount 风控概率；异地登录二次验证时给出更明确的处理提示
+
 ## v0.11.0 (2026-08-15)
 - 🔁 后台服务安装清单（`.daemon_manifest.json`）：安装脚本 / `sjtu-agent update` 自动恢复此前安装的 Task Scheduler / psmux / launchd / systemd 服务，重装后无需手动重新配置
 - 🧰 新增 `sjtu-agent daemons status / uninstall / resync`
@@ -9,7 +12,6 @@
 - 🖥 `install-daemons` / setup 新增 `--no-browser`；未安装 `web` 服务时不再等待或尝试打开浏览器
 - 🐧 systemd 补齐 `web`、`news-digest`、`aihot-push` 服务，并修正早报/午报时间
 - 💧 水源授权优先复用仍有效的 session cookie，登录后校验当前用户，减少异地登录触发
-- 🧬 水源 Playwright 登录复用持久化浏览器 profile（`shuiyuan_browser_profile/`），降低 jAccount 风控概率；异地登录二次验证时给出更明确的处理提示
 - 📚 新增排错手册、服务器部署指南和 GitHub Issue 模板
 
 ## v0.10.0 (2026-08-09)
