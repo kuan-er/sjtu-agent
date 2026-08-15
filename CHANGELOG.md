@@ -8,6 +8,7 @@
 - 🔑 恢复 User API Key 授权流程：`start_shuiyuan_api_key` 生成授权链接并复用 client_id，`submit_shuiyuan_api_key` 解密校验 payload 后保存
 - 🖥 Web GUI 改为视口内固定布局：消息区独立滚动，输入框始终可见，切换会话无需回到页面顶部
 - 📎 附件可随文字一起发送或单独发送；待发送附件可预览/取消；上传后后端会把本地路径注入上下文并引导调用 parse_local_file 读取
+- 🔐 `parse_local_file` / `read_assignment_file` 白名单增加 Web GUI 上传目录（`web_attachments/`），仍拒绝读取运行时目录凭据文件
 
 ## v0.15.1 (2026-08-15)
 - 🖥 GUI 细节修复：新会话按首条消息自动命名、收紧主页行距、legacy 页增加返回入口

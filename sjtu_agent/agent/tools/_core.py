@@ -24,8 +24,10 @@ import requests
 
 from sjtu_agent.paths import (
     AGENT_CONFIG_PATH,
+    ASSIGNMENTS_DIR,
     CARE_STATE_PATH,
     CONFIG_PATH,
+    DATA_DIR,
     DDL_CACHE_PATH,
     ENV_PATH,
     MYSJTU_CATALOG_PATH,
@@ -3415,15 +3417,31 @@ def tool_list_assignment_files(
     return {"tree": tree, "base_dir": str(base.resolve())}
 
 
+def _resolve_allowed_local_file(file_path: str) -> Path | None:
+    """把用户给的文件路径解析到允许读取的根目录内。
+
+    允许：仓库目录、SJTU_HOMEWORK_DIR / assignments、Web GUI 上传目录。
+    不允许读取运行时目录中的 .env / config.json 等凭据文件。
+    """
+    raw = Path(file_path)
+    path = raw.resolve() if raw.is_absolute() else (ROOT / raw).resolve()
+    allowed_roots = (
+        ROOT.resolve(),
+        Path(ASSIGNMENTS_DIR).resolve(),
+        (Path(DATA_DIR) / "web_attachments").resolve(),
+    )
+    if any(path.is_relative_to(root) for root in allowed_roots):
+        return path
+    return None
+
+
 def tool_read_assignment_file(
     file_path: str,
     max_chars: int = 8000,
     start_page: int = 1,
 ) -> dict:
-    path = Path(file_path).resolve()
-    if not path.is_relative_to(ROOT.resolve()):
-        path = (ROOT / file_path).resolve()
-    if not path.is_relative_to(ROOT.resolve()):
+    path = _resolve_allowed_local_file(file_path)
+    if path is None:
         return {"error": f"路径越权: {file_path}"}
     if not path.exists():
         return {"error": f"文件不存在: {file_path}，请用 list_assignment_files 确认正确路径"}
@@ -3613,10 +3631,8 @@ def tool_parse_local_file(
     Keeps read_assignment_file unchanged as fallback when strategy asks for legacy
     or when auto parse fails on PDF/HTML.
     """
-    path = Path(file_path).resolve()
-    if not path.is_relative_to(ROOT.resolve()):
-        path = (ROOT / file_path).resolve()
-    if not path.is_relative_to(ROOT.resolve()):
+    path = _resolve_allowed_local_file(file_path)
+    if path is None:
         return {"error": f"路径越权: {file_path}"}
     if not path.exists():
         return {"error": f"文件不存在: {file_path}，请确认路径"}
