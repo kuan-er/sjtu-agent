@@ -250,7 +250,7 @@ sjtu-agent export-config --output sjtu-agent-config.tar.gz
 sjtu-agent import-config sjtu-agent-config.tar.gz --yes
 ```
 
-推荐直接走 SSH 管道：`sjtu-agent export-config --output - | ssh server "sjtu-agent import-config - --yes"`。导入前会备份同名文件到运行时目录 `backups/`。详见 [SERVER_DEPLOYMENT.md](SERVER_DEPLOYMENT.md)。
+推荐直接走 SSH 管道：`sjtu-agent export-config --output - | ssh server "sjtu-agent import-config - --yes"`。归档默认 24 小时过期；导入前会备份同名文件到运行时目录 `backups/`。远程 Web UI 的 HTTPS 反代配置用 `sjtu-agent web-proxy --domain <域名>` 生成。详见 [SERVER_DEPLOYMENT.md](SERVER_DEPLOYMENT.md)。
 
 ### 仍然无法解决？
 

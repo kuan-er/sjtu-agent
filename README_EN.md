@@ -1,6 +1,8 @@
 # SJTU Agent
 
 [![Test](https://github.com/kuan-er/sjtu-agent/actions/workflows/test.yml/badge.svg)](https://github.com/kuan-er/sjtu-agent/actions/workflows/test.yml)
+[![Pages](https://github.com/kuan-er/sjtu-agent/actions/workflows/pages.yml/badge.svg)](https://github.com/kuan-er/sjtu-agent/actions/workflows/pages.yml)
+[![Release](https://github.com/kuan-er/sjtu-agent/actions/workflows/release.yml/badge.svg)](https://github.com/kuan-er/sjtu-agent/actions/workflows/release.yml)
 
 A campus assistant for Shanghai Jiao Tong University students, offering terminal chat, Telegram / Feishu (Lark) / WeChat / QQ bots, DDL aggregation, daily reports, campus news, canteen recommendations, and an MCP server.
 
@@ -11,6 +13,14 @@ Docs: [Documentation Site](https://kuan-er.github.io/sjtu-agent/docs/) · [Troub
 👉 **[Project Showcase](https://kuan-er.github.io/sjtu-agent)**
 
 If this project helps you, please consider giving it a ⭐ Star!
+
+## Contents
+
+- [Installation](#installation)
+- [Common Commands](#common-commands)
+- [Configuration](#configuration)
+- [Background Services](#background-services)
+- [Runtime Data](#runtime-data)
 
 ## Installation
 
@@ -133,6 +143,10 @@ sjtu-agent mcp --http --port 8765
 sjtu-agent add-mcp-server my-tools --transport stdio --command python --arg D:/path/to/server.py
 sjtu-agent add-skill my-skill --content-file D:/path/to/SKILL.md
 sjtu-agent install-daemons
+sjtu-agent daemons status
+sjtu-agent web --host 0.0.0.0 --no-browser
+sjtu-agent web-proxy --domain sjtu-agent.example.com
+sjtu-agent export-config --output - | ssh server "sjtu-agent import-config - --yes"
 ```
 
 Or run as a module:
@@ -569,6 +583,8 @@ To migrate credentials to another machine (e.g. a server):
 ```bash
 sjtu-agent export-config --output - | ssh user@server "sjtu-agent import-config - --yes"
 ```
+
+Archives expire after **24 hours by default** (`--expires-hours` / `--no-expiry`); import rejects expired archives unless `--allow-expired` is passed. For remote Web UI access, use `sjtu-agent web --host 0.0.0.0` and generate an Nginx/Caddy HTTPS config with `sjtu-agent web-proxy --domain <domain>`.
 
 See [Server Deployment](docs/SERVER_DEPLOYMENT.md).
 

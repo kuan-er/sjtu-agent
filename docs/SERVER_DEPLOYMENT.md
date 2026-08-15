@@ -60,7 +60,7 @@ sjtu-agent doctor
 sjtu-agent export-config --output - | ssh user@server "sjtu-agent import-config - --yes"
 ```
 
-需要同时迁移提醒/用户画像/食堂偏好时，导出端加 `--with-state`；只迁移其中某个时可用 `--state-file reminders.json`（可重复，可选 `reminders.json` / `user_profile.json` / `dining_history.json`）。导入端同样支持 `--state-file` 选择性导入。归档文件本身包含明文凭据，请**只在 SSH/scp 中传输，用后删除**；需要落到共享磁盘时使用 `--encrypt`（PBKDF2 + Fernet 加密，密码可设置 `SJTU_AGENT_CONFIG_PASSWORD`）。
+需要同时迁移提醒/用户画像/食堂偏好时，导出端加 `--with-state`；只迁移其中某个时可用 `--state-file reminders.json`（可重复，可选 `reminders.json` / `user_profile.json` / `dining_history.json`）。导入端同样支持 `--state-file` 选择性导入。归档默认 **24 小时过期**：`--expires-hours` 可调整，`--no-expiry` 关闭；导入端默认拒绝过期归档，确认可信时加 `--allow-expired`。归档文件本身包含明文凭据，请**只在 SSH/scp 中传输，用后删除**；需要落到共享磁盘时使用 `--encrypt`（PBKDF2 + Fernet 加密，密码可设置 `SJTU_AGENT_CONFIG_PASSWORD`）。
 
 默认路径：
 
@@ -135,9 +135,18 @@ sjtu-agent web --no-browser          # 在服务器执行
 
 ```bash
 sjtu-agent web --host 0.0.0.0 --port 7860 --no-browser
+
+# 生成 Nginx 配置（含 certbot 路径、HTTP→HTTPS 跳转、SSE 参数）
+sjtu-agent web-proxy --type nginx --domain sjtu-agent.example.com --output sjtu-agent.conf
+sudo cp sjtu-agent.conf /etc/nginx/conf.d/sjtu-agent.conf
+sudo certbot --nginx -d sjtu-agent.example.com
+sudo nginx -t && sudo systemctl reload nginx
+
+# 或 Caddy（自动 HTTPS）
+sjtu-agent web-proxy --type caddy --domain sjtu-agent.example.com
 ```
 
-然后用 Nginx / Caddy 反代到 `https://你的域名`。**不要**把带明文 HTTP 的 `0.0.0.0:7860` 直接暴露到公网；Web UI 的访问令牌走 Cookie，明文传输会被窃取。
+**不要**把带明文 HTTP 的 `0.0.0.0:7860` 直接暴露到公网；Web UI 的访问令牌走 Cookie，明文传输会被窃取。
 
 ## 7. 已知限制与建议
 

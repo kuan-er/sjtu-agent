@@ -442,6 +442,27 @@ def _cmd_web(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_web_proxy(args: argparse.Namespace) -> int:
+    from sjtu_agent.web_proxy import generate_proxy_config, write_proxy_config
+
+    try:
+        if args.output:
+            destination = write_proxy_config(
+                Path(args.output),
+                kind=args.type,
+                domain=args.domain,
+                backend_port=args.port,
+                force=args.force,
+            )
+            print(f"已生成 HTTPS 反代配置：{destination}")
+        else:
+            sys.stdout.write(generate_proxy_config(args.type, args.domain, args.port))
+    except (OSError, ValueError) as exc:
+        print(f"[!] {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def _cmd_wechat_bot(args: argparse.Namespace) -> int:
     return _run_script("wechat_bot", args.script_args)
 
@@ -581,6 +602,8 @@ def _cmd_export_config(args: argparse.Namespace) -> int:
             print("[!] 密码不能为空。", file=sys.stderr)
             return 1
 
+    expires_hours = None if getattr(args, "no_expiry", False) else args.expires_hours
+
     if getattr(args, "output", None) == "-":
         # --output -：二进制写入 stdout，报告写入 stderr
         try:
@@ -588,6 +611,7 @@ def _cmd_export_config(args: argparse.Namespace) -> int:
                 include_state=args.with_state,
                 state_files=args.state_file,
                 encrypt_password=encrypt_password,
+                expires_hours=expires_hours,
             )
             sys.stdout.buffer.write(data)
             sys.stdout.buffer.flush()
@@ -608,6 +632,7 @@ def _cmd_export_config(args: argparse.Namespace) -> int:
             include_state=args.with_state,
             state_files=args.state_file,
             encrypt_password=encrypt_password,
+            expires_hours=expires_hours,
             force=args.force,
         )
     except (OSError, RuntimeError, ValueError) as exc:
@@ -677,6 +702,7 @@ def _cmd_import_config(args: argparse.Namespace) -> int:
             decrypt_password=decrypt_password,
             skip_state=args.skip_state,
             state_files=args.state_file,
+            allow_expired=args.allow_expired,
             dry_run=args.dry_run,
         )
     except (OSError, RuntimeError, ValueError) as exc:
@@ -802,6 +828,39 @@ def build_parser() -> argparse.ArgumentParser:
         help="start the server without opening the browser automatically",
     )
     web_parser.set_defaults(func=_cmd_web)
+
+    web_proxy_parser = subparsers.add_parser(
+        "web-proxy",
+        help="generate an Nginx or Caddy HTTPS reverse-proxy config for the Web UI",
+    )
+    web_proxy_parser.add_argument(
+        "--type",
+        choices=["nginx", "caddy"],
+        default="nginx",
+        help="reverse proxy type (default: nginx)",
+    )
+    web_proxy_parser.add_argument(
+        "--domain",
+        required=True,
+        help="public domain name, e.g. sjtu-agent.example.com",
+    )
+    web_proxy_parser.add_argument(
+        "--port",
+        type=int,
+        default=7860,
+        help="local Web UI port that the proxy should forward to (default: 7860)",
+    )
+    web_proxy_parser.add_argument(
+        "--output",
+        default=None,
+        help="write config to a file instead of stdout",
+    )
+    web_proxy_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite an existing output file",
+    )
+    web_proxy_parser.set_defaults(func=_cmd_web_proxy)
 
     _platform_name = current_platform_name()
     install_daemons_parser = subparsers.add_parser(
@@ -936,6 +995,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="encrypt the archive with a passphrase (prompts, or SJTU_AGENT_CONFIG_PASSWORD)",
     )
     export_config_parser.add_argument(
+        "--expires-hours",
+        type=int,
+        default=24,
+        help="archive validity in hours (default: 24; 1-720)",
+    )
+    export_config_parser.add_argument(
+        "--no-expiry",
+        action="store_true",
+        help="do not set an expiry time (not recommended for plaintext archives)",
+    )
+    export_config_parser.add_argument(
         "--force",
         action="store_true",
         help="overwrite an existing output file",
@@ -963,6 +1033,11 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["reminders.json", "user_profile.json", "dining_history.json"],
         default=[],
         help="select a specific state file to import; repeatable",
+    )
+    import_config_parser.add_argument(
+        "--allow-expired",
+        action="store_true",
+        help="import an archive even after its expires_at timestamp",
     )
     import_config_parser.add_argument(
         "--dry-run",

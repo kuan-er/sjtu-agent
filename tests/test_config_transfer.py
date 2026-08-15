@@ -167,3 +167,67 @@ def test_invalid_state_file_is_rejected(monkeypatch, tmp_path):
     _patch_sources(monkeypatch, source)
     with pytest.raises(ValueError, match="不支持的状态文件"):
         ct.export_bytes(state_files=["evil.json"])
+
+
+def _make_archive(manifest: dict, files: dict[str, bytes]) -> bytes:
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
+        manifest_bytes = json.dumps(manifest).encode("utf-8")
+        for name, payload in [("manifest.json", manifest_bytes), *files.items()]:
+            info = tarfile.TarInfo(name)
+            info.size = len(payload)
+            tar.addfile(info, io.BytesIO(payload))
+    return buffer.getvalue()
+
+
+def test_expired_archive_is_rejected_by_default(monkeypatch, tmp_path):
+    target = tmp_path / "target"
+    archive = _make_archive(
+        {
+            "format": "sjtu-agent-config",
+            "version": 2,
+            "expires_at": "2000-01-01T00:00:00+00:00",
+            "files": [{"name": "config.json", "sha256": ct._sha256(b"{}")}],
+        },
+        {"config.json": b"{}"},
+    )
+    with pytest.raises(ValueError, match="已过期"):
+        ct.import_bytes(archive, target_dir=target)
+    report = ct.import_bytes(archive, target_dir=target, allow_expired=True)
+    assert report["written"] == ["config.json"]
+
+
+def test_checksum_mismatch_is_rejected(tmp_path):
+    archive = _make_archive(
+        {
+            "format": "sjtu-agent-config",
+            "version": 2,
+            "files": [{"name": "config.json", "sha256": "0" * 64}],
+        },
+        {"config.json": b"{}"},
+    )
+    with pytest.raises(ValueError, match="SHA-256"):
+        ct.import_bytes(archive, target_dir=tmp_path / "target")
+
+
+def test_v1_legacy_archive_without_checksum_is_still_accepted(tmp_path):
+    archive = _make_archive(
+        {"format": "sjtu-agent-config", "version": 1, "files": ["config.json"]},
+        {"config.json": b"{}"},
+    )
+    report = ct.import_bytes(archive, target_dir=tmp_path / "target")
+    assert report["written"] == ["config.json"]
+
+
+def test_export_manifest_contains_expiry_and_checksums(monkeypatch, tmp_path):
+    source = tmp_path / "source"
+    _make_source(source)
+    _patch_sources(monkeypatch, source)
+
+    data = ct.export_bytes(expires_hours=6)
+    with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
+        manifest = json.loads(tar.extractfile("manifest.json").read().decode("utf-8"))
+    assert manifest["version"] == 2
+    assert manifest["created_at"]
+    assert manifest["expires_at"]
+    assert manifest["files"][0]["sha256"]

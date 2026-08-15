@@ -2,6 +2,12 @@
 
 本文件记录各版本的用户可见变化。Agent 通过 `get_recent_updates` 读取（问「最近更新了什么」时），不写入 system prompt。
 
+## Unreleased
+- 🌐 新增 `sjtu-agent web-proxy`：生成 Nginx / Caddy HTTPS 反向代理配置（SSE 长连接参数、HTTP→HTTPS 跳转）
+- ⏳ 配置归档增加过期与校验策略：默认 24 小时过期、SHA-256 校验、拒绝过期归档（`--allow-expired` 放宽）
+- 🚀 新增 GitHub Actions 自动发布：推送 `v*` tag 后自动测试、构建 wheel/sdist、从 CHANGELOG 生成 Release Notes 并创建 Release
+- 📝 优化 README：目录、常用命令速查、远程 Web UI 与归档安全说明
+
 ## v0.11.2 (2026-08-15)
 - 📦 新增 `sjtu-agent export-config / import-config`：核心凭据打包迁移、SSH 管道直传、可选 PBKDF2+ Fernet 加密、导入前自动备份
 - 🗂 `export-config` / `import-config` 新增 `--state-file`，可按需选择 reminders / user_profile / dining_history 状态文件
