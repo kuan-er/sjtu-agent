@@ -60,7 +60,7 @@ sjtu-agent doctor
 sjtu-agent export-config --output - | ssh user@server "sjtu-agent import-config - --yes"
 ```
 
-需要同时迁移提醒/用户画像/食堂偏好时，导出端加 `--with-state`。归档文件本身包含明文凭据，请**只在 SSH/scp 中传输，用后删除**；需要落到共享磁盘时使用 `--encrypt`（PBKDF2 + Fernet 加密，密码可设置 `SJTU_AGENT_CONFIG_PASSWORD`）。
+需要同时迁移提醒/用户画像/食堂偏好时，导出端加 `--with-state`；只迁移其中某个时可用 `--state-file reminders.json`（可重复，可选 `reminders.json` / `user_profile.json` / `dining_history.json`）。导入端同样支持 `--state-file` 选择性导入。归档文件本身包含明文凭据，请**只在 SSH/scp 中传输，用后删除**；需要落到共享磁盘时使用 `--encrypt`（PBKDF2 + Fernet 加密，密码可设置 `SJTU_AGENT_CONFIG_PASSWORD`）。
 
 默认路径：
 

@@ -23,6 +23,7 @@ import os
 import shutil
 import tarfile
 import tempfile
+from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -159,18 +160,37 @@ def _tar_member_name(name: str) -> str | None:
     return name
 
 
-def export_bytes(*, include_state: bool = False, encrypt_password: str | None = None) -> bytes:
+def _normalise_state_files(state_files: Iterable[str] | None) -> set[str]:
+    selected = set(state_files or ())
+    invalid = sorted(selected - set(_STATE_NAMES))
+    if invalid:
+        raise ValueError(
+            "不支持的状态文件：" + ", ".join(invalid)
+            + "；可选值为 " + ", ".join(_STATE_NAMES)
+        )
+    return selected
+
+
+def export_bytes(
+    *,
+    include_state: bool = False,
+    state_files: Iterable[str] | None = None,
+    encrypt_password: str | None = None,
+) -> bytes:
     """把运行时配置打包为 tar.gz 字节流。"""
+    selected_state = _normalise_state_files(state_files)
+    if include_state:
+        selected_state = set(_STATE_NAMES)
+
     names: list[str] = []
     for name in _CORE_NAMES:
         path = _PATH_BY_NAME[name]
         if path.exists():
             names.append(name)
 
-    if include_state:
-        for name in _STATE_NAMES:
-            if _PATH_BY_NAME[name].exists():
-                names.append(name)
+    for name in _STATE_NAMES:
+        if name in selected_state and _PATH_BY_NAME[name].exists():
+            names.append(name)
 
     if not names:
         raise RuntimeError(
@@ -195,8 +215,15 @@ def export_bytes(*, include_state: bool = False, encrypt_password: str | None = 
     return data
 
 
-def _parse_archive(data: bytes, *, decrypt_password: str | None = None, skip_state: bool = False) -> dict[str, bytes]:
+def _parse_archive(
+    data: bytes,
+    *,
+    decrypt_password: str | None = None,
+    skip_state: bool = False,
+    state_files: Iterable[str] | None = None,
+) -> dict[str, bytes]:
     """解密（如需要）、解包并校验归档，返回 name -> bytes。"""
+    selected_state = _normalise_state_files(state_files)
     if data.startswith(_MAGIC):
         if not decrypt_password:
             raise ValueError("这是一个加密归档，请提供密码（或设置 SJTU_AGENT_CONFIG_PASSWORD）")
@@ -238,6 +265,8 @@ def _parse_archive(data: bytes, *, decrypt_password: str | None = None, skip_sta
                     raise ValueError(f"归档包含不允许的文件：{raw_name!r}")
                 if skip_state and name in _STATE_NAMES:
                     continue
+                if selected_state and name in _STATE_NAMES and name not in selected_state:
+                    continue
                 try:
                     member = tar.getmember(name)
                 except KeyError as exc:
@@ -270,16 +299,23 @@ def import_bytes(
     target_dir: Path | None = None,
     decrypt_password: str | None = None,
     skip_state: bool = False,
+    state_files: Iterable[str] | None = None,
     dry_run: bool = False,
     backup: bool = True,
 ) -> dict[str, Any]:
     """把导出归档导入到目标运行时目录。
 
+    state_files 可精确选择要导入的状态文件；skip_state=True 时忽略所有状态文件。
     返回报告；dry_run 时不写任何文件也不备份。
     """
     target = Path(target_dir or DATA_DIR)
     target.mkdir(parents=True, exist_ok=True)
-    contents = _parse_archive(data, decrypt_password=decrypt_password, skip_state=skip_state)
+    contents = _parse_archive(
+        data,
+        decrypt_password=decrypt_password,
+        skip_state=skip_state,
+        state_files=state_files,
+    )
 
     report: dict[str, Any] = {
         "target_dir": str(target),
@@ -348,25 +384,37 @@ def export_to_path(
     destination: Path,
     *,
     include_state: bool = False,
+    state_files: Iterable[str] | None = None,
     encrypt_password: str | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
     """导出到本地文件，返回报告。"""
     if destination.exists() and not force:
         raise FileExistsError(f"目标文件已存在（--force 可覆盖）：{destination}")
-    data = export_bytes(include_state=include_state, encrypt_password=encrypt_password)
+    data = export_bytes(
+        include_state=include_state,
+        state_files=state_files,
+        encrypt_password=encrypt_password,
+    )
     destination.parent.mkdir(parents=True, exist_ok=True)
     _atomic_write_bytes(destination, data)
     return {
         "path": str(destination),
         "size": len(data),
         "encrypted": encrypt_password is not None,
-        "files": _exported_names(include_state=include_state),
+        "files": _exported_names(include_state=include_state, state_files=state_files),
     }
 
 
-def _exported_names(*, include_state: bool = False) -> list[str]:
+def _exported_names(
+    *,
+    include_state: bool = False,
+    state_files: Iterable[str] | None = None,
+) -> list[str]:
+    selected_state = set(_STATE_NAMES) if include_state else _normalise_state_files(state_files)
     names = [name for name in _CORE_NAMES if _PATH_BY_NAME[name].exists()]
-    if include_state:
-        names += [name for name in _STATE_NAMES if _PATH_BY_NAME[name].exists()]
+    names += [
+        name for name in _STATE_NAMES
+        if name in selected_state and _PATH_BY_NAME[name].exists()
+    ]
     return names

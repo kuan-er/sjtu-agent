@@ -37,6 +37,8 @@ def _make_source(source_dir, with_state=False):
     )
     if with_state:
         (source_dir / "reminders.json").write_text(json.dumps([{"id": 1}]), encoding="utf-8")
+        (source_dir / "user_profile.json").write_text(json.dumps({"profile": "test"}), encoding="utf-8")
+        (source_dir / "dining_history.json").write_text(json.dumps({"dining": []}), encoding="utf-8")
 
 
 def test_export_import_roundtrip(monkeypatch, tmp_path):
@@ -133,3 +135,35 @@ def test_export_fails_without_any_config(monkeypatch, tmp_path):
     _patch_sources(monkeypatch, empty)
     with pytest.raises(RuntimeError, match="没有可导出"):
         ct.export_bytes()
+
+
+def test_export_can_select_specific_state_files(monkeypatch, tmp_path):
+    source = tmp_path / "source"
+    target = tmp_path / "target"
+    _make_source(source, with_state=True)
+    _patch_sources(monkeypatch, source)
+
+    data = ct.export_bytes(state_files=["reminders.json"])
+    report = ct.import_bytes(data, target_dir=target)
+    assert set(report["written"]) == {"config.json", ".env", "agent_config.json", "reminders.json"}
+    assert not (target / "user_profile.json").exists()
+    assert not (target / "dining_history.json").exists()
+
+
+def test_import_can_select_specific_state_files(monkeypatch, tmp_path):
+    source = tmp_path / "source"
+    target = tmp_path / "target"
+    _make_source(source, with_state=True)
+    _patch_sources(monkeypatch, source)
+
+    data = ct.export_bytes(include_state=True)
+    report = ct.import_bytes(data, target_dir=target, state_files=["user_profile.json"])
+    assert set(report["written"]) == {"config.json", ".env", "agent_config.json", "user_profile.json"}
+
+
+def test_invalid_state_file_is_rejected(monkeypatch, tmp_path):
+    source = tmp_path / "source"
+    _make_source(source)
+    _patch_sources(monkeypatch, source)
+    with pytest.raises(ValueError, match="不支持的状态文件"):
+        ct.export_bytes(state_files=["evil.json"])
