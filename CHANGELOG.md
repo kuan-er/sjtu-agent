@@ -4,6 +4,7 @@
 
 ## Unreleased
 - 🧬 水源 Playwright 登录复用持久化浏览器 profile（`shuiyuan_browser_profile/`），降低 jAccount 风控概率；异地登录二次验证时给出更明确的处理提示
+- 📦 新增 `sjtu-agent export-config / import-config`：核心凭据打包迁移、SSH 管道直传、可选 PBKDF2+ Fernet 加密、导入前自动备份
 
 ## v0.11.0 (2026-08-15)
 - 🔁 后台服务安装清单（`.daemon_manifest.json`）：安装脚本 / `sjtu-agent update` 自动恢复此前安装的 Task Scheduler / psmux / launchd / systemd 服务，重装后无需手动重新配置

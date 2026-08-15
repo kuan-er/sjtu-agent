@@ -4,6 +4,7 @@ import argparse
 import json
 import runpy
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from sjtu_agent import __version__
@@ -541,6 +542,144 @@ def _cmd_daemons_resync(args: argparse.Namespace) -> int:
     return 0
 
 
+def _prompt_config_password(confirm: bool) -> str:
+    """交互式读取配置归档密码；无 TTY 时从 SJTU_AGENT_CONFIG_PASSWORD 读取。"""
+    from sjtu_agent.config_transfer import password_from_env
+
+    env_password = password_from_env()
+    if env_password:
+        return env_password
+
+    try:
+        import getpass
+        if sys.stdin.isatty():
+            password = getpass.getpass("Config archive password: ")
+            if not confirm:
+                return password
+            again = getpass.getpass("Confirm password: ")
+            if password != again:
+                raise ValueError("两次输入的密码不一致")
+            return password
+    except EOFError as exc:
+        raise ValueError("无法在无 TTY 环境交互输入密码") from exc
+    raise ValueError(
+        "无法交互输入密码。请设置 SJTU_AGENT_CONFIG_PASSWORD，或使用未加密归档 + SSH 管道传输。"
+    )
+
+
+def _cmd_export_config(args: argparse.Namespace) -> int:
+    from sjtu_agent.config_transfer import export_bytes, export_to_path
+
+    encrypt_password: str | None = None
+    if args.encrypt:
+        try:
+            encrypt_password = _prompt_config_password(confirm=True)
+        except ValueError as exc:
+            print(f"[!] {exc}", file=sys.stderr)
+            return 1
+        if not encrypt_password:
+            print("[!] 密码不能为空。", file=sys.stderr)
+            return 1
+
+    if getattr(args, "output", None) == "-":
+        # --output -：二进制写入 stdout，报告写入 stderr
+        try:
+            data = export_bytes(include_state=args.with_state, encrypt_password=encrypt_password)
+            sys.stdout.buffer.write(data)
+            sys.stdout.buffer.flush()
+        except (OSError, RuntimeError, ValueError) as exc:
+            print(f"[!] 导出失败：{exc}", file=sys.stderr)
+            return 1
+        print(f"[i] 已向 stdout 写出 {len(data)} 字节。", file=sys.stderr)
+        return 0
+
+    destination = (
+        Path(args.output)
+        if args.output
+        else Path.cwd() / f"sjtu-agent-config-{datetime.now().strftime('%Y%m%d-%H%M%S')}.tar.gz"
+    )
+    try:
+        payload = export_to_path(
+            destination,
+            include_state=args.with_state,
+            encrypt_password=encrypt_password,
+            force=args.force,
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        print(f"[!] 导出失败：{exc}", file=sys.stderr)
+        return 1
+    print_json(payload)
+    if not encrypt_password:
+        print(
+            "[i] 这是未加密归档，内含 API Key / 密码 / Token。"
+            "请通过 SSH/scp 传输，用后删除，勿上传公网。",
+            file=sys.stderr,
+        )
+    return 0
+
+
+def _read_import_source(source: str) -> bytes:
+    if source == "-":
+        data = sys.stdin.buffer.read()
+    else:
+        data = Path(source).read_bytes()
+    if not data:
+        raise ValueError("输入为空")
+    return data
+
+
+def _cmd_import_config(args: argparse.Namespace) -> int:
+    from sjtu_agent.config_transfer import is_encrypted, import_bytes, password_from_env
+
+    try:
+        data = _read_import_source(args.archive)
+    except (OSError, ValueError) as exc:
+        print(f"[!] 读取输入失败：{exc}", file=sys.stderr)
+        return 1
+
+    decrypt_password: str | None = None
+    if is_encrypted(data):
+        decrypt_password = password_from_env()
+        if not decrypt_password:
+            try:
+                decrypt_password = _prompt_config_password(confirm=False)
+            except ValueError as exc:
+                print(f"[!] {exc}", file=sys.stderr)
+                return 1
+
+    if not args.dry_run and not args.yes:
+        if args.archive == "-":
+            print(
+                "[!] stdin 模式会覆盖运行时凭据文件，必须显式传 --yes。",
+                file=sys.stderr,
+            )
+            return 1
+        if not sys.stdin.isatty():
+            print(
+                "[!] 非交互环境导入会覆盖运行时凭据文件，必须显式传 --yes（或 --dry-run 预览）。",
+                file=sys.stderr,
+            )
+            return 1
+        answer = input("导入会覆盖同名运行时文件（自动备份），确认继续？[y/N] ").strip().lower()
+        if answer not in {"y", "yes"}:
+            print("已取消。", file=sys.stderr)
+            return 1
+
+    try:
+        payload = import_bytes(
+            data,
+            target_dir=Path(args.target_dir) if args.target_dir else None,
+            decrypt_password=decrypt_password,
+            skip_state=args.skip_state,
+            dry_run=args.dry_run,
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        print(f"[!] 导入失败：{exc}", file=sys.stderr)
+        return 1
+    print_json(payload)
+    return 0
+
+
 def _add_passthrough_parser(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
     name: str,
@@ -763,6 +902,59 @@ def build_parser() -> argparse.ArgumentParser:
         help="python executable to use (default: current interpreter)",
     )
     daemons_resync_parser.set_defaults(func=_cmd_daemons_resync)
+
+    export_config_parser = subparsers.add_parser(
+        "export-config",
+        help="export runtime credentials/config as a portable archive (use - for stdout)",
+    )
+    export_config_parser.add_argument(
+        "--output",
+        default=None,
+        help="output file path (default: sjtu-agent-config-<timestamp>.tar.gz; use - for stdout)",
+    )
+    export_config_parser.add_argument(
+        "--with-state",
+        action="store_true",
+        help="also export reminders/user profile/dining history",
+    )
+    export_config_parser.add_argument(
+        "--encrypt",
+        action="store_true",
+        help="encrypt the archive with a passphrase (prompts, or SJTU_AGENT_CONFIG_PASSWORD)",
+    )
+    export_config_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite an existing output file",
+    )
+    export_config_parser.set_defaults(func=_cmd_export_config)
+
+    import_config_parser = subparsers.add_parser(
+        "import-config",
+        help="import a config archive exported by export-config (use - for stdin)",
+    )
+    import_config_parser.add_argument("archive", help="archive path, or - for stdin")
+    import_config_parser.add_argument(
+        "--target-dir",
+        default=None,
+        help="runtime data directory to import into (default: current SJTU_AGENT_HOME)",
+    )
+    import_config_parser.add_argument(
+        "--skip-state",
+        action="store_true",
+        help="do not import optional state files if present in the archive",
+    )
+    import_config_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="validate and print what would be written without writing",
+    )
+    import_config_parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="overwrite same-name runtime files without prompting (backs them up first)",
+    )
+    import_config_parser.set_defaults(func=_cmd_import_config)
 
     doctor = subparsers.add_parser("doctor", help="print runtime paths and setup status")
     doctor.set_defaults(func=_cmd_doctor)
