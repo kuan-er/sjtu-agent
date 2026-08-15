@@ -127,7 +127,9 @@ pip install -e ".[tui]"   # 安装可选依赖
 sjtu-agent tui            # 启动 TUI
 ```
 
-支持会话列表切换、Markdown 流式消息、`/` 命令补全面板、危险工具审批、`ctrl+x` 停止生成、`ctrl+n` 新会话。未安装 Textual 时命令会给出安装提示。
+支持会话列表切换、Markdown 流式消息、`/` 命令补全面板、结构化命令卡片、危险工具审批；快捷键 `ctrl+n` 新会话、`ctrl+r` 重命名、`ctrl+d` 删除、`ctrl+x` 停止生成。
+
+附件：`/attach <本地路径>` 暂存图片 / PDF 等文件，发送下一条消息时后台预解析并注入上下文；文件会复制进 Web GUI 同款白名单目录，原始路径不会交给 Agent。未安装 Textual 时命令会给出安装提示。
 
 ### Web GUI
 
@@ -420,4 +422,4 @@ sjtu-agent install-daemons       # 服务器无桌面环境时加 --no-browser
 
 ## 版本
 
-当前版本：**v0.18.0**。发布历史见 [Releases](https://github.com/kuan-er/sjtu-agent/releases)。
+当前版本：**v0.19.0**。发布历史见 [Releases](https://github.com/kuan-er/sjtu-agent/releases)。

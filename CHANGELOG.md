@@ -2,6 +2,13 @@
 
 本文件记录各版本的用户可见变化。Agent 通过 `get_recent_updates` 读取（问「最近更新了什么」时），不写入 system prompt。
 
+## v0.19.0 (2026-08-16)
+- 🃏 TUI 结构化命令卡片：`/eat` `/news` `/hw` `/template` 等命令结果按 `{view, text, data}` 渲染成终端 Markdown 卡片，历史会话同样生效
+- ⌨️ TUI 会话管理快捷键：`ctrl+r` 重命名、`ctrl+d` 删除（二次确认），删除后自动切换/新建会话
+- 📎 TUI 附件上传：`/attach <本地路径>` 把文件复制进 `web_attachments/` 白名单目录，`/attach` 查看暂存、`/attach clear` 清空；原始路径不进入 Agent
+- 🧵 附件预解析移出 UI 线程：视觉模型 / OCR 解析期间 TUI 保持响应，解析完成后自动发送
+- 🧩 抽取 `web/attachment_context.py`：Web GUI 与 TUI 共用附件预解析与上下文注入逻辑
+
 ## v0.18.0 (2026-08-16)
 - 🖥 新增 Textual TUI：`sjtu-agent tui` 全屏终端聊天界面（需 `pip install -e ".[tui]"`；未安装时给出提示）
 - 🔄 TUI 与 Web GUI 共用同一 SQLite 会话存储和 SSE 引擎，会话 / 消息 / 命令结果实时同步

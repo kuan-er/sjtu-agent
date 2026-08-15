@@ -174,7 +174,9 @@ pip install -e ".[tui]"   # install the optional extra
 sjtu-agent tui            # start the TUI
 ```
 
-Session switching, streaming Markdown messages, `/` command completion, dangerous-tool approval, `ctrl+x` to stop generation, and `ctrl+n` for a new session are supported. If Textual is missing, the command prints an install hint.
+Session switching, streaming Markdown messages, `/` command completion, structured command cards, and dangerous-tool approval are supported. Shortcuts: `ctrl+n` new session, `ctrl+r` rename, `ctrl+d` delete, `ctrl+x` stop generation.
+
+Attachments: `/attach <local-path>` stages an image / PDF / other file; the next message pre-parses it in the background and injects the extracted content. Files are copied into the same whitelisted directory as the Web GUI, and the original local path is never exposed to the agent. If Textual is missing, the command prints an install hint.
 
 ## Web GUI
 
@@ -623,7 +625,7 @@ The Feishu Bot self-checks credentials, ChromaDB, and Agent API connectivity on 
 
 ## Version
 
-Current version: **v0.18.0**. Release history: [Releases](https://github.com/kuan-er/sjtu-agent/releases).
+Current version: **v0.19.0**. Release history: [Releases](https://github.com/kuan-er/sjtu-agent/releases).
 
 ## Release Notes
 

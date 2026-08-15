@@ -102,14 +102,19 @@ sjtu_agent/
     sources/          # per-platform scrapers (jwc, shuiyuan, official, canvas)
 
   tui/                # Textual full-screen chat TUI (optional extra [tui])
-    app.py            # ChatApp: session list, Markdown messages, slash completion
+    app.py            # ChatApp: session list, Markdown messages, slash completion, modals
     engine.py         # adapts the Web SSE chat/command streams and approvals
     session_model.py  # reuses web_sessions.sqlite3 so Web and TUI stay in sync
+    cards.py          # structured command results rendered as terminal Markdown cards
+    attachments.py    # whitelisted attachment staging copied into web_attachments/
+    commands.py       # slash-command completion candidates
+    messages.py       # command-result JSON and date-context message helpers
 
   web/                # local Web GUI + legacy config page
     server.py         # pure stdlib HTTP server: SSE chat (/api/chat), command SSE (/api/command), config APIs
     session_store.py  # SQLite-backed Web sessions/messages
     attachment_store.py  # uploaded attachment metadata/files
+    attachment_context.py  # shared attachment pre-parsing and context injection
     static/           # built React bundle (source in webui/src/, rebuild with npm run build:webui)
 ```
 
@@ -144,7 +149,7 @@ New code should go into `sjtu_agent/`, not these root or script files.
 
 ### Refactoring status
 
-Refactoring status (as of v0.18.0):
-- **Done**: agent.py split into `sjtu_agent/agent/`; tools split into `agent/tools/` subpackage; ConfigStore + protected write path; `run_tool` registry; Notifier abstraction; unified logging; Web GUI (multi-session, attachments, approvals); shared slash-command layer (`sjtu_agent/commands/`); Textual TUI (`sjtu-agent tui`, reuses the Web SQLite session store and SSE engine)
-- **Partial/deferred**: full BaseBotRunner transport abstraction to deduplicate all bot glue; BasePlatform for DDL scrapers; `/hw do` fine-grained progress callbacks; structured command cards inside the TUI
+Refactoring status (as of v0.19.0):
+- **Done**: agent.py split into `sjtu_agent/agent/`; tools split into `agent/tools/` subpackage; ConfigStore + protected write path; `run_tool` registry; Notifier abstraction; unified logging; Web GUI (multi-session, attachments, approvals); shared slash-command layer (`sjtu_agent/commands/`); Textual TUI (`sjtu-agent tui`, reuses the Web SQLite session store and SSE engine); TUI command cards, session rename/delete, and whitelisted `/attach` flow
+- **Partial/deferred**: full BaseBotRunner transport abstraction to deduplicate all bot glue; BasePlatform for DDL scrapers; `/hw do` fine-grained progress callbacks
 - CI workflow exists (`.github/workflows/test.yml`, installs `[tui]`) but coverage is thin

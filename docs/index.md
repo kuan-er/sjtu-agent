@@ -14,7 +14,7 @@ SJTU Agent 是面向上海交通大学学生的校园助手，提供终端对话
 
 ```bash
 sjtu-agent                  # 终端对话
-sjtu-agent tui              # 全屏 Textual TUI（可选依赖 [tui]）
+sjtu-agent tui              # 全屏 Textual TUI（可选依赖 [tui]；/attach 可上传附件）
 sjtu-agent doctor           # 检查配置和运行时路径
 sjtu-agent update           # 一键更新
 sjtu-agent install-daemons  # 安装后台服务
