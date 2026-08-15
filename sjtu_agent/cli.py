@@ -457,6 +457,18 @@ def _parse_hhmm(value: str) -> tuple[int, int]:
     return hour, minute
 
 
+def _should_open_web_after_install(args: argparse.Namespace) -> bool:
+    """安装后台服务后是否轮询并打开 Web UI。
+
+    仅在明确安装（或默认安装包含）web 服务、且用户没有传 --no-browser 时返回 True，
+    避免无头服务器上 `install-daemons --services feishu-bot` 卡 15 秒再尝试打开浏览器。
+    """
+    if getattr(args, "write_only", False) or getattr(args, "no_browser", False):
+        return False
+    selected = getattr(args, "services", None) or None
+    return selected is None or "web" in selected
+
+
 def _cmd_install_daemons(args: argparse.Namespace) -> int:
     try:
         # 构建平台专属参数（macOS 支持自定义 output_dir 和 telegram_throttle）
@@ -479,7 +491,7 @@ def _cmd_install_daemons(args: argparse.Namespace) -> int:
         print(str(exc), file=sys.stderr)
         return 1
     print_json(payload)
-    if not args.write_only:
+    if _should_open_web_after_install(args):
         import time
         import webbrowser
         import urllib.request
@@ -494,6 +506,8 @@ def _cmd_install_daemons(args: argparse.Namespace) -> int:
             except Exception:
                 time.sleep(1)
         webbrowser.open(url)
+    elif not args.write_only:
+        print("[i] 未选择 web 服务，跳过浏览器启动。")
     return 0
 
 
@@ -658,6 +672,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--write-only",
         action="store_true",
         help="only write service files; do not load/register them",
+    )
+    install_daemons_parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="do not poll/open the local Web UI after installation (useful on servers)",
     )
     install_daemons_parser.add_argument(
         "--python-executable",

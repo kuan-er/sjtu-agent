@@ -81,8 +81,8 @@ sjtu-agent feishu-bot -- --test   # 若配置了飞书
 # 关键：用户级服务在登出后继续运行
 loginctl enable-linger "$USER"
 
-# 安装需要的服务，而不是全部
-sjtu-agent install-daemons --services feishu-bot telegram-bot daily-report remind-check news-digest
+# 安装需要的服务，而不是全部；--no-browser 避免服务器上等待/尝试打开浏览器
+sjtu-agent install-daemons --no-browser --services feishu-bot telegram-bot daily-report remind-check news-digest
 
 # 查看
 sjtu-agent daemons status

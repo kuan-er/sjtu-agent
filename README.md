@@ -308,7 +308,7 @@ sjtu-agent install-daemons --backend psmux --services feishu-bot telegram-bot
 
 ```bash
 loginctl enable-linger "$USER"   # 登出后继续运行（一次性设置）
-sjtu-agent install-daemons
+sjtu-agent install-daemons       # 服务器无桌面环境时加 --no-browser
 ```
 
 服务器 24/7 部署完整步骤见 [docs/SERVER_DEPLOYMENT.md](docs/SERVER_DEPLOYMENT.md)。

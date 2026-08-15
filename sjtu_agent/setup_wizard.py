@@ -495,7 +495,13 @@ def _maybe_install_background_services(args: argparse.Namespace, status: dict) -
         path = service.get("plist_path") or service.get("service_path") or service.get("task_name") or ""
         print(f"  - {name} -> {path}")
 
-    # Wait for web service to come up, then open browser
+    # Wait for web service to come up, then open browser.
+    # 只有确实安装了 web 服务且未指定 --no-browser 时才做，避免服务器上无谓等待。
+    selected = set(args.services) if args.services else set()
+    if getattr(args, "no_browser", False) or (selected and "web" not in selected):
+        print("未选择 web 服务（或已指定 --no-browser），跳过浏览器启动。")
+        return True
+
     import time
     import webbrowser
     import urllib.request
@@ -1268,6 +1274,11 @@ def register_setup_parser(subparsers: argparse._SubParsersAction[argparse.Argume
         "--write-daemons-only",
         action="store_true",
         help="write launchd plist files without loading them",
+    )
+    parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="do not poll/open the local Web UI after installing background services",
     )
     parser.add_argument(
         "--output-dir",
