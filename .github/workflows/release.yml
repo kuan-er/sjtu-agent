@@ -27,7 +27,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e .
+          pip install -e ".[tui]"
           pip install pytest
 
       - name: Run tests
