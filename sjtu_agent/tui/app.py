@@ -11,6 +11,7 @@ import json
 import threading
 from typing import Any
 
+from .commands import command_candidates
 from .engine import cancel_turn, decide_approval, iter_chat_events, iter_command_events
 from .messages import display_text
 from .session_model import TuiSessionModel
@@ -22,7 +23,7 @@ def run_tui() -> int:
         from textual import on
         from textual.app import App, ComposeResult
         from textual.containers import Horizontal, Vertical
-        from textual.widgets import Footer, Header, Input, Label, ListItem, ListView, RichLog
+        from textual.widgets import Footer, Header, Input, Label, ListItem, ListView, RichLog, Static
         from rich.markup import escape
     except ImportError as exc:
         print("未安装 Textual。运行 `pip install -e \".[tui]\"` 后重试。", file=__import__("sys").stderr)
@@ -37,12 +38,21 @@ def run_tui() -> int:
         #sessions { width: 32; border-right: solid $primary-darken-2; }
         #chat { width: 1fr; height: 1fr; }
         #prompt { dock: bottom; }
+        #suggestions {
+            height: auto;
+            max-height: 10;
+            padding: 0 1;
+            color: $text-muted;
+        }
+        #suggestions .active { color: $secondary; text-style: bold; }
         """
 
         BINDINGS = [
             ("ctrl+n", "new_session", "新会话"),
             ("ctrl+l", "focus_prompt", "聚焦输入"),
             ("ctrl+x", "stop_turn", "停止生成"),
+            ("tab", "next_suggestion", "下一个建议"),
+            ("shift+tab", "previous_suggestion", "上一个建议"),
         ]
 
         def __init__(self):
@@ -50,6 +60,8 @@ def run_tui() -> int:
             self.model = TuiSessionModel()
             self.busy = False
             self.pending_approval: dict[str, Any] | None = None
+            self.suggestions: list[dict[str, Any]] = []
+            self.suggestion_index = 0
 
         @property
         def session_id(self) -> str | None:
@@ -62,21 +74,22 @@ def run_tui() -> int:
                     yield ListView(id="sessions")
                     yield RichLog(id="chat", markup=True, wrap=True)
                 yield Input(placeholder="输入消息，/ 执行斜杠命令，Enter 发送", id="prompt")
+                yield Static(id="suggestions")
             yield Footer()
 
         @property
         def chat(self) -> RichLog:
             return self.query_one("#chat", RichLog)
 
-        def on_mount(self) -> None:
-            self.refresh_sessions()
+        async def on_mount(self) -> None:
+            await self.refresh_sessions()
             self.query_one("#prompt", Input).focus()
 
         # ── 会话 ─────────────────────────────────────────────────────────
-        def action_new_session(self) -> None:
+        async def action_new_session(self) -> None:
             session = self.model.create_session("新会话")
             self.pending_approval = None
-            self.refresh_sessions(select_id=session.get("id"))
+            await self.refresh_sessions(select_id=session.get("id"))
             self.load_session(session.get("id") or "")
 
         def action_focus_prompt(self) -> None:
@@ -88,18 +101,18 @@ def run_tui() -> int:
             cancel_turn(self.session_id)
             self.chat.write("\n[dim]已请求停止…[/]")
 
-        def refresh_sessions(self, select_id: str | None = None) -> None:
+        async def refresh_sessions(self, select_id: str | None = None) -> None:
             session_list = self.query_one("#sessions", ListView)
-            session_list.clear()
+            await session_list.clear()
             target = select_id or self.session_id
-            for session in self.model.list_sessions():
+            for index, session in enumerate(self.model.list_sessions()):
                 item = ListItem(
                     Label(session.get("title") or "未命名会话"),
                     id=f"session-{session['id']}",
                 )
                 session_list.append(item)
                 if session["id"] == target:
-                    session_list.index = len(session_list.children) - 1
+                    session_list.index = index
 
         def load_session(self, session_id: str) -> None:
             self.model.select(session_id)
@@ -121,17 +134,58 @@ def run_tui() -> int:
                 return
             self.load_session(item_id[len("session-"):])
 
+        # ── / 命令补全 ──────────────────────────────────────────────────
+        def render_suggestions(self) -> None:
+            widget = self.query_one("#suggestions", Static)
+            if not self.suggestions:
+                widget.update("")
+                return
+            lines = []
+            for index, candidate in enumerate(self.suggestions):
+                prefix = "> " if index == self.suggestion_index else "  "
+                lines.append(
+                    f"{prefix}{candidate.get('icon', '')} {candidate['value']} — "
+                    f"{candidate.get('description', '')}"
+                )
+            widget.update("\n".join(lines))
+
+        @on(Input.Changed)
+        def on_input_changed(self, event: Input.Changed) -> None:
+            self.suggestions = command_candidates(event.value)
+            self.suggestion_index = 0
+            self.render_suggestions()
+
+        def action_next_suggestion(self) -> None:
+            if not self.suggestions:
+                return
+            self.suggestion_index = (self.suggestion_index + 1) % len(self.suggestions)
+            self.render_suggestions()
+
+        def action_previous_suggestion(self) -> None:
+            if not self.suggestions:
+                return
+            self.suggestion_index = (self.suggestion_index - 1) % len(self.suggestions)
+            self.render_suggestions()
+
         # ── 输入与审批 ──────────────────────────────────────────────────
         @on(Input.Submitted)
-        def on_input_submitted(self, event: Input.Submitted) -> None:
+        async def on_input_submitted(self, event: Input.Submitted) -> None:
             text = event.value.strip()
-            event.input.value = ""
             if not text or self.busy:
                 return
             if self.pending_approval is not None:
                 self.handle_approval(text)
+                event.input.value = ""
                 return
-            self.start_turn(text)
+            if self.suggestions and text.startswith("/"):
+                candidate = self.suggestions[self.suggestion_index]
+                event.input.value = candidate["value"]
+                self.suggestions = []
+                self.render_suggestions()
+                event.input.focus()
+                return
+            event.input.value = ""
+            await self.start_turn(text)
 
         def handle_approval(self, text: str) -> None:
             approval = self.pending_approval
@@ -144,10 +198,10 @@ def run_tui() -> int:
             decide_approval(str(approval.get("approval_id", "")), approved)
             self.chat.write(f"[dim]{'已批准' if approved else '已拒绝'}：{approval.get('tool_name', '')}[/]")
 
-        def start_turn(self, text: str) -> None:
+        async def start_turn(self, text: str) -> None:
             if self.session_id is None:
                 session = self.model.create_session("新会话")
-                self.refresh_sessions(select_id=session.get("id"))
+                await self.refresh_sessions(select_id=session.get("id"))
             session_id = self.model.ensure_for_message(text)
             if not session_id:
                 self.chat.write("[red]无法创建会话[/]")
@@ -208,11 +262,11 @@ def run_tui() -> int:
             elif kind == "cancelled":
                 chat.write("\n[dim]已取消[/]")
 
-        def finish_turn(self) -> None:
+        async def finish_turn(self) -> None:
             self.busy = False
             self.pending_approval = None
             self.chat.write("\n")
-            self.refresh_sessions(select_id=self.session_id)
+            await self.refresh_sessions(select_id=self.session_id)
 
     ChatApp().run()
     return 0
