@@ -442,6 +442,11 @@ def _cmd_web(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_tui(args: argparse.Namespace) -> int:
+    from sjtu_agent.tui import run
+    return run()
+
+
 def _cmd_web_proxy(args: argparse.Namespace) -> int:
     from sjtu_agent.web_proxy import generate_proxy_config, write_proxy_config
 
@@ -828,6 +833,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="start the server without opening the browser automatically",
     )
     web_parser.set_defaults(func=_cmd_web)
+
+    tui_parser = subparsers.add_parser(
+        "tui",
+        help="start the full-screen Textual terminal UI (requires: pip install -e \".[tui]\")",
+    )
+    tui_parser.set_defaults(func=_cmd_tui)
 
     web_proxy_parser = subparsers.add_parser(
         "web-proxy",

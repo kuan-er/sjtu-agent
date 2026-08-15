@@ -33,3 +33,5 @@ dependencies = {file = ["requirements.txt"]}
 [project.optional-dependencies]
 # 按需所取：语义记忆（跨会话语义检索）需要 chromadb
 memory = ["chromadb>=0.5.0"]
+# 按需所取：全屏终端 TUI 需要 textual（sjtu-agent tui）
+tui = ["textual>=0.80"]
