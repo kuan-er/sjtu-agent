@@ -2,7 +2,7 @@
 
 本文件记录各版本的用户可见变化。Agent 通过 `get_recent_updates` 读取（问「最近更新了什么」时），不写入 system prompt。
 
-## Unreleased
+## v0.11.0 (2026-08-15)
 - 🔁 后台服务安装清单（`.daemon_manifest.json`）：安装脚本 / `sjtu-agent update` 自动恢复此前安装的 Task Scheduler / psmux / launchd / systemd 服务，重装后无需手动重新配置
 - 🧰 新增 `sjtu-agent daemons status / uninstall / resync`
 - 🌐 Web UI 新增 `--host`（服务器可监听 0.0.0.0）

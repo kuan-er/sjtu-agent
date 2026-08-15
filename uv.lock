@@ -3125,7 +3125,7 @@ wheels = [
 
 [[package]]
 name = "sjtu-agent"
-version = "0.9.0"
+version = "0.11.0"
 source = { editable = "." }
 dependencies = [
     { name = "anthropic" },
