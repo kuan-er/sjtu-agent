@@ -246,20 +246,23 @@ if TEXTUAL_AVAILABLE:
                 self.stream_flush_timer = None
 
         def handle_approval(self, text: str) -> None:
-            approval = self.pending_approval
-            self.pending_approval = None
-            approved = text.lower() in {"approve", "yes", "y", "同意", "允许"}
-            if not approved and text.lower() not in {"deny", "no", "n", "拒绝"}:
-                self.pending_approval = approval
-                self.stream_text += "\n\n> 请输入 approve 或 deny。"
+            try:
+                approval = self.pending_approval
+                self.pending_approval = None
+                approved = text.lower() in {"approve", "yes", "y", "同意", "允许"}
+                if not approved and text.lower() not in {"deny", "no", "n", "拒绝"}:
+                    self.pending_approval = approval
+                    self.stream_text += "\n\n> 请输入 approve 或 deny。"
+                    self.schedule_stream_flush()
+                    return
+                decide_approval(str(approval.get("approval_id", "")), approved)
+                self.stream_text += (
+                    f"\n\n_{'已批准' if approved else '已拒绝'}："
+                    f"{approval.get('tool_name', '')}_"
+                )
                 self.schedule_stream_flush()
+            except Exception:
                 return
-            decide_approval(str(approval.get("approval_id", "")), approved)
-            self.stream_text += (
-                f"\n\n_{'已批准' if approved else '已拒绝'}："
-                f"{approval.get('tool_name', '')}_"
-            )
-            self.schedule_stream_flush()
 
         async def start_turn(self, text: str) -> None:
             if self.session_id is None:
@@ -318,33 +321,41 @@ if TEXTUAL_AVAILABLE:
 
         # ── 渲染（App 线程）─────────────────────────────────────────────
         def render_event(self, event: dict[str, Any], turn_session: str) -> None:
-            if turn_session != self.session_id:
+            try:
+                if turn_session != self.session_id:
+                    return
+                kind = event.get("kind")
+                if kind == "token":
+                    self.stream_text += str(event.get("text", ""))
+                elif kind == "tool_start":
+                    self.stream_text += f"\n\n🔧 **{event.get('name', '')}**"
+                elif kind == "tool_end":
+                    self.stream_text += f"\n\n✅ **{event.get('name', '')}** 完成"
+                elif kind == "approval_required":
+                    self.pending_approval = event
+                    try:
+                        args_text = json.dumps(event.get("arguments", {}), ensure_ascii=False)
+                    except Exception:
+                        args_text = str(event.get("arguments", {}))
+                    self.stream_text += (
+                        f"\n\n⚠️ **需要确认：{event.get('tool_name', '')}**\n\n"
+                        f"```json\n{args_text}\n```\n\n"
+                        "输入 `approve` 或 `deny`"
+                    )
+                elif kind == "command_start":
+                    self.stream_text += f"\n\n⚡ `{event.get('raw', '')}`"
+                elif kind == "command_progress":
+                    self.stream_text += f"\n\n_{event.get('message', '')}_"
+                elif kind == "command_result":
+                    self.stream_text += "\n\n" + str(event.get("text", ""))
+                elif kind == "error":
+                    self.stream_text += f"\n\n❌ **错误：{event.get('text', '')}**"
+                elif kind == "cancelled":
+                    self.stream_text += "\n\n_已取消_"
+                self.schedule_stream_flush()
+            except Exception:
+                # 任何事件渲染失败都不得让 App 闪退。
                 return
-            kind = event.get("kind")
-            if kind == "token":
-                self.stream_text += str(event.get("text", ""))
-            elif kind == "tool_start":
-                self.stream_text += f"\n\n🔧 **{event.get('name', '')}**"
-            elif kind == "tool_end":
-                self.stream_text += f"\n\n✅ **{event.get('name', '')}** 完成"
-            elif kind == "approval_required":
-                self.pending_approval = event
-                self.stream_text += (
-                    f"\n\n⚠️ **需要确认：{event.get('tool_name', '')}**\n\n"
-                    f"```json\n{json.dumps(event.get('arguments', {}), ensure_ascii=False)}\n```\n\n"
-                    "输入 `approve` 或 `deny`"
-                )
-            elif kind == "command_start":
-                self.stream_text += f"\n\n⚡ `{event.get('raw', '')}`"
-            elif kind == "command_progress":
-                self.stream_text += f"\n\n_{event.get('message', '')}_"
-            elif kind == "command_result":
-                self.stream_text += "\n\n" + str(event.get("text", ""))
-            elif kind == "error":
-                self.stream_text += f"\n\n❌ **错误：{event.get('text', '')}**"
-            elif kind == "cancelled":
-                self.stream_text += "\n\n_已取消_"
-            self.schedule_stream_flush()
 
         async def flush_stream(self) -> None:
             self.stream_flush_timer = None
@@ -357,21 +368,24 @@ if TEXTUAL_AVAILABLE:
                 return
 
         def finish_turn(self, turn_session: str) -> None:
-            if turn_session == self.session_id:
-                self.busy = False
-                self.pending_approval = None
-            if self.stream_flush_timer is not None:
-                try:
-                    self.stream_flush_timer.stop()
-                except Exception:
-                    pass
-                self.stream_flush_timer = None
-            # 最后一次刷新用普通 worker（非 exclusive），完成后刷新会话列表。
-            self.schedule_worker(self.flush_stream(), group="stream-final")
-            self.schedule_worker(
-                self.refresh_sessions(select_id=turn_session),
-                group="sessions-refresh",
-            )
+            try:
+                if turn_session == self.session_id:
+                    self.busy = False
+                    self.pending_approval = None
+                if self.stream_flush_timer is not None:
+                    try:
+                        self.stream_flush_timer.stop()
+                    except Exception:
+                        pass
+                    self.stream_flush_timer = None
+                # 最后一次刷新用普通 worker（非 exclusive），完成后刷新会话列表。
+                self.schedule_worker(self.flush_stream(), group="stream-final")
+                self.schedule_worker(
+                    self.refresh_sessions(select_id=turn_session),
+                    group="sessions-refresh",
+                )
+            except Exception:
+                return
 
 
 def build_app() -> "App | None":
