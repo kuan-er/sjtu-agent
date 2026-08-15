@@ -15,6 +15,7 @@ import json
 import threading
 from typing import Any
 
+from .attachments import TuiAttachments, build_attachment_note
 from .cards import render_command_result
 from .commands import command_candidates
 from .engine import cancel_turn, decide_approval, iter_chat_events, iter_command_events
@@ -121,6 +122,8 @@ if TEXTUAL_AVAILABLE:
         def __init__(self):
             super().__init__()
             self.model = TuiSessionModel()
+            self.attachments = TuiAttachments()
+            self.staged_attachment_ids: list[str] = []
             self.busy = False
             self.pending_approval: dict[str, Any] | None = None
             self.suggestions: list[dict[str, Any]] = []
@@ -181,6 +184,7 @@ if TEXTUAL_AVAILABLE:
             session = self.model.create_session("新会话")
             self.pending_approval = None
             self.busy = False
+            self.staged_attachment_ids = []
             await self.refresh_sessions(select_id=session.get("id"))
             await self.load_session(session.get("id") or "")
 
@@ -295,6 +299,7 @@ if TEXTUAL_AVAILABLE:
                 cancel_turn(self.session_id)
             self.busy = False
             self.pending_approval = None
+            self.staged_attachment_ids = []
             await self.load_session(target)
 
         # ── / 命令补全 ──────────────────────────────────────────────────
@@ -331,6 +336,52 @@ if TEXTUAL_AVAILABLE:
             self.render_suggestions()
 
         # ── 输入与审批 ──────────────────────────────────────────────────
+        def staged_attachment_items(self) -> list[dict[str, Any]]:
+            items = []
+            for attachment_id in self.staged_attachment_ids:
+                item = self.attachments.store.get(attachment_id)
+                if item:
+                    items.append(item)
+            return items
+
+        async def handle_attach_command(self, text: str) -> None:
+            parts = text.split(maxsplit=1)
+            path_arg = parts[1].strip() if len(parts) > 1 else ""
+
+            if not self.session_id:
+                session = self.model.create_session("新会话")
+                await self.refresh_sessions(select_id=session.get("id"))
+
+            if path_arg == "clear":
+                for attachment_id in self.staged_attachment_ids:
+                    self.attachments.remove(attachment_id)
+                self.staged_attachment_ids = []
+                await self.messages.mount(Markdown("> 🧹 已清空暂存附件"))
+                self.messages.scroll_end(animate=False)
+                return
+
+            if not path_arg:
+                items = self.staged_attachment_items()
+                if not items:
+                    await self.messages.mount(Markdown("> 没有暂存附件。用法：`/attach <本地文件路径>`"))
+                else:
+                    lines = ["> 📎 当前暂存附件："]
+                    for item in items:
+                        lines.append(f"> - `{item['filename']}`（{item.get('size', 0)}B）")
+                    await self.messages.mount(Markdown("\n".join(lines)))
+                self.messages.scroll_end(animate=False)
+                return
+
+            item, error = self.attachments.add(self.session_id, path_arg)
+            if error or not item:
+                await self.messages.mount(Markdown(f"> ❌ {error or '附件添加失败'}"))
+            else:
+                self.staged_attachment_ids.append(item["id"])
+                await self.messages.mount(
+                    Markdown(f"> 📎 已暂存附件：`{item['filename']}`（发送下一条消息时自动解析并附加）")
+                )
+            self.messages.scroll_end(animate=False)
+
         @on(Input.Submitted)
         async def on_input_submitted(self, event: Input.Submitted) -> None:
             text = event.value.strip()
@@ -340,6 +391,10 @@ if TEXTUAL_AVAILABLE:
                 self.handle_approval(text)
                 event.input.value = ""
                 return
+            if text.startswith("/attach"):
+                event.input.value = ""
+                await self.handle_attach_command(text)
+                return
             if self.suggestions and text.startswith("/"):
                 candidate = self.suggestions[self.suggestion_index]
                 event.input.value = candidate["value"]
@@ -347,8 +402,18 @@ if TEXTUAL_AVAILABLE:
                 self.render_suggestions()
                 event.input.focus()
                 return
+
             event.input.value = ""
-            await self.start_turn(text)
+            attachment_items = self.staged_attachment_items()
+            attachment_note = build_attachment_note(attachment_items)
+            message = (text or "请查看我上传的附件") + attachment_note
+            command_mode = (
+                not attachment_items
+                and text.startswith("/")
+                and is_core_command(text)
+            )
+            self.staged_attachment_ids = []
+            await self.start_turn(message, command_mode=command_mode)
 
         def schedule_worker(self, work, group: str, *, exclusive: bool = False) -> None:
             """启动 UI worker；任何刷新错误都不允许让 App 闪退。"""
@@ -390,7 +455,7 @@ if TEXTUAL_AVAILABLE:
             except Exception:
                 return
 
-        async def start_turn(self, text: str) -> None:
+        async def start_turn(self, text: str, command_mode: bool | None = None) -> None:
             if self.session_id is None:
                 session = self.model.create_session("新会话")
                 await self.refresh_sessions(select_id=session.get("id"))
@@ -398,6 +463,9 @@ if TEXTUAL_AVAILABLE:
             if not session_id:
                 await self.messages.mount(Markdown("> 无法创建会话"))
                 return
+
+            if command_mode is None:
+                command_mode = text.startswith("/") and is_core_command(text)
 
             try:
                 await self.messages.mount(
@@ -411,7 +479,6 @@ if TEXTUAL_AVAILABLE:
             self.stream_text = ""
             self.busy = True
             self.turn_session = session_id
-            command_mode = text.startswith("/") and is_core_command(text)
             threading.Thread(
                 target=self._run_stream,
                 args=(text, command_mode, session_id),

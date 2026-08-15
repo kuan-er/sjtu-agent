@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 import pytest
 
@@ -222,6 +223,59 @@ def test_delete_session_modal_creates_replacement(tmp_path):
             assert model.store.get_session(old_id) is None
             assert model.list_sessions()
             assert app.session_id == model.list_sessions()[0]["id"]
+
+    _run(scenario())
+
+
+def test_attach_command_uses_whitelisted_store_and_preparses(tmp_path, monkeypatch):
+    from sjtu_agent.tui.attachments import TuiAttachments
+    from sjtu_agent.web.attachment_store import AttachmentStore
+
+    store = SessionStore(tmp_path / "web_sessions.sqlite3")
+    model = TuiSessionModel(store)
+    model.create_session("新会话")
+    source = tmp_path / "作业.pdf"
+    source.write_bytes(b"%PDF fake")
+
+    sent_messages = []
+
+    def fake_stream(session_id, user_message):
+        sent_messages.append(user_message)
+        yield {"kind": "done"}
+
+    monkeypatch.setattr("sjtu_agent.tui.app.iter_chat_events", fake_stream)
+    monkeypatch.setattr(
+        "sjtu_agent.parsing.parse_file",
+        lambda path, **kwargs: {"ok": True, "content": "预解析出的作业内容"},
+    )
+
+    async def scenario():
+        app = build_app()
+        app.model = model
+        app.attachments = TuiAttachments(AttachmentStore(tmp_path / "web_attachments"))
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+
+            prompt = app.query_one("#prompt", Input)
+            prompt.focus()
+            prompt.value = f"/attach {source}"
+            await pilot.press("enter")
+            await pilot.pause()
+            assert len(app.staged_attachment_ids) == 1
+            item = app.attachments.store.get(app.staged_attachment_ids[0])
+            assert Path(item["path"]).is_relative_to(tmp_path / "web_attachments")
+
+            prompt.focus()
+            prompt.value = "帮我看看附件"
+            await pilot.press("enter")
+            for _ in range(20):
+                if not app.busy:
+                    break
+                await pilot.pause(0.05)
+
+            assert sent_messages
+            assert "预解析出的作业内容" in sent_messages[-1]
+            assert str(source) not in sent_messages[-1]
 
     _run(scenario())
 
