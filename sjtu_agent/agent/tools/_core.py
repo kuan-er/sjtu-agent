@@ -184,7 +184,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "setup_shuiyuan",
-            "description": "交互式授权水源社区 Discourse User API Key。会自动打开浏览器，用户在页面点击授权后自动完成，无需手动操作。用户说'配置水源'/'授权水源'/'设置水源'时调用。",
+            "description": "配置或刷新水源社区登录态。当前版本保存 session cookie，无需 User API Key；已有有效 cookie 时不会重新登录。用户说'配置水源'/'授权水源'/'设置水源'时调用。",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -1535,6 +1535,14 @@ def tool_check_setup() -> dict:
         "shuiyuan": {
             "has_api_key": bool(cfg.get("shuiyuan_user_api_key")),
             "has_cookies": bool(cfg.get("shuiyuan_cookies")),
+            "access_ok": bool(cfg.get("shuiyuan_user_api_key") or cfg.get("shuiyuan_cookies")),
+            "needs_attention": not bool(cfg.get("shuiyuan_user_api_key") or cfg.get("shuiyuan_cookies")),
+            "api_key_required": False,
+            "note": (
+                "session cookie 已可用于水源搜索和读取帖子，无需 User API Key。"
+                if cfg.get("shuiyuan_cookies")
+                else "未配置水源登录态；如需要可调用 setup_shuiyuan。"
+            ),
         },
         "course_community": {
             "has_cookies": bool(cfg.get("course_sjtu_cookies")),

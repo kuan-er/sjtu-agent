@@ -132,12 +132,13 @@ body {
   white-space: nowrap;
 }
 
-.messages { flex: 1; overflow-y: auto; padding: 24px; }
+.messages { flex: 1; overflow-y: auto; padding: 16px 18px; }
 
 .hero { height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text-2); text-align: center; }
-.hero h1 { color: var(--text); font-size: 26px; }
+.hero h1 { color: var(--text); font-size: 22px; margin: 0 0 8px; }
+.hero p { margin: 0; line-height: 1.5; }
 
-.message { display: flex; gap: 10px; margin-bottom: 20px; }
+.message { display: flex; gap: 8px; margin-bottom: 14px; }
 .message.user { flex-direction: row-reverse; }
 
 .avatar {
@@ -151,15 +152,15 @@ body {
 
 .bubble {
   max-width: min(760px, 78%);
-  padding: 12px 16px; border-radius: 12px;
-  white-space: pre-wrap; word-break: break-word; line-height: 1.65;
+  padding: 10px 14px; border-radius: 12px;
+  white-space: pre-wrap; word-break: break-word; line-height: 1.5;
 }
 
 .message.user .bubble { background: var(--user-bubble); color: #fff; }
 .message.assistant .bubble { background: var(--assistant-bubble); border: 1px solid var(--border); }
 
 .markdown { word-break: break-word; }
-.markdown p { margin: 0 0 10px; }
+.markdown p { margin: 0 0 6px; }
 .markdown p:last-child { margin-bottom: 0; }
 .markdown pre {
   background: var(--panel-2); border: 1px solid var(--border);

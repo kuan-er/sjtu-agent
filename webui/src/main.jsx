@@ -331,6 +331,16 @@ function App() {
     await loadSessions();
   };
 
+  const ensureSessionTitle = async (id, message, wasNew) => {
+    const existing = sessions.find(s => s.id === id);
+    const shouldRename = wasNew || (existing && existing.title === '新会话' && messages.length === 0);
+    if (!shouldRename) return;
+    const title = message.replace(/\s+/g, ' ').trim().slice(0, 24) || '新会话';
+    if (title !== '新会话') {
+      try { await renameSession(id, title); } catch (_) {}
+    }
+  };
+
   const deleteSession = async (id) => {
     await api('/api/sessions/' + id, { method: 'DELETE' });
     await loadSessions();
@@ -401,16 +411,19 @@ function App() {
     partialRef.current = '';
 
     let id = sessionId;
+    let wasNew = false;
     if (!id) {
       try {
         const session = await createSession();
         id = session.id;
+        wasNew = true;
         setSessionId(id);
       } catch (err) { setSending(false); return; }
     }
 
     const attachmentIds = stagedFiles.map(a => a.id);
     setMessages(prev => [...prev, { role: 'user', content: message }]);
+    ensureSessionTitle(id, message, wasNew);
     setStagedFiles([]);
     setStream([]);
     setApproval(null);

@@ -2,6 +2,10 @@
 
 本文件记录各版本的用户可见变化。Agent 通过 `get_recent_updates` 读取（问「最近更新了什么」时），不写入 system prompt。
 
+## Unreleased
+- 🖥 GUI 细节修复：新会话按首条消息自动命名、收紧主页行距、legacy 页增加返回入口
+- 💧 修正水源状态提示：session cookie 已足够搜索/读帖，不再提示需要 User API Key
+
 ## v0.15.0 (2026-08-15)
 - 🖥 Web GUI Phase 3：附件上传/下载/图片与 PDF 预览、危险工具审批、Canvas/水源结果卡片、会话搜索、复制按钮、流式中断历史回写
 
