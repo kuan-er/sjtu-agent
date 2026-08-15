@@ -669,6 +669,14 @@
       cursor: not-allowed;
     }
 
+    .legacy-back {
+      position: fixed; top: 10px; right: 12px; z-index: 99;
+      background: #1677ff; color: #fff; text-decoration: none;
+      padding: 6px 10px; border-radius: 8px; font-size: 12px;
+      box-shadow: 0 4px 16px rgba(22,119,255,.25);
+    }
+    .legacy-back:hover { background: #0958d9; }
+
     /* ── Responsive ── */
     @media (max-width: 600px) {
       .layout { grid-template-columns: 1fr; }
@@ -680,6 +688,7 @@
   </style>
 </head>
 <body>
+<a href="/" class="legacy-back" title="返回新版 GUI">← 返回新版 GUI</a>
 
 <div class="layout">
   <!-- Sidebar -->
