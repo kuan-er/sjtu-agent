@@ -175,6 +175,57 @@ def test_high_frequency_stream_does_not_crash_app(tmp_path, monkeypatch):
     _run(scenario())
 
 
+def test_rename_session_modal(tmp_path):
+    store = SessionStore(tmp_path / "web_sessions.sqlite3")
+    model = TuiSessionModel(store)
+    session_id = model.create_session("旧名字")["id"]
+
+    async def scenario():
+        app = build_app()
+        app.model = model
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            await pilot.press("ctrl+r")
+            await pilot.pause()
+            rename_input = app.screen.query_one("#rename-input", Input)
+            rename_input.value = "新名字"
+            await pilot.press("enter")
+            for _ in range(20):
+                if model.get_current()["title"] == "新名字":
+                    break
+                await pilot.pause(0.05)
+
+            assert model.get_current()["title"] == "新名字"
+            assert model.get_current()["id"] == session_id
+
+    _run(scenario())
+
+
+def test_delete_session_modal_creates_replacement(tmp_path):
+    store = SessionStore(tmp_path / "web_sessions.sqlite3")
+    model = TuiSessionModel(store)
+    old_id = model.create_session("待删除")["id"]
+
+    async def scenario():
+        app = build_app()
+        app.model = model
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            await pilot.press("ctrl+d")
+            await pilot.pause()
+            await pilot.press("y")
+            for _ in range(20):
+                if model.store.get_session(old_id) is None:
+                    break
+                await pilot.pause(0.05)
+
+            assert model.store.get_session(old_id) is None
+            assert model.list_sessions()
+            assert app.session_id == model.list_sessions()[0]["id"]
+
+    _run(scenario())
+
+
 def test_command_suggestions_fill_input(tmp_path):
     store = SessionStore(tmp_path / "web_sessions.sqlite3")
     model = TuiSessionModel(store)

@@ -15,28 +15,81 @@ import json
 import threading
 from typing import Any
 
+from .cards import render_command_result
 from .commands import command_candidates
 from .engine import cancel_turn, decide_approval, iter_chat_events, iter_command_events
-from .messages import display_text
+from .messages import display_text, parse_command_result
 from .session_model import TuiSessionModel
 from sjtu_agent.commands import is_core_command
 
 try:
     from textual import on
     from textual.app import App, ComposeResult
+    from textual.binding import Binding
     from textual.containers import Horizontal, Vertical, VerticalScroll
+    from textual.screen import ModalScreen
     from textual.widgets import Footer, Header, Input, Label, ListItem, ListView, Markdown, Static
     TEXTUAL_AVAILABLE = True
 except ImportError:  # pragma: no cover - depends on optional extra
     App = None  # type: ignore[assignment]
+    Binding = None  # type: ignore[assignment]
     ComposeResult = None  # type: ignore[assignment]
     Horizontal = Vertical = VerticalScroll = None  # type: ignore[assignment]
+    ModalScreen = None  # type: ignore[assignment]
     Footer = Header = Input = Label = ListItem = ListView = Markdown = Static = None  # type: ignore[assignment]
     on = None  # type: ignore[assignment]
     TEXTUAL_AVAILABLE = False
 
 
 if TEXTUAL_AVAILABLE:
+
+    class RenameModal(ModalScreen[str | None]):
+        """重命名当前会话的输入弹窗。"""
+
+        CSS = """
+        #rename-input { width: 60; }
+        """
+
+        BINDINGS = [("escape", "cancel", "取消")]
+
+        def __init__(self, current_title: str):
+            super().__init__()
+            self.current_title = current_title
+
+        def compose(self) -> ComposeResult:
+            yield Label(f"重命名会话（当前：{self.current_title}）")
+            yield Input(value=self.current_title, id="rename-input")
+
+        def on_mount(self) -> None:
+            prompt = self.query_one("#rename-input", Input)
+            prompt.focus()
+            prompt.cursor_position = len(prompt.value)
+
+        @on(Input.Submitted)
+        def on_input_submitted(self, event: Input.Submitted) -> None:
+            self.dismiss(event.value.strip() or self.current_title)
+
+        def action_cancel(self) -> None:
+            self.dismiss(None)
+
+    class ConfirmDeleteModal(ModalScreen[bool]):
+        """删除会话二次确认。"""
+
+        BINDINGS = [
+            ("y", "confirm", "确认删除"),
+            ("n", "cancel", "取消"),
+            ("escape", "cancel", "取消"),
+        ]
+
+        def compose(self) -> ComposeResult:
+            yield Label("⚠️ 删除当前会话？消息会从本地 SQLite 中永久移除。")
+            yield Label("[y] 确认    [n/esc] 取消")
+
+        def action_confirm(self) -> None:
+            self.dismiss(True)
+
+        def action_cancel(self) -> None:
+            self.dismiss(False)
 
     class ChatApp(App):
         """与 Web GUI 共用 session store 的 Textual 聊天客户端。"""
@@ -56,7 +109,9 @@ if TEXTUAL_AVAILABLE:
         """
 
         BINDINGS = [
+            Binding("ctrl+d", "delete_session", "删除会话", priority=True),
             ("ctrl+n", "new_session", "新会话"),
+            ("ctrl+r", "rename_session", "重命名"),
             ("ctrl+l", "focus_prompt", "聚焦输入"),
             ("ctrl+x", "stop_turn", "停止生成"),
             ("tab", "next_suggestion", "下一个建议"),
@@ -132,6 +187,52 @@ if TEXTUAL_AVAILABLE:
         def action_focus_prompt(self) -> None:
             self.query_one("#prompt", Input).focus()
 
+        def action_rename_session(self) -> None:
+            session = self.model.get_current()
+            if not session:
+                return
+            session_id = session["id"]
+            old_title = session.get("title", "新会话")
+
+            def on_result(new_title: str | None) -> None:
+                if not new_title or new_title == old_title:
+                    return
+                self.model.rename(session_id, new_title)
+                self.schedule_worker(self.after_rename(session_id), group="session-op")
+
+            self.push_screen(RenameModal(old_title), callback=on_result)
+
+        async def after_rename(self, session_id: str) -> None:
+            await self.refresh_sessions(select_id=session_id)
+            await self.load_session(session_id)
+
+        def action_delete_session(self) -> None:
+            session_id = self.session_id
+            if not session_id:
+                return
+
+            def on_result(confirmed: bool) -> None:
+                if not confirmed:
+                    return
+                if self.busy:
+                    cancel_turn(session_id)
+                self.busy = False
+                self.pending_approval = None
+                self.schedule_worker(self.after_delete(session_id), group="session-op")
+
+            self.push_screen(ConfirmDeleteModal(), callback=on_result)
+
+        async def after_delete(self, session_id: str) -> None:
+            self.model.delete(session_id)
+            remaining = self.model.list_sessions()
+            await self.refresh_sessions()
+            if remaining:
+                await self.load_session(remaining[0]["id"])
+            else:
+                session = self.model.create_session("新会话")
+                await self.refresh_sessions(select_id=session.get("id"))
+                await self.load_session(session.get("id") or "")
+
         def action_stop_turn(self) -> None:
             if not self.busy or not self.session_id:
                 return
@@ -168,11 +269,15 @@ if TEXTUAL_AVAILABLE:
                 title = (session or {}).get("title", "")
                 widgets: list[Markdown] = [Markdown(f"# {title}")]
                 for message in self.model.messages(session_id):
-                    text = display_text(message.get("content", ""))
+                    content = message.get("content", "")
                     if message.get("role") == "user":
-                        widgets.append(Markdown(f"> **你**\n\n{text}"))
+                        widgets.append(Markdown(f"> **你**\n\n{display_text(content)}"))
+                        continue
+                    payload = parse_command_result(content)
+                    if payload is not None:
+                        widgets.append(Markdown(render_command_result(payload)))
                     else:
-                        widgets.append(Markdown(text))
+                        widgets.append(Markdown(display_text(content)))
                 await self.messages.mount(*widgets)
                 self.messages.scroll_end(animate=False)
             except Exception:
@@ -335,6 +440,8 @@ if TEXTUAL_AVAILABLE:
 
         def post_thread_event(self, callback, *args) -> None:
             """从 worker 线程安全地投递 UI 回调；app 关闭后静默丢弃。"""
+            if not getattr(self, "is_running", False):
+                return
             try:
                 self.call_from_thread(callback, *args)
             except Exception:
@@ -368,7 +475,12 @@ if TEXTUAL_AVAILABLE:
                 elif kind == "command_progress":
                     self.stream_text += f"\n\n_{event.get('message', '')}_"
                 elif kind == "command_result":
-                    self.stream_text += "\n\n" + str(event.get("text", ""))
+                    payload = {
+                        "view": event.get("view", "markdown"),
+                        "text": event.get("text", ""),
+                        "data": event.get("data", {}),
+                    }
+                    self.stream_text += "\n\n" + render_command_result(payload)
                 elif kind == "error":
                     self.stream_text += f"\n\n❌ **错误：{event.get('text', '')}**"
                 elif kind == "cancelled":
