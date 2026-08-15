@@ -55,6 +55,7 @@ CARE_STATE_PATH       = DATA_DIR / "care_state.json"
 NEWS_HISTORY_PATH     = DATA_DIR / "news_history.json"
 CONVERSATION_LOG_PATH = DATA_DIR / "conversation_log.jsonl"
 WEB_TOKEN_PATH        = DATA_DIR / ".web_token"
+DAEMON_MANIFEST_PATH  = DATA_DIR / ".daemon_manifest.json"
 DINING_HISTORY_PATH   = DATA_DIR / "dining_history.json"
 CANTEEN_KNOWLEDGE_PATH = PACKAGE_ROOT / "data" / "canteen_knowledge.json"
 
@@ -181,6 +182,7 @@ def describe_runtime_paths() -> dict[str, str]:
         "mysjtu_catalog_path": str(MYSJTU_CATALOG_PATH),
         "schedule_cache_path": str(SCHEDULE_CACHE_PATH),
         "dining_history_path": str(DINING_HISTORY_PATH),
+        "daemon_manifest_path": str(DAEMON_MANIFEST_PATH),
         "canteen_knowledge_path": str(CANTEEN_KNOWLEDGE_PATH),
     }
 

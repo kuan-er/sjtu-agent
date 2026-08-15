@@ -96,7 +96,7 @@ type: scope — 描述
 ## 测试
 
 ```bash
-pytest tests/ -q           # 全量（当前 287 个）
+pytest tests/ -q           # 全量
 pytest tests/test_dining.py -q   # 单文件
 pytest -k "test_name"      # 按名称筛选
 ```

@@ -1,0 +1,25 @@
+name: 📚 文档改进
+description: 建议补充或修正文档
+title: "docs: "
+labels: ["documentation", "good first issue"]
+body:
+  - type: textarea
+    id: where
+    attributes:
+      label: 涉及哪部分文档
+      placeholder: 例如 README、docs/TROUBLESHOOTING.md、docs/DEPLOYMENT.md
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: 希望补充/修改什么
+      description: 可以附上你已经验证过的命令、截图或参考链接
+    validations:
+      required: true
+  - type: checkboxes
+    id: willing_to_pr
+    attributes:
+      label: 是否愿意直接提交 PR
+      options:
+        - label: 我可以帮忙写这份文档

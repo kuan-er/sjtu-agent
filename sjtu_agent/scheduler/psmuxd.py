@@ -90,6 +90,13 @@ def install(
 
     py = str(python_executable or Path(sys.executable))
     selected = set(service_names or _SERVICE_SPECS.keys())
+    unsupported = sorted(selected - set(_SERVICE_SPECS))
+    if unsupported:
+        raise RuntimeError(
+            "psmux 后端只适合常驻进程，不支持定时任务："
+            + ", ".join(unsupported)
+            + "。请改用 Task Scheduler 后端。"
+        )
     LOG_DIR.mkdir(parents=True, exist_ok=True)
 
     results: list[dict] = []

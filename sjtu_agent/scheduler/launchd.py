@@ -94,6 +94,13 @@ _SERVICE_SPECS = {
         "schedule_type": "none",
         "keep_alive": True,
     },
+    "aihot-push": {
+        "label": "com.sjtu.aihot-push",
+        "subcommand": "aihot-push",
+        "log": "aihot_push.launchd.log",
+        "run_at_load": False,
+        "schedule_type": "calendar",
+    },
     "news-digest": {
         "label": "com.sjtu.news-digest",
         "subcommand": "news-digest",

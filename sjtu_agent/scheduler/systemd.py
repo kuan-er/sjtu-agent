@@ -34,6 +34,7 @@ _SERVICE_SPECS = {
         "restart": "no",
         "has_timer": True,
         "timer_type": "calendar",
+        "schedule_time": (8, 0),
     },
     "noon-report": {
         "unit_name": "sjtu-agent-noon-report",
@@ -42,6 +43,7 @@ _SERVICE_SPECS = {
         "restart": "no",
         "has_timer": True,
         "timer_type": "calendar",
+        "schedule_time": (12, 0),
     },
     "remind-check": {
         "unit_name": "sjtu-agent-remind-check",
@@ -99,6 +101,31 @@ _SERVICE_SPECS = {
         "has_timer": False,
         "wants_after": "network-online.target",
     },
+    "news-digest": {
+        "unit_name": "sjtu-agent-news-digest",
+        "subcommand": "news-digest",
+        "log": "news_digest.systemd.log",
+        "restart": "no",
+        "has_timer": True,
+        "timer_type": "calendar",
+        "schedule_time": (10, 0),
+    },
+    "aihot-push": {
+        "unit_name": "sjtu-agent-aihot-push",
+        "subcommand": "aihot-push",
+        "log": "aihot_push.systemd.log",
+        "restart": "no",
+        "has_timer": True,
+        "timer_type": "calendar",
+    },
+    "web": {
+        "unit_name": "sjtu-agent-web",
+        "subcommand": "web --no-browser",
+        "log": "web.systemd.log",
+        "restart": "always",
+        "has_timer": False,
+        "wants_after": "network-online.target",
+    },
 }
 
 
@@ -137,12 +164,12 @@ WantedBy=default.target
 def _write_timer_unit(
     unit_name: str,
     timer_type: str,
-    daily_report_time: tuple[int, int],
+    schedule_time: tuple[int, int],
     remind_interval: int,
 ) -> Path:
     """生成并写入 .timer 单元文件，返回文件路径。"""
     if timer_type == "calendar":
-        hour, minute = daily_report_time
+        hour, minute = schedule_time
         schedule = f"OnCalendar=*-*-* {hour:02d}:{minute:02d}:00"
     else:
         # OnUnitInactiveSec：上次运行结束后等待 N 秒再次触发
@@ -232,7 +259,7 @@ def install(
             timer_path = _write_timer_unit(
                 unit_name=unit_name,
                 timer_type=spec["timer_type"],
-                daily_report_time=daily_report_time,
+                schedule_time=spec.get("schedule_time", daily_report_time),
                 remind_interval=remind_interval,
             )
 

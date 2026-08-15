@@ -2,6 +2,14 @@
 
 本文件记录各版本的用户可见变化。Agent 通过 `get_recent_updates` 读取（问「最近更新了什么」时），不写入 system prompt。
 
+## Unreleased
+- 🔁 后台服务安装清单（`.daemon_manifest.json`）：安装脚本 / `sjtu-agent update` 自动恢复此前安装的 Task Scheduler / psmux / launchd / systemd 服务，重装后无需手动重新配置
+- 🧰 新增 `sjtu-agent daemons status / uninstall / resync`
+- 🌐 Web UI 新增 `--host`（服务器可监听 0.0.0.0）
+- 🐧 systemd 补齐 `web`、`news-digest`、`aihot-push` 服务，并修正早报/午报时间
+- 💧 水源授权优先复用仍有效的 session cookie，登录后校验当前用户，减少异地登录触发
+- 📚 新增排错手册、服务器部署指南和 GitHub Issue 模板
+
 ## v0.10.0 (2026-08-09)
 - ⚡ **uv 迁移**：install 脚本换 uv，安装时间从分钟级降到 ~30 秒（数量级提升）
 - 📦 **依赖按需拆分**：移除死依赖（browser-use / langchain-openai）；语义记忆（chromadb）改为可选 extra `[memory]`

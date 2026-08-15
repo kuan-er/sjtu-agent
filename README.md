@@ -4,7 +4,7 @@
 
 面向上海交通大学学生的校园助手，提供终端对话、飞书 / Telegram / 微信 / QQ Bot、DDL 聚合、日报推送和 MCP Server。
 
-[English Version](README_EN.md) · [项目展示页](https://kuan-er.github.io/sjtu-agent)
+[English Version](README_EN.md) · [项目展示页](https://kuan-er.github.io/sjtu-agent) · [排错手册](docs/TROUBLESHOOTING.md) · [服务器部署](docs/SERVER_DEPLOYMENT.md)
 
 如果这个项目对你有帮助，欢迎点一个 ⭐ Star！
 
@@ -246,7 +246,7 @@ sjtu-agent install-parse-backends --backend whisper
 |------|------|
 | macOS | `~/Library/Application Support/sjtu-agent` |
 | Linux | `~/.local/share/sjtu-agent` |
-| Windows | `%APPDATA%/sjtu-agent` |
+| Windows | 以 `sjtu-agent doctor` 输出为准（通常为 `%LOCALAPPDATA%\sjtu-agent\sjtu-agent`） |
 
 三个核心文件：
 
@@ -289,6 +289,8 @@ sjtu-agent install-daemons --services daily-report remind-check
 
 ```powershell
 sjtu-agent install-daemons
+sjtu-agent daemons status      # 查看已安装服务
+sjtu-agent daemons uninstall   # 卸载全部服务
 ```
 
 **psmux**（适合常驻进程，无弹窗）：
@@ -300,11 +302,16 @@ sjtu-agent install-daemons --backend psmux --services feishu-bot telegram-bot
 
 飞书 Bot 还提供桌面 GUI 启动器：双击 `install\launch-feishu.bat` 即可。
 
+> 后台服务安装记录保存在运行时数据目录的 `.daemon_manifest.json`。重新安装、移动目录或重建 `.venv` 后，安装脚本和 `sjtu-agent update` 会自动执行 `sjtu-agent daemons resync` 恢复服务，无需手动重新配置。
+
 ### Linux (systemd)
 
 ```bash
+loginctl enable-linger "$USER"   # 登出后继续运行（一次性设置）
 sjtu-agent install-daemons
 ```
+
+服务器 24/7 部署完整步骤见 [docs/SERVER_DEPLOYMENT.md](docs/SERVER_DEPLOYMENT.md)。
 
 ---
 
@@ -324,6 +331,10 @@ sjtu-agent install-daemons
 ### QQ Bot
 
 登录 [q.qq.com](https://q.qq.com/qqbot/openclaw/) 创建机器人获取 AppID / AppSecret → 对话中让 Agent 调用 `setup_qq` → `sjtu-agent qq-bot` 启动。
+
+### 水源社区
+
+在对话中对 Agent 说「配置水源」即可授权。当前版本使用 session cookie 方案（旧 User API Key 流程已废弃）；如遇异地登录 / 二次验证，或需要手动导出 cookie，见 [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)。
 
 ---
 

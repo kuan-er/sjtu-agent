@@ -1,0 +1,41 @@
+name: 🐛 Bug 报告
+description: 提交一个可复现的 bug
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提交前请先查看 [docs/TROUBLESHOOTING.md](https://github.com/kuan-er/sjtu-agent/blob/main/docs/TROUBLESHOOTING.md) 和已有 issue，避免重复。
+  - type: input
+    id: version
+    attributes:
+      label: 版本 / 平台
+      placeholder: 例如 v0.10.0 / Windows 11 / macOS 15
+    validations:
+      required: true
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: 发生了什么
+      description: 描述期望行为与实际行为
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      placeholder: "1. 运行 ...\n2. 看到 ..."
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志 / 报错
+      description: 请粘贴 `sjtu-agent doctor` 输出或相关日志。日志文件在运行时数据目录的 `logs/` 下。注意脱敏，不要粘贴 API Key、密码、token。
+      render: shell
+  - type: textarea
+    id: context
+    attributes:
+      label: 补充信息
+      description: 是否重装过、是否移动过项目目录、是否使用 psmux/Task Scheduler 等

@@ -139,9 +139,26 @@ if [[ $ADDED_TO_RC -eq 0 ]]; then
   echo "  $EXPORT_LINE"
 fi
 
+SETUP_EXIT=0
 if [[ $RUN_SETUP -eq 1 ]]; then
   log "启动 sjtu-agent setup"
-  exec "$VENV_BIN/sjtu-agent" setup
+  set +e
+  "$VENV_BIN/sjtu-agent" setup
+  SETUP_EXIT=$?
+  set -e
+fi
+
+# 安装/重建 venv 后，按之前的安装清单自动恢复后台服务（launchd / systemd）。
+# 若项目目录或 Python 路径没有变化，resync 会直接跳过。
+log "恢复此前安装过的后台服务"
+if "$VENV_PY" -m sjtu_agent daemons resync >/dev/null 2>&1; then
+  log "后台服务已是最新，或已从安装清单自动恢复。"
+else
+  log "后台服务恢复跳过或失败；如需安装请运行 sjtu-agent install-daemons"
+fi
+
+if [[ $SETUP_EXIT -ne 0 ]]; then
+  exit "$SETUP_EXIT"
 fi
 
 cat <<EOF
