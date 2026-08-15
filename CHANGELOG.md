@@ -2,7 +2,7 @@
 
 本文件记录各版本的用户可见变化。Agent 通过 `get_recent_updates` 读取（问「最近更新了什么」时），不写入 system prompt。
 
-## Unreleased
+## v0.14.0 (2026-08-15)
 - 🖥 Web GUI Phase 2：Markdown / 代码高亮 / KaTeX、工具卡片耗时与状态、停止生成、主题与强调色、移动端会话抽屉
 
 ## v0.13.0 (2026-08-15)
