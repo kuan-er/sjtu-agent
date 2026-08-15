@@ -11,20 +11,10 @@ import json
 import threading
 from typing import Any
 
-from .engine import (
-    choose_event_stream,
-    decide_approval,
-    iter_chat_events,
-    iter_command_events,
-    new_store,
-)
+from .engine import cancel_turn, decide_approval, iter_chat_events, iter_command_events
+from .messages import display_text
+from .session_model import TuiSessionModel
 from sjtu_agent.commands import is_core_command
-
-_COMMAND_RESULT_MARKER = "__SJTU_COMMAND_RESULT__"
-
-
-def _session_title(text: str) -> str:
-    return " ".join(text.split())[:24] or "新会话"
 
 
 def run_tui() -> int:
@@ -52,14 +42,18 @@ def run_tui() -> int:
         BINDINGS = [
             ("ctrl+n", "new_session", "新会话"),
             ("ctrl+l", "focus_prompt", "聚焦输入"),
+            ("ctrl+x", "stop_turn", "停止生成"),
         ]
 
         def __init__(self):
             super().__init__()
-            self.store = new_store()
-            self.session_id: str | None = None
+            self.model = TuiSessionModel()
             self.busy = False
             self.pending_approval: dict[str, Any] | None = None
+
+        @property
+        def session_id(self) -> str | None:
+            return self.model.current_id
 
         def compose(self) -> ComposeResult:
             yield Header()
@@ -80,20 +74,25 @@ def run_tui() -> int:
 
         # ── 会话 ─────────────────────────────────────────────────────────
         def action_new_session(self) -> None:
-            session = self.store.create_session("新会话")
-            self.session_id = session.get("id")
+            session = self.model.create_session("新会话")
             self.pending_approval = None
-            self.refresh_sessions(select_id=self.session_id)
-            self.load_session(self.session_id)
+            self.refresh_sessions(select_id=session.get("id"))
+            self.load_session(session.get("id") or "")
 
         def action_focus_prompt(self) -> None:
             self.query_one("#prompt", Input).focus()
+
+        def action_stop_turn(self) -> None:
+            if not self.busy or not self.session_id:
+                return
+            cancel_turn(self.session_id)
+            self.chat.write("\n[dim]已请求停止…[/]")
 
         def refresh_sessions(self, select_id: str | None = None) -> None:
             session_list = self.query_one("#sessions", ListView)
             session_list.clear()
             target = select_id or self.session_id
-            for session in self.store.list_sessions():
+            for session in self.model.list_sessions():
                 item = ListItem(
                     Label(session.get("title") or "未命名会话"),
                     id=f"session-{session['id']}",
@@ -103,23 +102,16 @@ def run_tui() -> int:
                     session_list.index = len(session_list.children) - 1
 
         def load_session(self, session_id: str) -> None:
-            self.session_id = session_id
+            self.model.select(session_id)
             chat = self.query_one("#chat", RichLog)
             chat.clear()
-            session = self.store.get_session(session_id)
-            chat.write(f"[bold]会话：{session.get('title', '')}[/]\n")
-            for message in self.store.list_messages(session_id):
-                content = message.get("content", "")
+            session = self.model.get_current()
+            chat.write(f"[bold]会话：{(session or {}).get('title', '')}[/]\n")
+            for message in self.model.messages(session_id):
+                text = display_text(message.get("content", ""))
                 if message.get("role") == "user":
-                    chat.write(f"[bold cyan]你[/] {escape(content)}")
+                    chat.write(f"[bold cyan]你[/] {escape(text)}")
                 else:
-                    payload = None
-                    if isinstance(content, str) and content.startswith(_COMMAND_RESULT_MARKER):
-                        try:
-                            payload = json.loads(content[len(_COMMAND_RESULT_MARKER):])
-                        except json.JSONDecodeError:
-                            payload = None
-                    text = (payload or {}).get("text", content) if payload else content
                     chat.write(f"[bold green]Agent[/] {escape(text)}")
 
         @on(ListView.Selected)
@@ -154,16 +146,12 @@ def run_tui() -> int:
 
         def start_turn(self, text: str) -> None:
             if self.session_id is None:
-                session = self.store.create_session("新会话")
-                self.session_id = session.get("id")
-                self.refresh_sessions(select_id=self.session_id)
-            if self.session_id is None:
+                session = self.model.create_session("新会话")
+                self.refresh_sessions(select_id=session.get("id"))
+            session_id = self.model.ensure_for_message(text)
+            if not session_id:
                 self.chat.write("[red]无法创建会话[/]")
                 return
-
-            session = self.store.get_session(self.session_id)
-            if session and session.get("title") == "新会话":
-                self.store.rename_session(self.session_id, _session_title(text))
 
             self.busy = True
             self.chat.write(f"[bold cyan]你[/] {escape(text)}")

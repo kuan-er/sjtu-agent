@@ -84,6 +84,19 @@ def test_choose_event_stream_uses_command_path(monkeypatch):
     assert calls[-1] == ("chat", "今天吃什么")
 
 
+def test_cancel_turn_marks_session(monkeypatch):
+    calls = []
+
+    def fake_cancel(session_id):
+        calls.append(session_id)
+
+    monkeypatch.setattr(engine, "_mark_cancelled", fake_cancel)
+    engine.cancel_turn("s1")
+    assert calls == ["s1"]
+    engine.cancel_turn("")
+    assert calls[-1] == "__legacy__"
+
+
 def test_new_store_reuses_web_session_store():
     store = engine.new_store()
     assert isinstance(store, SessionStore)

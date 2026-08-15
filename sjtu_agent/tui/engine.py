@@ -15,6 +15,7 @@ from typing import Any
 from sjtu_agent.commands import is_core_command
 from sjtu_agent.web.server import (
     _decide_approval,
+    _mark_cancelled,
     _stream_chat,
     _stream_command,
 )
@@ -80,6 +81,11 @@ def choose_event_stream(session_id: str, text: str) -> Iterator[dict[str, Any]]:
 def decide_approval(approval_id: str, approved: bool) -> bool:
     """审批 Web/TUI 共享引擎中的危险工具调用。"""
     return _decide_approval(approval_id, approved)
+
+
+def cancel_turn(session_id: str) -> None:
+    """标记当前会话的生成任务为取消（与 /api/chat/cancel 同一通道）。"""
+    _mark_cancelled(session_id or "__legacy__")
 
 
 def new_store() -> SessionStore:
