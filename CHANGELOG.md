@@ -2,7 +2,7 @@
 
 本文件记录各版本的用户可见变化。Agent 通过 `get_recent_updates` 读取（问「最近更新了什么」时），不写入 system prompt。
 
-## Unreleased
+## v0.15.1 (2026-08-15)
 - 🖥 GUI 细节修复：新会话按首条消息自动命名、收紧主页行距、legacy 页增加返回入口
 - 💧 修正水源状态提示：session cookie 已足够搜索/读帖，不再提示需要 User API Key
 
