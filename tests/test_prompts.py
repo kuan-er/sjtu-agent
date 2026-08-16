@@ -4,6 +4,7 @@ from sjtu_agent.agent.prompts import (
     _BOT_SETUP,
     _CORE_PRINCIPLES,
     _DOMAIN_GUIDE,
+    _PROJECT_IDENTITY,
     _TOOL_ROUTING,
     SYSTEM_PROMPT,
 )
@@ -11,7 +12,7 @@ from sjtu_agent.agent.prompts import (
 
 def test_system_prompt_is_module_concatenation():
     """SYSTEM_PROMPT = 各模块常量拼接（行为不变，仅结构化）。"""
-    assert SYSTEM_PROMPT == _CORE_PRINCIPLES + _TOOL_ROUTING + _DOMAIN_GUIDE + _BOT_SETUP
+    assert SYSTEM_PROMPT == _PROJECT_IDENTITY + _CORE_PRINCIPLES + _TOOL_ROUTING + _DOMAIN_GUIDE + _BOT_SETUP
 
 
 def test_no_hardcoded_recent_updates():
@@ -39,9 +40,16 @@ def test_bot_setup_guides_out_of_prefix():
 
 def test_unknown_info_requires_web_search():
     assert "web_search" in SYSTEM_PROMPT
+    assert "github_repo_search" in SYSTEM_PROMPT
     assert "黑话" in SYSTEM_PROMPT
     assert "不认识的缩写" in SYSTEM_PROMPT
     assert "流口水" in SYSTEM_PROMPT
+
+
+def test_project_identity_included():
+    assert "https://github.com/kuan-er/sjtu-agent" in _PROJECT_IDENTITY
+    assert "kuan-er" in _PROJECT_IDENTITY
+    assert "github_repo_search" in _TOOL_ROUTING
 
 
 def test_startup_adapts_to_academic_calendar():
