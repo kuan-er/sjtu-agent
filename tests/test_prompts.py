@@ -46,5 +46,5 @@ def test_unknown_info_requires_web_search():
 
 def test_startup_adapts_to_academic_calendar():
     assert "寒暑假" in _DOMAIN_GUIDE
-    assert "不要罗列作业 DDL、课表、食堂" in _DOMAIN_GUIDE
-    assert "不要逐项罗列所有平台状态" in _DOMAIN_GUIDE
+    assert "不要提作业 DDL、课表、食堂" in _DOMAIN_GUIDE
+    assert "不要在每个新会话开始时自动调用 check_setup" in _DOMAIN_GUIDE

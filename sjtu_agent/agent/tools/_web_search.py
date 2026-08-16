@@ -95,22 +95,57 @@ def _search_duckduckgo(query: str, max_results: int) -> list[dict]:
     resp.raise_for_status()
     page = resp.text
 
-    results: list[dict] = []
-    for match in re.finditer(
-        r'<a[^>]+rel="nofollow"[^>]+href="([^"]+)"[^>]*>(.*?)</a>.*?'
+    links = re.findall(
+        r'<a[^>]+rel="nofollow"[^>]+href="([^"]+)"[^>]*>(.*?)</a>',
+        page,
+        re.DOTALL | re.IGNORECASE,
+    )
+    snippets = re.findall(
         r'<td[^>]*class=["\']result-snippet["\'][^>]*>(.*?)</td>',
         page,
         re.DOTALL | re.IGNORECASE,
-    ):
-        link = html.unescape(match.group(1))
-        title = _clean(match.group(2))
-        snippet = _clean(match.group(3))
+    )
+
+    results: list[dict] = []
+    for index, (raw_link, raw_title) in enumerate(links):
+        link = html.unescape(raw_link)
+        title = _clean(raw_title)
         if not title or not link:
             continue
+        snippet = _clean(snippets[index]) if index < len(snippets) else ""
         results.append({"title": title, "url": link, "snippet": snippet[:300]})
         if len(results) >= max_results:
             break
     return results
+
+
+def _merge_results(batches: list[list[dict]], max_results: int) -> list[dict]:
+    seen: set[str] = set()
+    merged: list[dict] = []
+    for batch in batches:
+        for item in batch:
+            key = item.get("url", "")
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            merged.append(item)
+            if len(merged) >= max_results:
+                return merged
+    return merged
+
+
+def _query_variants(query: str) -> list[str]:
+    """原始查询 + 缩写单独查询，提高黑话命中率。"""
+    variants = [query]
+    acronyms = [token for token in re.findall(r"[A-Za-z0-9]+", query)
+                if token.isupper() and 2 <= len(token) <= 6]
+    if acronyms:
+        variants.append(" ".join(acronyms))
+    base = re.sub(r"\b[A-Z]{2,6}\b", " ", query)
+    base = re.sub(r"\s+", " ", base).strip()
+    if base and base != query:
+        variants.append(base)
+    return variants[:3]
 
 
 def tool_web_search(query: str, max_results: int = 5) -> dict:
@@ -120,14 +155,23 @@ def tool_web_search(query: str, max_results: int = 5) -> dict:
     max_results = max(1, min(int(max_results or 5), 8))
 
     errors: list[str] = []
-    for searcher in (_search_bing, _search_duckduckgo):
-        try:
-            results = searcher(query, max_results)
-            if results:
-                return {"ok": True, "query": query, "results": results}
-            errors.append("no results")
-        except Exception as exc:
-            errors.append(f"{type(exc).__name__}: {exc}")
+    batches: list[list[dict]] = []
+    for variant in _query_variants(query):
+        for searcher in (_search_bing, _search_duckduckgo):
+            try:
+                results = searcher(variant, max_results)
+                if results:
+                    batches.append(results)
+            except Exception as exc:
+                errors.append(f"{type(exc).__name__}: {exc}")
+        merged = _merge_results(batches, max_results)
+        if len(merged) >= 2:
+            return {"ok": True, "query": query, "results": merged}
+        batches = list(merged and [merged] or [])
+
+    merged = _merge_results(batches, max_results)
+    if merged:
+        return {"ok": True, "query": query, "results": merged}
 
     return {
         "ok": False,

@@ -67,3 +67,22 @@ def test_web_search_failure_is_structured(monkeypatch):
     assert result["ok"] is False
     assert "联网搜索失败" in result["error"]
     assert result["results"] == []
+
+
+def test_web_search_tries_acronym_and_full_name_variants(monkeypatch):
+    queries = []
+
+    def fake_get(url, **kwargs):
+        queries.append(url)
+        if "DSH" in url and "DeepSeek" not in url:
+            return FakeResponse(
+                '<li class="b_algo"><h2><a href="https://example.org/dsh">DSH 定义</a></h2>'
+                "<p>DSH 是 DeepSeek Harness。</p></li>"
+            )
+        return FakeResponse("<html></html>")
+
+    monkeypatch.setattr("sjtu_agent.agent.tools._web_search.requests.get", fake_get)
+    result = tool_web_search("DeepSeek Harness DSH 的消息")
+    assert result["ok"] is True
+    assert result["results"][0]["title"] == "DSH 定义"
+    assert any("DSH" in url and "DeepSeek" not in url for url in queries)

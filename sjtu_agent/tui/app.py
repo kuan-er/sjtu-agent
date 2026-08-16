@@ -644,7 +644,9 @@ if TEXTUAL_AVAILABLE:
             try:
                 markdown = self.query_one("#stream-markdown", Markdown)
                 await markdown.update(self.stream_text)
-                self.messages.scroll_end(animate=False)
+                # 只有用户停留在底部时才自动跟随；上翻历史时不要抢滚动位置。
+                if self.messages.is_vertical_scroll_end:
+                    self.messages.scroll_end(animate=False)
             except Exception:
                 # 会话切换 / widget 被移除 / 更新失败都不允许闪退。
                 return
