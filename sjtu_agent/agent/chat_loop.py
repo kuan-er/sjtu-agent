@@ -333,7 +333,18 @@ def _build_date_ctx() -> str:
         f"（query_grades: year='{_cur_xnm}', semester='{_cur_xqm}'）。\n"
         f"「本学年」= {_cur_xnm}学年"
         f"（query_grades: year='{_cur_xnm}', semester=''）。"
-    )
+    ) + _calendar_context(_now.date())
+
+
+def _calendar_context(date) -> str:
+    """校历节假日 / 调休 / 寒暑假上下文；失败时静默返回空串。"""
+    try:
+        from sjtu_agent.calendar import AcademicCalendar
+        from sjtu_agent.paths import DATA_DIR
+        ctx = AcademicCalendar(DATA_DIR).get_context(date)
+        return f"\n{ctx}" if ctx else ""
+    except Exception:
+        return ""
 
 
 def chat_loop(client, model: str):

@@ -34,6 +34,8 @@ const TOOL_LABELS = {
   check_setup: '检查配置',
   download_assignments: '下载作业',
   search_campus: '搜索校园',
+  web_search: '联网搜索',
+  github_repo_search: '搜索 GitHub 仓库',
   browse_mysjtu: '浏览交大门户',
   list_reminders: '查看提醒',
   read_emails: '读取邮件',

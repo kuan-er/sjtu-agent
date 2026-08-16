@@ -106,4 +106,36 @@ class AcademicCalendar:
         if is_mk:
             parts.append(f"今天是调休补课日（{mk_note}），按补课安排上课。")
 
+        # 不在任何校历学期内 → 寒暑假 / 开学前空档，提示模型不要以在校事务起手
+        if not self.get_semester(date):
+            if date.month in (1, 2):
+                break_label = "寒假"
+            elif date.month in (7, 8):
+                break_label = "暑假"
+            else:
+                break_label = "假期/非教学期"
+            parts.append(
+                f"当前不在校历学期内（{break_label}），多数同学不在校内；"
+                "不要主动推荐食堂、课表、作业 DDL 等在校事务。"
+            )
+            next_start = self.next_semester_start(date)
+            if next_start:
+                days = (next_start - date).days
+                if days > 0:
+                    parts.append(f"距下一学期开学还有 {days} 天。")
+
         return " ".join(parts)
+
+    def next_semester_start(self, date: _dt.date | None = None) -> _dt.date | None:
+        """Return the next semester start date strictly after *date*."""
+        if date is None:
+            date = _dt.date.today()
+        self.load()
+        starts: list[_dt.date] = []
+        for sem in self._data.get("semesters", {}).values():
+            try:
+                starts.append(_dt.date.fromisoformat(sem["start_date"]))
+            except (KeyError, ValueError):
+                continue
+        future = sorted(d for d in starts if d > date)
+        return future[0] if future else None

@@ -124,3 +124,18 @@ class TestSemester:
     def test_summer_context_empty(self, cal):
         ctx = cal.get_context(_dt.date(2026, 7, 10))
         assert ctx == ""
+
+    def test_summer_break_context(self, cal):
+        ctx = cal.get_context(_dt.date(2026, 8, 16))
+        assert "暑假" in ctx
+        assert "不在校内" in ctx
+        assert "29 天" in ctx
+
+    def test_winter_break_context(self, cal):
+        ctx = cal.get_context(_dt.date(2026, 1, 20))
+        assert "寒假" in ctx
+        assert "不在校内" in ctx
+
+    def test_next_semester_start(self, cal):
+        assert cal.next_semester_start(_dt.date(2026, 8, 16)) == _dt.date(2026, 9, 14)
+        assert cal.next_semester_start(_dt.date(2027, 1, 20)) is None

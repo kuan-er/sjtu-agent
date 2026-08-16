@@ -644,7 +644,9 @@ if TEXTUAL_AVAILABLE:
             try:
                 markdown = self.query_one("#stream-markdown", Markdown)
                 await markdown.update(self.stream_text)
-                self.messages.scroll_end(animate=False)
+                # 只有用户停留在底部时才自动跟随；上翻历史时不要抢滚动位置。
+                if self.messages.is_vertical_scroll_end:
+                    self.messages.scroll_end(animate=False)
             except Exception:
                 # 会话切换 / widget 被移除 / 更新失败都不允许闪退。
                 return
@@ -660,12 +662,22 @@ if TEXTUAL_AVAILABLE:
                     except Exception:
                         pass
                     self.stream_flush_timer = None
-                # 最后一次刷新用普通 worker（非 exclusive），完成后刷新会话列表。
-                self.schedule_worker(self.flush_stream(), group="stream-final")
+                # 每轮结束后从共享 session store 重建完整消息区，
+                # 避免长流式 Markdown 更新后 VerticalScroll 只显示当前回复。
                 self.schedule_worker(
-                    self.refresh_sessions(select_id=turn_session),
-                    group="sessions-refresh",
+                    self.finalize_turn(turn_session),
+                    group="turn-finalize",
                 )
+            except Exception:
+                return
+
+        async def finalize_turn(self, turn_session: str) -> None:
+            try:
+                await self.flush_stream()
+                if turn_session == self.session_id:
+                    await self.load_session(turn_session)
+                else:
+                    await self.refresh_sessions(select_id=turn_session)
             except Exception:
                 return
 

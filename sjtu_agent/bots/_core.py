@@ -32,7 +32,7 @@ def build_date_ctx() -> str:
     else:
         cur_xnm, cur_xqm = year - 1, "3"
         prev_xnm, prev_xqm = year - 1, "2"
-    return (
+    text = (
         f"\n\n## 当前时间（每轮自动刷新）\n"
         f"现在：{now.strftime('%Y年%m月%d日 %H:%M')}，星期{'一二三四五六日'[now.weekday()]}。\n"
         f"当前学期：{cur_xnm}-{cur_xnm + 1}学年第{cur_xqm}学期。\n"
@@ -41,6 +41,15 @@ def build_date_ctx() -> str:
         f"「本学期」={cur_xnm}-{cur_xnm + 1}学年第{cur_xqm}学期"
         f"（query_grades: year='{cur_xnm}', semester='{cur_xqm}'）。"
     )
+    try:
+        from sjtu_agent.calendar import AcademicCalendar
+        from sjtu_agent.paths import DATA_DIR
+        cal_ctx = AcademicCalendar(DATA_DIR).get_context(now.date())
+        if cal_ctx:
+            text += f"\n{cal_ctx}"
+    except Exception:
+        pass
+    return text
 
 
 def build_profile_ctx() -> str:
