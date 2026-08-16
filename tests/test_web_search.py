@@ -1,0 +1,69 @@
+from __future__ import annotations
+
+from sjtu_agent.agent.tools._web_search import tool_web_search
+
+
+class FakeResponse:
+    def __init__(self, text, status_code=200):
+        self.text = text
+        self.status_code = status_code
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+
+def test_web_search_parses_bing_results(monkeypatch):
+    html = """
+    <html><body>
+    <li class="b_algo">
+      <h2><a href="https://example.com/dsh">DeepSeek Harness 介绍</a></h2>
+      <p>DeepSeek Harness 是一个终端智能体框架。</p>
+    </li>
+    </body></html>
+    """
+    monkeypatch.setattr("sjtu_agent.agent.tools._web_search.requests.get", lambda *a, **k: FakeResponse(html))
+    result = tool_web_search("DSH 是什么意思")
+    assert result["ok"] is True
+    assert result["results"][0]["title"] == "DeepSeek Harness 介绍"
+    assert result["results"][0]["url"] == "https://example.com/dsh"
+    assert "终端智能体" in result["results"][0]["snippet"]
+
+
+def test_web_search_falls_back_to_duckduckgo(monkeypatch):
+    html = """
+    <html><body>
+    <a rel="nofollow" href="https://example.org/item" class="result-link">Fallback Result</a>
+    <td class="result-snippet">fallback snippet</td>
+    </body></html>
+    """
+    calls = {"n": 0}
+
+    def fake_get(url, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("bing blocked")
+        return FakeResponse(html)
+
+    monkeypatch.setattr("sjtu_agent.agent.tools._web_search.requests.get", fake_get)
+    result = tool_web_search("fallback query")
+    assert result["ok"] is True
+    assert calls["n"] == 2
+    assert result["results"][0]["title"] == "Fallback Result"
+
+
+def test_web_search_empty_query():
+    result = tool_web_search("  ")
+    assert result["ok"] is False
+    assert "query" in result["error"]
+
+
+def test_web_search_failure_is_structured(monkeypatch):
+    def fake_get(*a, **k):
+        raise RuntimeError("offline")
+
+    monkeypatch.setattr("sjtu_agent.agent.tools._web_search.requests.get", fake_get)
+    result = tool_web_search("anything")
+    assert result["ok"] is False
+    assert "联网搜索失败" in result["error"]
+    assert result["results"] == []

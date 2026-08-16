@@ -475,10 +475,19 @@ def _encode_command_result(result) -> str:
 def _date_context() -> str:
     import datetime as _dt
     now = _dt.datetime.now()
-    return (
+    text = (
         f"\n\n## 当前时间\n"
         f"现在：{now.strftime('%Y年%m月%d日 %H:%M')}，星期{'一二三四五六日'[now.weekday()]}。"
     )
+    try:
+        from sjtu_agent.calendar import AcademicCalendar
+        from sjtu_agent.paths import DATA_DIR
+        cal_ctx = AcademicCalendar(DATA_DIR).get_context(now.date())
+        if cal_ctx:
+            text += f"\n{cal_ctx}"
+    except Exception:
+        pass
+    return text
 
 
 def _stream_chat(user_message: str, session_id: str | None = None):

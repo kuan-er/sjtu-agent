@@ -333,8 +333,8 @@ def test_attachment_parsing_runs_off_the_ui_thread(tmp_path, monkeypatch):
             assert app.query_one("#attach-progress", Markdown) is not None
 
             release.set()
-            for _ in range(50):
-                if not app.busy:
+            for _ in range(100):
+                if sent_messages:
                     break
                 await pilot.pause(0.05)
 

@@ -116,6 +116,10 @@ from sjtu_agent.agent.tools._dining import (
     tool_recommend_canteen, tool_record_dining_choice,
     tool_get_dining_history,
 )
+from sjtu_agent.agent.tools._web_search import (
+    TOOLS_ENTRIES as _WEB_SEARCH_TOOLS,
+    tool_web_search,
+)
 from sjtu_agent.agent.tools._changelog import (
     TOOLS_ENTRIES as _CHANGELOG_TOOLS,
     tool_get_recent_updates,
@@ -927,6 +931,7 @@ TOOLS = [
     *_EMAIL_TOOLS,
     *_CANVAS_FILES_TOOLS,
     *_DINING_TOOLS,
+    *_WEB_SEARCH_TOOLS,
 ]
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -4111,6 +4116,7 @@ _TOOL_REGISTRY = {
     "search_emails": tool_search_emails,
     "send_email": tool_send_email,
     "fetch_url": tool_fetch_url,
+    "web_search": tool_web_search,
     "execute_python": tool_execute_python,
     "update_user_profile": tool_update_user_profile,
     "get_user_profile": _no_args(tool_get_user_profile),

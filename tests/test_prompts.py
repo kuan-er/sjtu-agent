@@ -35,3 +35,16 @@ def test_bot_setup_guides_out_of_prefix():
     """4 平台详细引导已移出 system prompt（改为按需工具）。"""
     assert "open.feishu.cn" not in SYSTEM_PROMPT
     assert "BotFather" not in SYSTEM_PROMPT
+
+
+def test_unknown_info_requires_web_search():
+    assert "web_search" in SYSTEM_PROMPT
+    assert "黑话" in SYSTEM_PROMPT
+    assert "不认识的缩写" in SYSTEM_PROMPT
+    assert "流口水" in SYSTEM_PROMPT
+
+
+def test_startup_adapts_to_academic_calendar():
+    assert "寒暑假" in _DOMAIN_GUIDE
+    assert "不要罗列作业 DDL、课表、食堂" in _DOMAIN_GUIDE
+    assert "不要逐项罗列所有平台状态" in _DOMAIN_GUIDE
