@@ -51,9 +51,11 @@ def test_streaming_reply_updates_markdown_widget(tmp_path, monkeypatch):
     model = TuiSessionModel(store)
     model.create_session("新会话")
 
-    def fake_stream(user_message, session_id=None):
-        yield {"kind": "token", "text": "# 标题\n\n"}
-        yield {"kind": "token", "text": "**加粗** 和列表：\n\n- A\n- B"}
+    def fake_stream(session_id, user_message):
+        assistant = "# 标题\n\n**加粗** 和列表：\n\n- A\n- B"
+        yield {"kind": "token", "text": assistant}
+        store.append_message(session_id, "user", user_message)
+        store.append_message(session_id, "assistant", assistant)
         yield {"kind": "done"}
 
     monkeypatch.setattr("sjtu_agent.tui.app.iter_chat_events", fake_stream)
@@ -67,15 +69,17 @@ def test_streaming_reply_updates_markdown_widget(tmp_path, monkeypatch):
             prompt.focus()
             prompt.value = "hello"
             await pilot.press("enter")
-            for _ in range(20):
+            for _ in range(30):
                 if not app.busy:
                     break
                 await pilot.pause(0.1)
 
             assert app.busy is False
-            stream = app.query_one("#stream-markdown", Markdown)
-            assert "加粗" in stream.source
-            assert "列表" in stream.source
+            markdown_widgets = list(app.messages.query(Markdown))
+            sources = "\n".join(w.source for w in markdown_widgets)
+            assert "hello" in sources
+            assert "加粗" in sources
+            assert "列表" in sources
 
     _run(scenario())
 
@@ -85,8 +89,10 @@ def test_stream_exception_is_rendered_without_thread_crash(tmp_path, monkeypatch
     model = TuiSessionModel(store)
     model.create_session("新会话")
 
-    def fake_stream(user_message, session_id=None):
+    def fake_stream(session_id, user_message):
         yield {"kind": "token", "text": "部分内容"}
+        store.append_message(session_id, "user", user_message)
+        store.append_message(session_id, "assistant", "mock stream failure")
         raise RuntimeError("mock stream failure")
 
     monkeypatch.setattr("sjtu_agent.tui.app.iter_chat_events", fake_stream)
@@ -100,14 +106,14 @@ def test_stream_exception_is_rendered_without_thread_crash(tmp_path, monkeypatch
             prompt.focus()
             prompt.value = "hello"
             await pilot.press("enter")
-            for _ in range(20):
+            for _ in range(30):
                 if not app.busy:
                     break
                 await pilot.pause(0.1)
 
             assert app.busy is False
-            stream = app.query_one("#stream-markdown", Markdown)
-            assert "mock stream failure" in stream.source
+            sources = "\n".join(w.source for w in app.messages.query(Markdown))
+            assert "mock stream failure" in sources
 
     _run(scenario())
 
@@ -146,12 +152,16 @@ def test_high_frequency_stream_does_not_crash_app(tmp_path, monkeypatch):
     model = TuiSessionModel(store)
     model.create_session("新会话")
 
-    def fake_stream(user_message, session_id=None):
+    def fake_stream(session_id, user_message):
+        parts = []
         for index in range(200):
+            parts.append(f"token-{index} ")
             yield {"kind": "token", "text": f"token-{index} "}
             if index % 20 == 0:
                 import time
                 time.sleep(0.005)
+        store.append_message(session_id, "user", user_message)
+        store.append_message(session_id, "assistant", "".join(parts))
         yield {"kind": "done"}
 
     monkeypatch.setattr("sjtu_agent.tui.app.iter_chat_events", fake_stream)
@@ -171,8 +181,8 @@ def test_high_frequency_stream_does_not_crash_app(tmp_path, monkeypatch):
                 await pilot.pause(0.05)
 
             assert app.busy is False
-            stream = app.query_one("#stream-markdown", Markdown)
-            assert "token-199" in stream.source
+            sources = "\n".join(w.source for w in app.messages.query(Markdown))
+            assert "token-199" in sources
 
     _run(scenario())
 
