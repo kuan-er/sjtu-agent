@@ -149,7 +149,7 @@ New code should go into `sjtu_agent/`, not these root or script files.
 
 ### Refactoring status
 
-Refactoring status (as of v0.19.0):
-- **Done**: agent.py split into `sjtu_agent/agent/`; tools split into `agent/tools/` subpackage; ConfigStore + protected write path; `run_tool` registry; Notifier abstraction; unified logging; Web GUI (multi-session, attachments, approvals); shared slash-command layer (`sjtu_agent/commands/`); Textual TUI (`sjtu-agent tui`, reuses the Web SQLite session store and SSE engine); TUI command cards, session rename/delete, and whitelisted `/attach` flow
+Refactoring status (as of v0.20.0):
+- **Done**: agent.py split into `sjtu_agent/agent/`; tools split into `agent/tools/` subpackage; ConfigStore + protected write path; `run_tool` registry; Notifier abstraction; unified logging; Web GUI (multi-session, attachments, approvals); shared slash-command layer (`sjtu_agent/commands/`); Textual TUI (shared session store + SSE engine, command cards, session actions, whitelisted `/attach`); web / GitHub search tools (`_web_search`, `_github_search`); academic-calendar-aware date contexts and startup behavior; project identity in system prompt
 - **Partial/deferred**: full BaseBotRunner transport abstraction to deduplicate all bot glue; BasePlatform for DDL scrapers; `/hw do` fine-grained progress callbacks
 - CI workflow exists (`.github/workflows/test.yml`, installs `[tui]`) but coverage is thin

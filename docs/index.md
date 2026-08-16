@@ -5,10 +5,11 @@ SJTU Agent 是面向上海交通大学学生的校园助手，提供终端对话
 ## 快速导航
 
 - [安装与快速开始](https://github.com/kuan-er/sjtu-agent#%E5%BF%AB%E9%80%9F%E5%BC%80%E5%A7%8B)
+- [Web GUI](WEB_GUI_REDESIGN.md)
+- [Textual TUI](TUI.md)
 - [服务器部署](SERVER_DEPLOYMENT.md)
 - [排错手册](TROUBLESHOOTING.md)
 - [飞书 Bot 排错](feishu-bot-troubleshooting.md)
-- [Web GUI](WEB_GUI_REDESIGN.md)
 
 ## 常用命令
 

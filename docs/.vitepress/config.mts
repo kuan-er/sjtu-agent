@@ -22,6 +22,7 @@ export default defineConfig({
         items: [
           { text: '文档首页', link: '/' },
           { text: 'Web GUI', link: '/WEB_GUI_REDESIGN' },
+          { text: 'Textual TUI', link: '/TUI' },
           { text: '服务器部署', link: '/SERVER_DEPLOYMENT' },
           { text: '排错手册', link: '/TROUBLESHOOTING' },
           { text: '飞书 Bot 排错', link: '/feishu-bot-troubleshooting' },

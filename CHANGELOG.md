@@ -2,6 +2,13 @@
 
 本文件记录各版本的用户可见变化。Agent 通过 `get_recent_updates` 读取（问「最近更新了什么」时），不写入 system prompt。
 
+## v0.20.0 (2026-08-16)
+- 🧠 智商优化：新会话不再自动 check_setup 抢戏，直接回答首轮问题；启动开场按校历自适应（寒暑假不推荐在校事务，并提示距开学天数）
+- 🔍 新增 `web_search`：Bing + DuckDuckGo 双引擎合并，自动生成缩写 / 全称查询变体；未知名词 / 黑话 / 时效性信息必须先搜索
+- 🐙 新增 `github_repo_search`：GitHub REST API 仓库搜索；Agent 认识自己的仓库（kuan-er/sjtu-agent）与作者
+- 🖥 TUI 修复：流式输出时可上翻历史；每轮结束后重建完整会话历史，不再只剩当前回复
+- 📝 README 全面重写：按场景组织能力、界面与配置，作为项目主牌面
+
 ## v0.19.0 (2026-08-16)
 - 🃏 TUI 结构化命令卡片：`/eat` `/news` `/hw` `/template` 等命令结果按 `{view, text, data}` 渲染成终端 Markdown 卡片，历史会话同样生效
 - ⌨️ TUI 会话管理快捷键：`ctrl+r` 重命名、`ctrl+d` 删除（二次确认），删除后自动切换/新建会话

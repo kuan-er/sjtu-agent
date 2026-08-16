@@ -194,6 +194,13 @@ A browser-based chat interface with persistent, synchronized conversations:
 - **Slash commands**: quick chips above the input (homework / news / dining / template / DDL / settings), a `/` completion panel, and structured result cards per command type
 - The legacy config page remains at `/legacy`
 
+## Smarter Context & Search
+
+- New conversations answer the first question directly instead of running `check_setup` first.
+- Startup behavior follows the academic calendar: during winter / summer breaks the agent does not push on-campus tasks and reports days until the next semester.
+- `web_search` merges Bing + DuckDuckGo results and retries acronym / full-name query variants for jargon and unknown terms.
+- `github_repo_search` searches GitHub repositories via the REST API; the agent knows its own repository is `github.com/kuan-er/sjtu-agent` by `kuan-er`.
+
 ## MCP & Skills
 
 The Agent can expose its own tools as an MCP server and load external MCP servers as extra tools. External MCP server config lives in `config.json` under `mcp_servers`; enabled prompt-only skills live under `skills.enabled`.
@@ -625,7 +632,7 @@ The Feishu Bot self-checks credentials, ChromaDB, and Agent API connectivity on 
 
 ## Version
 
-Current version: **v0.19.0**. Release history: [Releases](https://github.com/kuan-er/sjtu-agent/releases).
+Current version: **v0.20.0**. Release history: [Releases](https://github.com/kuan-er/sjtu-agent/releases).
 
 ## Release Notes
 
