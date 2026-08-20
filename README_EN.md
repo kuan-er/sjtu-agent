@@ -373,8 +373,8 @@ In your new app:
 | Can't find bot in Feishu | Version not published / review not approved / scope doesn't include you |
 | Bot online but won't reply | Events & Callbacks not switched to Long Connection, or `im.message.receive_v1` not subscribed |
 | Permission denied error | Forgot to request `im:message:send_as_bot` |
-| Verify App ID/Secret | Run `sjtu-agent feishu-bot -- --test` (note the `--`) |
-| Find your open_id | Run `sjtu-agent feishu-bot -- --whoami`, then send any message |
+| Verify App ID/Secret | Run `sjtu-agent feishu-bot --test` |
+| Find your open_id | Run `sjtu-agent feishu-bot --whoami`, then send any message |
 
 ## Feishu Bot Slash Commands
 
