@@ -2,6 +2,9 @@
 
 本文件记录各版本的用户可见变化。Agent 通过 `get_recent_updates` 读取（问「最近更新了什么」时），不写入 system prompt。
 
+## Unreleased
+- 🔄 新增 `sjtu-agent daemons restart`：一键重启后台服务（停止 → 按安装清单参数重建并启动），支持 `--services` 子集选择（issue #149-5）
+
 ## v0.20.1 (2026-08-20)
 - ⏱️ 飞书 Bot 请求超时阈值放宽并可配置：`feishu_capture_timeout`（默认 600 秒，设 0 不限时，与 Telegram 等端一致）替代旧的固定 120 秒；等待期间每 `feishu_progress_interval` 秒（默认 120 秒，最多 3 条）发送"仍在处理中"心跳
 - 🔌 超时后自动做 15 秒 API 健康探测，区分"密钥失效/服务不可用"与"模型只是慢/任务复杂"，并给出对应处理建议；日志记录超时任务的实际完成耗时，便于判断阈值是否需要继续调大

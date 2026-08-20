@@ -16,6 +16,7 @@ from sjtu_agent.scheduler import (
     install_daemons,
     list_deployments,
     resync_daemons,
+    restart_daemons,
     uninstall_daemons,
 )
 from sjtu_agent.setup_wizard import register_setup_parser
@@ -568,6 +569,20 @@ def _cmd_daemons_resync(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_daemons_restart(args: argparse.Namespace) -> int:
+    try:
+        payload = restart_daemons(
+            service_names=tuple(args.services) if args.services else None,
+            backend=args.backend,
+        )
+    except (RuntimeError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    print_json(payload)
+    failed = [r for r in payload.get("results", []) if not r.get("restarted")]
+    return 1 if failed else 0
+
+
 def _prompt_config_password(confirm: bool) -> str:
     """交互式读取配置归档密码；无 TTY 时从 SJTU_AGENT_CONFIG_PASSWORD 读取。"""
     from sjtu_agent.config_transfer import password_from_env
@@ -978,6 +993,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="python executable to use (default: current interpreter)",
     )
     daemons_resync_parser.set_defaults(func=_cmd_daemons_resync)
+
+    daemons_restart_parser = daemons_sub.add_parser(
+        "restart",
+        help="restart background services (stop + reinstall, preserving manifest settings)",
+    )
+    daemons_restart_parser.add_argument(
+        "--services",
+        nargs="+",
+        choices=available_service_names(),
+        help="subset of services to restart (default: all installed)",
+    )
+    daemons_restart_parser.add_argument(
+        "--backend",
+        choices=["taskschd", "psmux"],
+        default="taskschd",
+        help="(Windows) 后端选择，用于从未安装过的服务首次安装：taskschd 或 psmux",
+    )
+    daemons_restart_parser.set_defaults(func=_cmd_daemons_restart)
 
     export_config_parser = subparsers.add_parser(
         "export-config",

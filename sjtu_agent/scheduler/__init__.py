@@ -180,6 +180,107 @@ def daemon_status(
     return _status(service_names=service_names, **platform_kwargs)
 
 
+def restart_daemons(
+    service_names: tuple[str, ...] | None = None,
+    python_executable: Path | None = None,
+    backend: str = "taskschd",
+    **platform_kwargs,
+) -> dict:
+    """
+    重启后台守护进程：先停止（uninstall）再按清单参数重建并启动（install）。
+
+    后端没有独立的 stop/start 原语（launchd/psmux/taskschd/systemd 都只暴露
+    install/uninstall/status），因此 restart 通用实现为 uninstall→install，
+    语义等价于"停掉旧进程 → 用记录的参数重新注册并拉起"。
+
+    参数：
+        service_names       要重启的服务子集；None 表示重启清单里的全部服务
+        python_executable   使用的 Python 解释器路径，默认当前解释器
+        backend             请求的服务从未安装过时的后端（Windows: taskschd/psmux）
+
+    已安装过的服务会保留清单中的 daily_report_time / remind_interval /
+    telegram_throttle / output_dir 等参数；未安装过的服务按默认参数安装。
+    """
+    current_py = str(python_executable or sys.executable)
+    selected = set(service_names or ())
+    results: list[dict] = []
+
+    for deployment in list_deployments():
+        dep_backend = deployment["backend"]
+        dep_services = tuple(deployment["services"])
+        if selected:
+            wanted = tuple(sorted(set(dep_services) & selected))
+            if not wanted:
+                continue
+        else:
+            wanted = dep_services
+        if not wanted:
+            continue
+
+        kwargs: dict = {
+            "daily_report_time": tuple(deployment.get("daily_report_time") or (22, 0)),
+            "remind_interval": int(deployment.get("remind_interval") or 60),
+            "telegram_throttle": int(deployment.get("telegram_throttle") or 10),
+        }
+        output_dir = deployment.get("output_dir")
+        if output_dir:
+            kwargs["output_dir"] = Path(output_dir)
+        else:
+            kwargs["output_dir"] = platform_kwargs.get("output_dir")
+
+        try:
+            uninstall_daemons(service_names=wanted, backend=dep_backend)
+            install_daemons(
+                service_names=wanted,
+                python_executable=Path(current_py),
+                backend=dep_backend,
+                **kwargs,
+            )
+            results.append({
+                "backend": dep_backend,
+                "services": list(wanted),
+                "restarted": True,
+            })
+        except Exception as exc:
+            results.append({
+                "backend": dep_backend,
+                "services": list(wanted),
+                "restarted": False,
+                "error": str(exc),
+            })
+        selected -= set(wanted)
+
+    # 请求的服务从未安装过 → 直接按默认参数安装（等价首次安装并启动）
+    if selected:
+        try:
+            install_daemons(
+                service_names=tuple(sorted(selected)),
+                python_executable=Path(current_py),
+                backend=backend,
+                **platform_kwargs,
+            )
+            results.append({
+                "backend": backend,
+                "services": sorted(selected),
+                "restarted": True,
+            })
+        except Exception as exc:
+            results.append({
+                "backend": backend,
+                "services": sorted(selected),
+                "restarted": False,
+                "error": str(exc),
+            })
+
+    return {
+        "platform": current_platform_name(),
+        "python_executable": current_py,
+        "manifest_path": str(DAEMON_MANIFEST_PATH),
+        "results": results,
+        "any_restarted": any(r.get("restarted") for r in results),
+    }
+
+
 def resync_daemons(python_executable: Path | None = None) -> dict:
     """
     根据安装清单恢复此前安装过的后台服务。
