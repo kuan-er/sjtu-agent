@@ -636,3 +636,77 @@ def test_process_in_thread_progress_pings_capped(monkeypatch):
     assert len(pings) <= 3  # _MAX_PROGRESS_PINGS 限频
     assert replies[-1] == "done"
     assert len(conv["messages"]) == 1  # 成功提交
+
+
+# ── 富文本（post）解析（issue #149-1） ───────────────────────────────────────
+
+def _post_content(text_only: str = "", elements=None):
+    """构造飞书 post 消息 content JSON。elements 为一行元素列表（嵌套行）。"""
+    if elements is None:
+        elements = [{"tag": "text", "text": text_only}]
+    return json.dumps({"title": "", "content": [elements]}, ensure_ascii=False)
+
+
+def test_extract_post_content_plain_text():
+    from scripts.feishu_bot import _extract_post_content
+    raw = _post_content("你好，请查论文")
+    result = _extract_post_content(raw)
+    assert result["text"] == "你好，请查论文"
+    assert result["image_keys"] == []
+
+
+def test_extract_post_content_multiple_lines_and_tags():
+    from scripts.feishu_bot import _extract_post_content
+    content = [
+        [{"tag": "text", "text": "第一段文字"}, {"tag": "at", "user_id": "ou_1", "user_name": "小明"}],
+        [{"tag": "a", "text": "链接文字", "href": "https://example.com"}, {"tag": "text", "text": " 结尾"}],
+    ]
+    raw = json.dumps({"title": "标题", "content": content}, ensure_ascii=False)
+    result = _extract_post_content(raw)
+    assert "第一段文字" in result["text"]
+    assert "小明" in result["text"]
+    assert "链接文字" in result["text"]
+    assert "标题" in result["text"]  # 标题并入正文（若有）
+    assert result["image_keys"] == []
+
+
+def test_extract_post_content_with_images():
+    from scripts.feishu_bot import _extract_post_content
+    content = [
+        [
+            {"tag": "text", "text": "看看这两张图"},
+            {"tag": "img", "image_key": "img_v1_1"},
+            {"tag": "img", "image_key": "img_v1_2"},
+        ],
+        [{"tag": "text", "text": "尾部文字"}],
+    ]
+    raw = json.dumps({"title": "", "content": content}, ensure_ascii=False)
+    result = _extract_post_content(raw)
+    assert result["text"] == "看看这两张图\n尾部文字"  # 行间保留换行
+    assert result["image_keys"] == ["img_v1_1", "img_v1_2"]
+
+
+def test_extract_post_content_malformed():
+    from scripts.feishu_bot import _extract_post_content
+    assert _extract_post_content("not json") == {"text": "", "image_keys": []}
+    assert _extract_post_content(json.dumps({"content": "oops"})) == {"text": "", "image_keys": []}
+
+
+def test_build_vision_content_openai_and_anthropic():
+    import base64 as _b64
+
+    from scripts import feishu_bot
+    img1, img2 = b"\x89PNG123", b"\x89PNG456"
+    b64_1 = _b64.b64encode(img1).decode()
+    b64_2 = _b64.b64encode(img2).decode()
+
+    blocks = feishu_bot._build_vision_content("deepseek-vl", "描述图片", [img1, img2])
+    assert blocks[0] == {"type": "text", "text": "描述图片"}
+    assert blocks[1] == {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_1}"}}
+    assert blocks[2] == {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_2}"}}
+
+    an_blocks = feishu_bot._build_vision_content("claude-4-sonnet", "desc", [img1])
+    assert an_blocks[1] == {
+        "type": "image",
+        "source": {"type": "base64", "media_type": "image/jpeg", "data": b64_1},
+    }
