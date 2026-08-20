@@ -710,3 +710,22 @@ def test_build_vision_content_openai_and_anthropic():
         "type": "image",
         "source": {"type": "base64", "media_type": "image/jpeg", "data": b64_1},
     }
+
+
+# ── 附件解析失败如实透出 / 防幻觉（issue #149-4） ────────────────────────────
+
+def test_parse_fail_context_includes_reason_and_anti_hallucination():
+    """失败上下文必须包含真实原因 + 明确禁止编造'权限/白名单'类说法。"""
+    from scripts import feishu_bot
+    ctx = feishu_bot._parse_fail_context("paddleocr backend is not installed")
+    assert "paddleocr backend is not installed" in ctx
+    assert "如实" in ctx and "不要编造" in ctx
+    assert "权限" in ctx or "白名单" in ctx  # 点名被禁止的说法，堵死幻觉
+
+
+def test_parse_fail_context_empty_reason_says_unknown():
+    """原因为空时使用中性表述（'内容提取失败'），而不是留白让模型编。"""
+    from scripts import feishu_bot
+    ctx = feishu_bot._parse_fail_context("")
+    assert "内容提取失败" in ctx
+    assert "不要编造" in ctx
