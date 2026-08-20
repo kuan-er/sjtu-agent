@@ -130,7 +130,97 @@ sjtu-agent update
 sjtu-agent daemons resync
 ```
 
-## 6. 远程 Web 配置页（可选）
+## 6. 定时推送怎么生效（提醒 / 日报）
+
+**"好不容易设置的提醒却不准时响" 通常不是功能问题，而是守护进程没装/没跑。**
+
+推送链路是完整的：
+
+```
+聊天里让 Agent 设置提醒（`add_reminder` 工具，写入数据目录 `reminders.json`）
+  → 写入数据目录 reminders.json
+  → remind-check 守护进程（每分钟触发）
+  → send_notification → 你配置的通知渠道（飞书 / Telegram 等）
+```
+
+设置提醒的入口（`scripts/remind_check.py` 读取 `reminders.json`，`reminders` 工具写它）与日报同源，因此只要 `remind-check` 服务在跑，你的用户级提醒就会**准时主动推送**，不需要等你来找 bot。
+
+安装与验证：
+
+```bash
+# 安装（务必包含 remind-check；其余按需）
+sjtu-agent install-daemons --no-browser --services remind-check feishu-bot daily-report
+
+# 确认在跑
+sjtu-agent daemons status
+sjtu-agent remind-check --list          # 打印当前所有提醒与状态
+
+# 改了提醒后想让服务立刻重载/重启
+sjtu-agent daemons restart --services remind-check
+```
+
+推送渠道需要满足：
+
+- **飞书**：`notify_channels` 含 `feishu`，且数据目录里已存 `feishu_open_id`（bot 收到过你的消息就会自动保存，见 config.json）。
+- **Telegram**：`telegram_token` / `telegram_allowed_ids` 配置好，`notify_channels` 含 `telegram`，且已给 bot 发过消息以获得 chat id。
+
+常见排查：
+
+| 现象 | 原因 | 处理 |
+| --- | --- | --- |
+| 设置了提醒但不响 | remind-check 服务没装/没跑 | 上面 install-daemons + daemons status |
+| 渠道没收到但日志正常 | notify_channels 没含该渠道，或目标 id 未保存 | 检查 config.json 的 `notify_channels` 与 `feishu_open_id` / telegram chat |
+| bot 回复"只能你来找我时顺便提醒" | **模型不知道你的部署情况，是错误断言**（功能本身存在） | 按本节安装 daemon；或运行 `sjtu-agent daemons status` 后确认可推送 |
+
+> 注意：`remind-check` 每分钟轮询一次，秒级精度不保证；跨时区/夏令时按服务器本地时间。
+
+## 7. 工作区：作业目录与数据目录（跨机器访问）
+
+项目有两类"工作区"，都需要在服务器部署时想清楚放哪：
+
+**① 数据目录**（`SJTU_AGENT_HOME`，默认 `~/.local/share/sjtu-agent`）
+
+存放 `config.json` / `agent_config.json` / `.env`、`reminders.json`、`user_profile.json`、`web_sessions.sqlite3`、`logs/`、`feishu_media/` 等全部运行时状态。跨机迁移就用 `export-config` / `import-config`（见第 2 节）。要想把数据放独立磁盘：
+
+```bash
+export SJTU_AGENT_HOME=/opt/sjtu-agent
+# systemd 用户环境也要能看到同一个值：
+systemctl --user set-environment SJTU_AGENT_HOME=/opt/sjtu-agent
+```
+
+**② 作业 / 附件目录**（`SJTU_HOMEWORK_DIR`，默认 `数据目录/assignments`）
+
+Agent 把作业文件、`/hw do` 等工作产物放在这里。设定：
+
+```bash
+export SJTU_HOMEWORK_DIR=/home/you/assignments
+```
+
+**服务器 + 本机共用一套工作区的三种方案**（按场景选）：
+
+- **方案 A：服务器为主，本机远程挂载（推荐做作业）**
+  服务器 `assignments/` 通过 SSHFS 挂到本机（macOS 需 `brew install macfuse`）：
+  ```bash
+  mkdir -p ~/assignments
+  sshfs user@server:/home/you/assignments ~/assignments -o reconnect
+  # 或用 rsync 双向同步（处理简单、无需常驻挂载）
+  rsync -avz --delete user@server:/home/you/assignments/ ~/assignments/
+  ```
+  本机用 IDE 直接编辑，Agent 在服务器上读到的就是同一份文件。
+
+- **方案 B：本机为主，服务器同步过去**
+  本机是唯一工作副本，改完推送：
+  ```bash
+  rsync -avz --delete ~/assignments/ user@server:/home/you/assignments/
+  ```
+  适合本机离线编辑、偶尔让服务器跑重活（如编译/查 DDL）的场景。
+
+- **方案 C：两边各自独立（最稳，但不同步）**
+  谁加工就在谁的 `assignments/` 里跑，不跨机共享。适合 Agent 只在一边用的情况。
+
+> 安全注意：把 `assignments/` 当普通文件处理即可，它包含作业/课程资料；但**不要把 `SJTU_AGENT_HOME`（尤其含密钥的 `config.json` / `.env`）rsync 到不信任机器或网盘**。跨机传配置用第 2 节的 `export-config`（支持加密，`--encrypt`）。
+
+## 8. 远程 Web 配置页（可选）
 
 Web UI 默认只监听 `127.0.0.1`。服务器上有两种安全打开方式：
 
@@ -160,7 +250,7 @@ sjtu-agent web-proxy --type caddy --domain sjtu-agent.example.com
 
 **不要**把带明文 HTTP 的 `0.0.0.0:7860` 直接暴露到公网；Web UI 的访问令牌走 Cookie，明文传输会被窃取。
 
-## 7. 已知限制与建议
+## 9. 已知限制与建议
 
 - jAccount 风控：服务器 IP 登录校园平台可能触发异地登录。优先复用本机复制的 Cookie；失效后在本地刷新再同步，或手动在服务器上完成一次带二次验证的登录。
 - Canvas / AI 好课 / phycai 的自动登录依赖 Playwright Chromium；无桌面 Linux 也能 headless 运行，但要先装系统依赖（`playwright install --with-deps chromium`）。
