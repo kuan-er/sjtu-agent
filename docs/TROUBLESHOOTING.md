@@ -220,9 +220,86 @@ Windows 若下载超时，可以设置代理后重试，或从安装脚本加 `-
 
 飞书专属排查见 [docs/feishu-bot-troubleshooting.md](feishu-bot-troubleshooting.md)。
 
+## 8. 服务器部署常见问题
+
+### 手动安装 `pip install -e .` 报错
+
+报错中包含：
+
+```bash
+ERROR: Could not find a version that satisfies the requirement setuptools>=69 (from versions: none)
+```
+
+这种情况通常是 Python 版本问题，先运行 `python --version`，若 python 版本过低（<=3.7）则需升级：
+
+```bash
+sudo apt update
+sudo apt install python3.14
+```
+
+若版本较新，则可能是服务器提供商的 `pip` 镜像老旧，可使用清华镜像源替代安装：
+
+```bash
+pip install -e /home/ubuntu/sjtu-agent -i https://pypi.tuna.tsinghua.edu.cn/simple
+```
+
+### 传递依赖版本冲突
+
+例如：OCR 插件中的依赖 `paddlex` 需要 `pyyaml==6.0.2`，而 `kubernetes` 要求 `pyyaml>=6.0.3`。
+
+运行：
+
+```bash
+python -c "import kubernetes; print('kubernetes OK')"
+python -c "import paddlex; print('paddlex OK')"
+```
+若分别输出 `kubernetes OK` 和 `paddlex OK`，则说明实际依赖可用，无需在意报错。
+
+### 运行 `pip` 安装报错
+
+报错如下：
+
+```bash
+error: externally-managed-environment
+× This environment is externally managed
+╰─> To install Python packages system-wide, try apt install
+python3-xyz, where xyz is the package you are trying to
+install.
+If you wish to install a non-Debian-packaged Python package,
+create a virtual environment using python3 -m venv path/to/venv.
+Then use path/to/venv/bin/python and path/to/venv/bin/pip. Make
+sure you have python3-full installed.
+If you wish to install a non-Debian packaged Python application,
+it may be easiest to use pipx install xyz, which will manage a
+virtual environment for you. Make sure you have pipx installed.
+See /usr/share/doc/python3.14/README.venv for more information.
+note: If you believe this is a mistake, please contact your Python installation or OS distribution provider. You can override this, at the risk of breaking your Python installation or OS, by passing --break-system-packages.
+hint: See PEP 668 for the detailed specification.
+```
+
+先运行：
+
+```bash
+which pip
+which python
+```
+
+终端会输出两个路径。观察路径中是否存在 `.venv` 字样。
+
+若返回类似于：
+
+```bash
+$ which pip
+/usr/bin/pip # 没有 .venv
+$ which python
+/home/ubuntu/sjtu-agent/.venv/bin/python # 有 .venv
+```
+
+则说明 venv 创建不完整，运行： `python3 -m venv --upgrade-deps .venv` 使得 venv 自带最新 pip，再运行 `which` 指令检查 `pip` 是否位于虚拟环境中。
+
 ---
 
-## 8. 其他常见问题
+## 9. 其他常见问题
 
 ### 配置到底存在哪里？
 
