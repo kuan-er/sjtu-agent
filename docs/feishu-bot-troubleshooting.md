@@ -98,3 +98,28 @@ psmux -L sjtu-agent server-info
 # 重启 bot（psmux 后端）
 sjtu-agent install-daemons --backend psmux --services feishu-bot
 ```
+
+## 长时间指令报"处理超时"
+
+**症状**：输入需要 AI 处理较久的指令后，机器人回复"处理超时，请稍后重试"。
+
+**原因**：飞书 bot 对单轮处理有一个整轮等待上限（旧版本固定 120 秒）。而引擎内部单次 LLM 请求的预算就是 180 秒、一轮最多可包含 8 次工具迭代加长时间工具（Canvas / Playwright / MATLAB 等），120 秒比引擎自身预算还小，正常但较慢的请求会被误杀。Telegram / WeChat / QQ 与网页版没有这个整轮硬超时（网页版还有流式 token 进度），只有飞书 bot 受影响。
+
+**调节方式**（改配置即可，无需重启 bot，下一条消息生效）：
+
+```json
+{
+  "feishu_capture_timeout": 600,
+  "feishu_progress_interval": 120
+}
+```
+
+- `feishu_capture_timeout`：单轮处理最大等待秒数，默认 `600`（10 分钟）；设 `0` 表示不限时（与 Telegram 等端行为一致）。
+- `feishu_progress_interval`：等待期间发送"仍在处理中"心跳的间隔秒数，默认 `120`，最多发 3 条，避免刷屏。
+
+**超时后的行为**：会先做一次 15 秒的 API 健康探测（`max_tokens=1` 的最小请求）来区分故障原因：
+
+- 探测失败 → 提示"检测到 API 端点异常"，指向密钥失效 / 服务不可用 / 网络问题，请检查 `api_key`、`base_url`、模型名。
+- 探测正常 → 提示"模型响应较慢或任务过于复杂"，建议拆小重试或调大 `feishu_capture_timeout`。
+
+注意：超时**不会中断**已经在跑的旧任务（Python 无法安全强杀线程），但旧任务的结果会被丢弃、不再写入会话，也不会补发一条"迟到回复"，避免一条消息两条回复造成混乱；日志会记录 `超时任务在 N 秒后完成（结果已丢弃）`，可用于判断是否阈值仍然偏小。

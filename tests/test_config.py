@@ -93,6 +93,36 @@ def test_qq_fields_parsed(tmp_config):
     assert store.qq_enabled is False
 
 
+def test_feishu_timeout_fields_defaults(tmp_config):
+    _, _, write = tmp_config
+    write({})
+
+    from sjtu_agent.config import ConfigStore
+    store = ConfigStore()
+    assert store.feishu_capture_timeout == 600
+    assert store.feishu_progress_interval == 120
+
+
+def test_feishu_timeout_fields_parsed(tmp_config):
+    _, _, write = tmp_config
+    write({"feishu_capture_timeout": 300, "feishu_progress_interval": 60})
+
+    from sjtu_agent.config import ConfigStore
+    store = ConfigStore()
+    assert store.feishu_capture_timeout == 300
+    assert store.feishu_progress_interval == 60
+
+
+def test_feishu_timeout_zero_and_invalid(tmp_config):
+    _, _, write = tmp_config
+    write({"feishu_capture_timeout": 0, "feishu_progress_interval": "abc"})
+
+    from sjtu_agent.config import ConfigStore
+    store = ConfigStore()
+    assert store.feishu_capture_timeout == 0  # 0 = 不限时
+    assert store.feishu_progress_interval == 120  # 非法值回退默认
+
+
 # ---------------------------------------------------------------------------
 # 热重载
 # ---------------------------------------------------------------------------

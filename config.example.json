@@ -48,6 +48,9 @@
   "feishu_app_secret": "",
   "feishu_allowed_open_ids": [],
   "feishu_enabled": true,
+  "_feishu_timeout_comment": "可选：单轮 LLM 处理超时（秒）。默认 600；设 0 表示不限时（与 Telegram 等端一致）。等待期间每 feishu_progress_interval 秒会发送一次“仍在处理中”心跳（最多 3 条），超时后会做一次 API 健康探测以区分服务异常与单纯较慢。改这两项不需要重启 bot。",
+  "feishu_capture_timeout": 600,
+  "feishu_progress_interval": 120,
 
   "_telegram_comment": "Telegram Bot（https://t.me/BotFather 获取 token）",
   "telegram_token": "",
