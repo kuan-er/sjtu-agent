@@ -21,6 +21,7 @@ from sjtu_agent.paths import CONFIG_PATH, read_json_safe
 
 
 _CACHE_TTL_SECONDS = 60
+_DEFAULT_DISCOVERY_TIMEOUT = 15.0  # 单个 MCP server 发现（连接+列工具）超时，防止坏 server 拖死每轮工具列表
 _TOOLS_CACHE: dict[str, Any] = {"ts": 0.0, "tools": [], "map": {}}
 _NAME_RE = re.compile(r"[^a-zA-Z0-9_]")
 
@@ -180,31 +181,48 @@ async def _list_tools_async() -> tuple[list[dict], dict[str, dict]]:
     used_names: set[str] = set()
     for server_id, server_cfg in _enabled_servers().items():
         try:
-            async with _open_session(server_cfg) as session:
-                result = await session.list_tools()
+            _timeout = float(server_cfg.get("discovery_timeout", _DEFAULT_DISCOVERY_TIMEOUT))
+
+            async def _discover(cfg=server_cfg):
+                async with _open_session(cfg) as session:
+                    return await session.list_tools()
+
+            result = await asyncio.wait_for(_discover(), timeout=_timeout)
+        except asyncio.TimeoutError:
+            reason = (
+                f"MCP server 连接/发现超时（>{_timeout:.0f}s）。请检查命令/URL 是否可达、"
+                f"依赖是否安装在 bot 进程所在 venv，然后用 sjtu-agent daemons restart 重启后台服务。"
+            )
         except Exception as exc:
-            public_name = _unique_name(f"mcp__{_sanitize(server_id)}__status", used_names)
-            tools.append({
-                "type": "function",
-                "function": {
-                    "name": public_name,
-                    "description": f"[MCP:{server_id}] Report why this MCP server is unavailable.",
-                    "parameters": {"type": "object", "properties": {}, "required": []},
-                },
-            })
-            name_map[public_name] = {
-                "server_id": server_id,
-                "tool_name": "__status__",
-                "error": str(exc),
-            }
+            reason = str(exc)
+        else:
+            for idx, tool_obj in enumerate(getattr(result, "tools", []) or []):
+                tool, meta = _tool_to_openai(server_id, tool_obj, idx)
+                public_name = _unique_name(meta["public_name"], used_names)
+                tool["function"]["name"] = public_name
+                meta["public_name"] = public_name
+                tools.append(tool)
+                name_map[meta["public_name"]] = meta
             continue
-        for idx, tool_obj in enumerate(getattr(result, "tools", []) or []):
-            tool, meta = _tool_to_openai(server_id, tool_obj, idx)
-            public_name = _unique_name(meta["public_name"], used_names)
-            tool["function"]["name"] = public_name
-            meta["public_name"] = public_name
-            tools.append(tool)
-            name_map[meta["public_name"]] = meta
+
+        # 连接/发现失败：注入一个可调用的状态工具，让模型能看到失败原因
+        public_name = _unique_name(f"mcp__{_sanitize(server_id)}__status", used_names)
+        tools.append({
+            "type": "function",
+            "function": {
+                "name": public_name,
+                "description": (
+                    f"[MCP:{server_id}] 该 MCP server 当前不可用，原因：{reason}。"
+                    f"调用（无需参数）以获取完整错误信息。"
+                ),
+                "parameters": {"type": "object", "properties": {}, "required": []},
+            },
+        })
+        name_map[public_name] = {
+            "server_id": server_id,
+            "tool_name": "__status__",
+            "error": reason,
+        }
     return tools, name_map
 
 
