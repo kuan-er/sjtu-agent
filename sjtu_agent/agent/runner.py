@@ -30,9 +30,15 @@ _MAX_NETWORK_RETRIES = 2   # 网络/超时重试上限
 
 
 def _get_tools():
-    """Lazy import TOOLS，避免 runner ↔ tools 循环依赖。"""
-    from sjtu_agent.agent.tools import TOOLS
-    return TOOLS
+    """Lazy import：内置工具 + MCP 服务器动态工具（registry 聚合）。
+
+    修复（issue #149-2）：之前只返回静态 TOOLS，add_mcp_server 写入的
+    MCP 服务器工具永远不会进入发给模型的工具列表（配置写了、bot 也重启了，
+    但工具列表里始终没有 mcp__*）。registry.get_available_tools 自带 60s
+    TTL 缓存 + 坏 server 状态工具，不会每轮重复连接。
+    """
+    from sjtu_agent.extensions.registry import get_available_tools
+    return get_available_tools()
 
 
 def _get_run_tool():

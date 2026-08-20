@@ -257,7 +257,18 @@ def tool_add_mcp_server(
         "server_id": server_id,
         "config": server_cfg,
         "tool_prefix": f"mcp__{server_id}__",
-        "next_action": "Restart or continue the conversation; MCP tools will be rediscovered automatically.",
+        "config_path": str(CONFIG_PATH),
+        "next_action": (
+            "MCP tools are now registered. Tell the user: 配置已写入 "
+            f"`{CONFIG_PATH}`（mcp_servers 键）。工具会在下一次工具列表刷新（约 60 秒内）"
+            "自动下发，无需重启会话；但若依赖未装齐，需要把依赖安装进「运行 bot 的进程」所在 "
+            "venv（不是交互式 sjtu-agent 的 venv），然后重启对应的后台服务。"
+        ),
+        "checklist": [
+            "依赖安装进 bot 进程所在 venv，例如: cd 项目目录 && source .venv/bin/activate && pip install <包>",
+            "重启后台服务: sjtu-agent daemons restart --services feishu-bot  （或其他 bot，Windows 加 --backend psmux 视部署而定）",
+            "重启后若工具仍不出现，直接调用 mcp__<server_id>__status 查看失败原因",
+        ],
     }
 
 
