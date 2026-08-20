@@ -3,6 +3,7 @@
 本文件记录各版本的用户可见变化。Agent 通过 `get_recent_updates` 读取（问「最近更新了什么」时），不写入 system prompt。
 
 ## Unreleased
+- 🖼️ 飞书富文本（post）支持：一段文字 + 若干图片组合为多模态输入（有视觉模型时）、无图富文本按普通文本处理；解析 text/a/at/img 元素并保留标题（issue #149-1）
 - 🔌 MCP 修复：runner 工具列表真正聚合 MCP 服务器动态工具（之前 add_mcp_server 写入的配置永远不会下发到模型）；单个 server 连接/发现超时产出可调用状态工具（不再拖死整轮）；`add_mcp_server` 返回带正确配置路径 + 依赖 venv + `daemons restart` 指引（issue #149-2）
 - 🔄 新增 `sjtu-agent daemons restart`：一键重启后台服务（停止 → 按安装清单参数重建并启动），支持 `--services` 子集选择（issue #149-5）
 

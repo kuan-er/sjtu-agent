@@ -613,6 +613,77 @@ def _extract_text(content_json: str) -> str:
     return text.strip()
 
 
+def _extract_post_content(content_json: str) -> dict:
+    """解析飞书富文本（post）消息，返回 {"text", "image_keys"}。
+
+    post 结构（feishu api）：
+      {"title": "...", "content": [
+        [{"tag":"text","text":"..."}, {"tag":"a","text":"链接",...},
+         {"tag":"at","user_id","user_name":"..."}, {"tag":"img","image_key":"..."}],
+        [...]
+      ]}
+    文本行内元素用空格拼接、行间用换行拼接；图片 key 单独收集
+    （issue #149-1：让 bot 能读懂"一段文字 + 几张图"的富文本输入）。
+    """
+    try:
+        obj = json.loads(content_json or "{}")
+    except Exception:
+        return {"text": "", "image_keys": []}
+    if not isinstance(obj, dict):
+        return {"text": "", "image_keys": []}
+
+    lines = obj.get("content")
+    if not isinstance(lines, list):
+        return {"text": "", "image_keys": []}
+
+    text_parts: list[str] = []
+    image_keys: list[str] = []
+    for line in lines:
+        if not isinstance(line, list):
+            continue
+        line_text: list[str] = []
+        for el in line:
+            if not isinstance(el, dict):
+                continue
+            tag = el.get("tag", "")
+            if tag == "text":
+                line_text.append(str(el.get("text", "") or ""))
+            elif tag == "a":
+                line_text.append(str(el.get("text", "") or str(el.get("href", "") or "")))
+            elif tag == "at":
+                line_text.append(str(el.get("user_name", "") or ""))
+            elif tag == "img":
+                key = str(el.get("image_key", "") or "").strip()
+                if key:
+                    image_keys.append(key)
+        if line_text:
+            text_parts.append(" ".join(p for p in line_text if p).strip())
+
+    title = str(obj.get("title", "") or "").strip()
+    if title:
+        text_parts.insert(0, title)
+
+    return {"text": "\n".join(p for p in text_parts if p).strip(), "image_keys": image_keys}
+
+
+def _build_vision_content(model: str, text: str, image_bytes_list: list[bytes]) -> list:
+    """构建多模态 content：文本块 + 若干图片块（OpenAI / Anthropic 两种格式）。"""
+    content: list = [{"type": "text", "text": text or "请看这张图片。"}]
+    for img_bytes in image_bytes_list:
+        b64 = base64.b64encode(img_bytes).decode()
+        if agent._is_anthropic_model(model):
+            content.append({
+                "type": "image",
+                "source": {"type": "base64", "media_type": "image/jpeg", "data": b64},
+            })
+        else:
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+            })
+    return content
+
+
 # ── AI 资讯 ──────────────────────────────────────────────────────────────────
 
 def _fetch_aihot_news() -> str:
@@ -1095,18 +1166,11 @@ def _process_media_in_thread(sender_open_id: str, message_id: str, msg_type: str
         if msg_type == "image":
             if _model_supports_vision(model):
                 img_bytes = local_path.read_bytes()
-                b64 = base64.b64encode(img_bytes).decode()
-                content: list = [{"type": "text", "text": "用户发送了一张图片，请先描述图片内容，再回答用户问题。"}]
-                if agent._is_anthropic_model(model):
-                    content.append({
-                        "type": "image",
-                        "source": {"type": "base64", "media_type": "image/jpeg", "data": b64},
-                    })
-                else:
-                    content.append({
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
-                    })
+                content: list = _build_vision_content(
+                    model,
+                    "用户发送了一张图片，请先描述图片内容，再回答用户问题。",
+                    [img_bytes],
+                )
                 reply, new_messages = _run_turn_detached(conv, "", sender_open_id, multimodal_content=content)
                 return {"dispatch": "turn", "reply": reply, "messages": new_messages,
                         "user_text": "[用户发送了一张图片]"}
@@ -1196,6 +1260,96 @@ def _process_media_in_thread(sender_open_id: str, message_id: str, msg_type: str
         lock.release()
 
 
+def _process_rich_media_in_thread(sender_open_id: str, message_id: str, text: str, image_keys: list[str]) -> None:
+    """处理富文本（post）消息：一段文字 + 若干图片，组合成多模态输入（issue #149-1）。
+
+    复用超时/心跳/快照提交骨架：worker 只计算，父线程统一回复/提交。
+    """
+    try:
+        conv, meta, lock = _conv_mgr.get_active(sender_open_id)
+    except Exception as e:
+        _logger.warning(f"[feishu] get_active 异常: {e}")
+        return
+    if not lock.acquire(blocking=False):
+        _reply_text(message_id, "上一条消息还在处理中，请稍候…")
+        return
+
+    def _do_rich_process() -> dict:
+        model = conv["model_box"][0]
+        user_text = (text or "").strip() or "[用户发送了一条富文本消息]"
+
+        if image_keys and _model_supports_vision(model):
+            img_list: list[bytes] = []
+            for key in image_keys:
+                try:
+                    local_path = _download_feishu_resource(
+                        message_id=message_id, file_key=key, msg_type="image",
+                        filename=f"image_{key[:10]}.jpg",
+                    )
+                    img_list.append(local_path.read_bytes())
+                except Exception as e:
+                    _logger.warning(f"[feishu] 富文本图片下载失败 {key[:10]}: {e}")
+            content = _build_vision_content(model, user_text, img_list)
+            reply, new_messages = _run_turn_detached(conv, user_text, sender_open_id, multimodal_content=content)
+        else:
+            # 无图或模型不支持视觉：按文字理解（如实提示没看图的限制）
+            note = (
+                f"\n\n（本条飞书富文本消息还包含 {len(image_keys)} 张图片；当前模型不支持直接看图，"
+                f"已仅按文字理解。）" if image_keys else ""
+            )
+            reply, new_messages = _run_turn_detached(conv, user_text + note, sender_open_id)
+        return {"dispatch": "turn", "reply": reply, "messages": new_messages, "user_text": user_text}
+
+    timeout = _capture_timeout_secs()
+    interval = _progress_interval_secs()
+    pings_sent = 0
+
+    def _ping(waited: float) -> None:
+        nonlocal pings_sent
+        if pings_sent >= _MAX_PROGRESS_PINGS:
+            return
+        pings_sent += 1
+        _reply_text(
+            message_id,
+            f"⏳ 富文本内容较多（含 {len(image_keys)} 张图），AI 仍在处理中（已等待 {int(waited)} 秒）～",
+        )
+
+    def _on_late(**kw) -> None:
+        if kw.get("exception"):
+            _logger.warning(f"[feishu] 超时富文本任务最终失败（等待 {kw['elapsed']:.0f}s）：{kw['exception']}")
+        else:
+            _logger.warning(f"[feishu] 超时富文本任务在 {kw['elapsed']:.0f}s 后完成（结果已丢弃，未污染会话）")
+
+    try:
+        result = _run_fn_with_timeout(
+            _do_rich_process, timeout,
+            on_progress=_ping, progress_interval=interval, on_late=_on_late,
+        )
+    except TimeoutError:
+        _logger.warning(f"[feishu] 富文本处理超时（{timeout}s），释放锁")
+        probe = None
+        try:
+            probe = _probe_api_health(conv["model_box"][0], conv["client_box"][0])
+        except Exception as e:
+            _logger.warning(f"[feishu] 健康探测失败: {e}")
+        _reply_text(message_id, _build_timeout_message(timeout, probe))
+        return
+    except Exception as e:
+        _logger.warning(f"[feishu] 富文本处理出错：{e}")
+        _reply_text(message_id, f"富文本处理失败：{e}")
+        return
+    else:
+        reply = result.get("reply") or ""
+        new_messages = result.get("messages")
+        if new_messages is not None:
+            conv["messages"] = new_messages
+        _reply_text(message_id, reply)
+        log_turn(result.get("user_text") or "", reply)
+    finally:
+        _conv_mgr.save()
+        lock.release()
+
+
 def _handle_message(data: P2ImMessageReceiveV1) -> None:
     """Phase 1: 轻量同步工作（event loop 线程），立即返回让 ack 快速发出。"""
     cfg = _load_cfg()
@@ -1235,8 +1389,27 @@ def _handle_message(data: P2ImMessageReceiveV1) -> None:
             if _is_duplicate_content(sender_open_id, text):
                 _logger.info(f"[feishu] 跳过重复内容: {text[:40]!r}")
                 return
+        elif msg_type == "post":
+            # 富文本：一段文字 + 若干图片（比如用户框选粘贴或组合内容）
+            post = _extract_post_content(msg.content)
+            text = post["text"]
+            image_keys = post["image_keys"]
+            if image_keys:
+                if _is_duplicate_content(sender_open_id, f"rich:{text}|{len(image_keys)}"):
+                    _logger.info(f"[feishu] 跳过重复富文本: {text[:40]!r}")
+                    return
+                _logger.info(f"[feishu] 富文本消息（{len(image_keys)} 张图 + {len(text)} 字）→ 组合多模态处理")
+                _EXECUTOR.submit(_process_rich_media_in_thread, sender_open_id, message_id, text, image_keys)
+                return
+            if not text:
+                return
+            # 无图富文本：当作普通文本处理（复用下方同一套逻辑与入口）
+            if _is_duplicate_content(sender_open_id, text):
+                _logger.info(f"[feishu] 跳过重复内容: {text[:40]!r}")
+                return
+            msg_type = "text"
         elif not media_supported:
-            _reply_text(message_id, f"(暂不支持的消息类型: {msg_type}，目前支持文本、图片、文件、音频、视频)")
+            _reply_text(message_id, f"(暂不支持的消息类型: {msg_type}，目前支持文本、富文本、图片、文件、音频、视频)")
             return
 
         # ── 自然语言短语拦截 ────────────────────────────────────────
