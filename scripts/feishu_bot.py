@@ -100,7 +100,8 @@ if not APP_ID or not APP_SECRET:
 _api_client = lark.Client.builder().app_id(APP_ID).app_secret(APP_SECRET).build()
 
 # ── 后台线程池（LLM 推理在后台线程执行，避免阻塞 WS event loop） ─────────
-_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="feishu")
+# 8 线程：长任务（单轮可达分钟级）占池时避免其他用户互相饿死。
+_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=8, thread_name_prefix="feishu")
 
 # ── 作业解答上下文（记住最近一次 /hw do，供"给我答案"使用）────────────────
 _hw_context: dict[str, dict] = {}
@@ -814,7 +815,35 @@ def _build_parser_context(local_path: Path, media_type: str = "file", max_chars:
         return "", str(ex)
 
 
-_CAPTURE_TIMEOUT = 120  # 单轮 LLM 调用最大等待秒数
+# ── 单轮处理超时与进度心跳（可通过 config.json 热调，无需重启） ─────────
+# feishu_capture_timeout：单轮 LLM 处理最大等待秒数（默认 600；<=0 表示不限时，
+#   与 Telegram/WeChat/QQ 等"无整轮硬超时"的端对齐）。注意引擎内部单次请求
+#   预算即 180s、单轮最多 8 次工具迭代 + 长工具（Canvas/Playwright/MATLAB），
+#   旧的 120s 固定值比引擎自身预算还小，会误杀正常慢请求（issue 反馈）。
+# feishu_progress_interval：等待期间发送"仍在处理中"心跳的间隔秒数。
+_DEFAULT_CAPTURE_TIMEOUT = 600
+_DEFAULT_PROGRESS_INTERVAL = 120
+_MAX_PROGRESS_PINGS = 3  # 心跳消息最多发几条，避免刷屏
+
+
+def _capture_timeout_secs() -> float:
+    """当前单轮处理超时秒数（每次调用热读 config，改配置即生效）。"""
+    try:
+        raw = _load_cfg().get("feishu_capture_timeout", _DEFAULT_CAPTURE_TIMEOUT)
+        return float(raw) if raw is not None else float(_DEFAULT_CAPTURE_TIMEOUT)
+    except (TypeError, ValueError):
+        return float(_DEFAULT_CAPTURE_TIMEOUT)
+
+
+def _progress_interval_secs() -> float:
+    """进度心跳间隔秒数（热读 config）。"""
+    try:
+        raw = _load_cfg().get("feishu_progress_interval", _DEFAULT_PROGRESS_INTERVAL)
+        return float(raw) if raw is not None else float(_DEFAULT_PROGRESS_INTERVAL)
+    except (TypeError, ValueError):
+        return float(_DEFAULT_PROGRESS_INTERVAL)
+
+
 _MEMORY_EXTRACT_EVERY = 10  # 每 N 轮对话尝试提取一次记忆
 _msg_counters: dict[str, int] = {}  # per-user message counter for memory throttle
 
@@ -839,10 +868,19 @@ def _try_extract_memory(open_id: str, conv: dict) -> None:
         _logger.warning(f"[feishu] 记忆提取失败: {e}")
 
 
-def _run_fn_with_timeout(fn, timeout: float, *args):
-    """在临时线程中运行 fn(*args)，超时抛出 TimeoutError。"""
-    result = []
-    exc = []
+def _run_fn_with_timeout(fn, timeout: float, *args, on_progress=None, progress_interval: float = 0.0, on_late=None):
+    """在临时线程中运行 fn(*args)，超时抛出 TimeoutError。
+
+    - timeout <= 0 表示不限时：与 Telegram 等无整轮硬超时的端一致，一直等到完成。
+    - 等待期间每隔 progress_interval 秒调用 on_progress(waited_secs)（若提供），
+      用于给用户发"仍在处理中"心跳，区分"慢但正常"与"卡死"。
+    - 超时**不会杀死** worker 线程（Python 无法安全强杀）：worker 继续跑完，
+      最终结果/异常通过 on_late(result=..., elapsed=...) 或
+      on_late(exception=..., elapsed=...) 在完成后上报，用于日志诊断（如判断
+      阈值是否仍然太小、或 API 是否真的失效）。
+    """
+    result: list = []
+    exc: list = []
     done = threading.Event()
 
     def _wrapper():
@@ -853,13 +891,105 @@ def _run_fn_with_timeout(fn, timeout: float, *args):
         finally:
             done.set()
 
-    t = threading.Thread(target=_wrapper, daemon=True)
-    t.start()
-    if not done.wait(timeout):
-        raise TimeoutError(f"操作超时（{timeout}秒）")
-    if exc:
-        raise exc[0]
-    return result[0] if result else None
+    threading.Thread(target=_wrapper, daemon=True).start()
+
+    start = time.monotonic()
+    deadline = start + timeout if (timeout and timeout > 0) else None
+    next_ping = start + (progress_interval if progress_interval and progress_interval > 0 else 0)
+
+    while not done.is_set():
+        now = time.monotonic()
+        if deadline is not None and now >= deadline:
+            break
+        wait_for = 1.0
+        if deadline is not None:
+            wait_for = min(wait_for, deadline - now)
+        if next_ping > now:
+            wait_for = min(wait_for, next_ping - now)
+        done.wait(wait_for)
+        now = time.monotonic()
+        if on_progress and next_ping <= now:
+            try:
+                on_progress(now - start)
+            except Exception:
+                pass
+            next_ping = now + progress_interval
+
+    if done.is_set():
+        if exc:
+            raise exc[0]
+        return result[0] if result else None
+
+    # 超时：worker 仍在跑，挂一个观察线程等它结束（只做日志/诊断，不再动会话）
+    if on_late:
+        def _observe():
+            done.wait()
+            try:
+                if exc:
+                    on_late(exception=exc[0], elapsed=time.monotonic() - start)
+                else:
+                    on_late(result=result[0] if result else None, elapsed=time.monotonic() - start)
+            except Exception:
+                pass
+        threading.Thread(target=_observe, daemon=True).start()
+    raise TimeoutError(f"操作超时（{timeout}秒）")
+
+
+def _run_turn_detached(conv: dict, user_text: str, open_id: str = "",
+                       multimodal_content: list | None = None) -> tuple[str, list]:
+    """在 messages 的**拷贝**上执行一轮对话，返回 (回复文本, 新的 messages)。
+
+    核心目的（fix）：超时/失败时调用方直接丢弃新列表，残留 worker 线程永远
+    无法污染线上会话——修复旧实现里"超时后旧 turn 与新一轮并发写同一个
+    conv['messages']"导致的历史错乱/回复串台。
+    """
+    sess = {
+        "messages": list(conv.get("messages") or []),
+        "model_box": conv["model_box"],
+        "client_box": conv["client_box"],
+    }
+    if multimodal_content is not None:
+        reply = _capture_turn_multimodal(sess, multimodal_content, open_id)
+    else:
+        reply = _capture_turn(sess, user_text, open_id)
+    return reply, sess["messages"]
+
+
+def _probe_api_health(model: str, client) -> dict:
+    """微型健康探测：15s 内发一个 max_tokens=1 的最小请求，判断 API 端点是否可达。
+
+    用于超时后区分"API 失效/配置错误"与"模型只是慢"。返回 {"ok": bool, "detail": str}。
+    """
+    try:
+        if model.startswith("claude") or getattr(client, "messages", None) is not None:
+            client.messages.create(
+                model=model, messages=[{"role": "user", "content": "ping"}],
+                max_tokens=1, timeout=15,
+            )
+        else:
+            client.chat.completions.create(
+                model=model, messages=[{"role": "user", "content": "ping"}],
+                max_tokens=1, timeout=15,
+            )
+        return {"ok": True, "detail": "API 端点可达"}
+    except Exception as e:
+        return {"ok": False, "detail": f"{type(e).__name__}: {e}"[:200]}
+
+
+def _build_timeout_message(waited: float, probe: dict | None) -> str:
+    """超时提示：根据 API 健康探测结果区分"服务异常"与"只是慢/忙"。"""
+    w = int(waited)
+    if probe and not probe.get("ok"):
+        return (
+            f"⏱️ 处理超时（已等待 {w} 秒）。\n"
+            f"检测到 API 端点异常：{probe.get('detail', '未知错误')}\n"
+            f"可能是密钥失效 / 服务不可用 / 网络问题。请检查 api_key、base_url、模型名后重试。"
+        )
+    return (
+        f"⏱️ 处理超时（已等待 {w} 秒）。\n"
+        f"API 端点响应正常，可能是模型响应较慢或任务过于复杂。\n"
+        f"可稍后重试，或把任务拆小分步提问；若频繁出现，可在 config.json 中调大 feishu_capture_timeout。"
+    )
 
 
 def _process_in_thread(sender_open_id: str, message_id: str, text: str) -> None:
@@ -876,27 +1006,61 @@ def _process_in_thread(sender_open_id: str, message_id: str, text: str) -> None:
     if not lock.acquire(blocking=False):
         _reply_text(message_id, "上一条消息还在处理中，请稍候…")
         return
+
+    timeout = _capture_timeout_secs()
+    interval = _progress_interval_secs()
+    pings_sent = 0
+
+    def _ping(waited: float) -> None:
+        nonlocal pings_sent
+        if pings_sent >= _MAX_PROGRESS_PINGS:
+            return
+        pings_sent += 1
+        _reply_text(
+            message_id,
+            f"⏳ 这条指令比较复杂，AI 仍在处理中（已等待 {int(waited)} 秒），完成后会自动发送～",
+        )
+
+    def _on_late(**kw) -> None:
+        # 超时后 worker 仍会跑完；这里只做诊断日志（用于判断阈值/API 健康），
+        # 结果已丢弃，绝不会写入或回复，避免"一条消息两条回复"。
+        if kw.get("exception"):
+            _logger.warning(f"[feishu] 超时任务最终失败（等待 {kw['elapsed']:.0f}s）：{kw['exception']}")
+        else:
+            _logger.warning(f"[feishu] 超时任务在 {kw['elapsed']:.0f}s 后完成（结果已丢弃，未污染会话）")
+
     try:
-        reply = _run_fn_with_timeout(_capture_turn, _CAPTURE_TIMEOUT, conv, text, sender_open_id)
+        reply, new_messages = _run_fn_with_timeout(
+            _run_turn_detached, timeout, conv, text, sender_open_id,
+            on_progress=_ping, progress_interval=interval, on_late=_on_late,
+        )
     except TimeoutError:
-        _logger.warning(f"[feishu] LLM 调用超时（{_CAPTURE_TIMEOUT}s），释放锁")
-        _reply_text(message_id, "处理超时，请稍后重试")
+        _logger.warning(f"[feishu] LLM 调用超时（{timeout}s），释放锁")
+        probe = None
+        try:
+            probe = _probe_api_health(conv["model_box"][0], conv["client_box"][0])
+        except Exception as e:
+            _logger.warning(f"[feishu] 健康探测失败: {e}")
+        _reply_text(message_id, _build_timeout_message(timeout, probe))
         return
     except Exception as e:
         _logger.warning(f"[feishu] 处理出错：{e}")
         _reply_text(message_id, f"出错了：{e}")
         return
+    else:
+        # 成功：仍在锁内，把工作副本原子提交回会话
+        conv["messages"] = new_messages
+        _reply_text(message_id, reply)
+        # 记录到用户画像（conversation_log + 关键词），失败静默
+        log_turn(text, reply)
+        # 记忆提取不阻塞锁 — 在发送回复后异步进行
+        try:
+            _try_extract_memory(sender_open_id, conv)
+        except Exception:
+            pass
     finally:
         _conv_mgr.save()
         lock.release()
-    _reply_text(message_id, reply)
-    # 记录到用户画像（conversation_log + 关键词），失败静默
-    log_turn(text, reply)
-    # 记忆提取不阻塞锁 — 在发送回复后异步进行
-    try:
-        _try_extract_memory(sender_open_id, conv)
-    except Exception:
-        pass
 
 
 def _process_media_in_thread(sender_open_id: str, message_id: str, msg_type: str, content_json: str) -> None:
@@ -909,11 +1073,16 @@ def _process_media_in_thread(sender_open_id: str, message_id: str, msg_type: str
         _reply_text(message_id, "上一条消息还在处理中，请稍候…")
         return
 
-    def _do_media_process():
+    def _do_media_process() -> dict:
+        """计算媒体处理结果，**不回复**。返回 {"dispatch", "reply", "messages", "user_text"}。
+
+        - dispatch "reply": 直接回复 reply，不提交会话消息。
+        - dispatch "turn": 已走一轮对话，reply 为回复，messages 为需提交的工作副本。
+        回复统一由父线程发出，保证超时后 worker 不会再补发一条"迟到回复"。
+        """
         media = _extract_media_ref(msg_type, content_json)
         if not media:
-            _reply_text(message_id, f"暂不支持解析该消息内容（类型={msg_type}）。")
-            return
+            return {"dispatch": "reply", "reply": f"暂不支持解析该消息内容（类型={msg_type}）。", "messages": None, "user_text": None}
 
         local_path = _download_feishu_resource(
             message_id=message_id,
@@ -938,9 +1107,10 @@ def _process_media_in_thread(sender_open_id: str, message_id: str, msg_type: str
                         "type": "image_url",
                         "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
                     })
-                reply = _capture_turn_multimodal(conv, content, sender_open_id)
-                _reply_text(message_id, reply)
-                return
+                reply, new_messages = _run_turn_detached(conv, "", sender_open_id, multimodal_content=content)
+                return {"dispatch": "turn", "reply": reply, "messages": new_messages,
+                        "user_text": "[用户发送了一张图片]"}
+
             # 模型不支持视觉 → 不 return，落到下方 OCR 解析路径。
             # 之前这里直接 return 提示"不支持识图"，导致即使安装了 OCR
             # 后端（paddleocr/whisper）也从不尝试解析图片（issue #113 #2）。
@@ -952,8 +1122,7 @@ def _process_media_in_thread(sender_open_id: str, message_id: str, msg_type: str
             if load_vision_config() is not None:
                 try:
                     desc = analyze_image(img_bytes, "请描述这张图片并提取其中的文字。")
-                    _reply_text(message_id, f"🖼️ [视觉模型识图]\n{desc}")
-                    return
+                    return {"dispatch": "reply", "reply": f"🖼️ [视觉模型识图]\n{desc}", "messages": None, "user_text": None}
                 except Exception as e:
                     _logger.warning(f"[feishu] 视觉模型识图失败，回退 OCR: {e}")
             # 视觉模型不可用/失败 → 落到下方 OCR 解析路径
@@ -972,18 +1141,56 @@ def _process_media_in_thread(sender_open_id: str, message_id: str, msg_type: str
         else:
             user_text += f"\n\n（附件解析失败：{parse_err}）"
         user_text += "\n\n请根据已提取内容回答；若信息不足，再向用户追问。"
-        reply = _capture_turn(conv, user_text, sender_open_id)
-        _reply_text(message_id, reply)
-        log_turn(user_text, reply)
+        reply, new_messages = _run_turn_detached(conv, user_text, sender_open_id)
+        return {"dispatch": "turn", "reply": reply, "messages": new_messages, "user_text": user_text}
+
+    timeout = _capture_timeout_secs()
+    interval = _progress_interval_secs()
+    pings_sent = 0
+
+    def _ping(waited: float) -> None:
+        nonlocal pings_sent
+        if pings_sent >= _MAX_PROGRESS_PINGS:
+            return
+        pings_sent += 1
+        _reply_text(
+            message_id,
+            f"⏳ 附件的解析比较复杂，AI 仍在处理中（已等待 {int(waited)} 秒），完成后会自动发送～",
+        )
+
+    def _on_late(**kw) -> None:
+        if kw.get("exception"):
+            _logger.warning(f"[feishu] 超时媒体任务最终失败（等待 {kw['elapsed']:.0f}s）：{kw['exception']}")
+        else:
+            _logger.warning(f"[feishu] 超时媒体任务在 {kw['elapsed']:.0f}s 后完成（结果已丢弃，未污染会话）")
 
     try:
-        _run_fn_with_timeout(_do_media_process, _CAPTURE_TIMEOUT)
+        result = _run_fn_with_timeout(
+            _do_media_process, timeout,
+            on_progress=_ping, progress_interval=interval, on_late=_on_late,
+        )
     except TimeoutError:
-        _logger.warning(f"[feishu] 媒体处理超时（{_CAPTURE_TIMEOUT}s），释放锁")
-        _reply_text(message_id, "处理超时，请稍后重试")
+        _logger.warning(f"[feishu] 媒体处理超时（{timeout}s），释放锁")
+        probe = None
+        try:
+            probe = _probe_api_health(conv["model_box"][0], conv["client_box"][0])
+        except Exception as e:
+            _logger.warning(f"[feishu] 健康探测失败: {e}")
+        _reply_text(message_id, _build_timeout_message(timeout, probe))
+        return
     except Exception as e:
         _logger.warning(f"[feishu] 媒体处理出错：{e}")
         _reply_text(message_id, f"附件处理失败：{e}")
+        return
+    else:
+        # 成功：仍在锁内提交/回复
+        reply = result.get("reply") or ""
+        new_messages = result.get("messages")
+        if new_messages is not None:
+            conv["messages"] = new_messages
+        _reply_text(message_id, reply)
+        if result.get("dispatch") == "turn":
+            log_turn(result.get("user_text") or "", reply)
     finally:
         _conv_mgr.save()
         lock.release()

@@ -16,4 +16,4 @@ if sys.stderr is None:
 
 __all__ = ["__version__"]
 
-__version__ = "0.20.0"
+__version__ = "0.20.1"

@@ -206,6 +206,24 @@ class ConfigStore:
     def feishu_allowed_open_ids(self) -> list[str]:
         return self.get("feishu_allowed_open_ids", [])
 
+    @property
+    def feishu_capture_timeout(self) -> float:
+        """单轮 LLM 处理超时秒数（默认 600；<=0 表示不限时，与 Telegram 等端一致）。"""
+        raw = self.get("feishu_capture_timeout", 600)
+        try:
+            return float(raw) if raw is not None else 600.0
+        except (TypeError, ValueError):
+            return 600.0
+
+    @property
+    def feishu_progress_interval(self) -> float:
+        """处理中进度心跳的发送间隔秒数（默认 120）。"""
+        raw = self.get("feishu_progress_interval", 120)
+        try:
+            return float(raw) if raw is not None else 120.0
+        except (TypeError, ValueError):
+            return 120.0
+
     # —— QQ ——--------------------------------------------------------------
     @property
     def qq_app_id(self) -> str:

@@ -59,5 +59,7 @@ sessions/
 .test_runtime_other/
 .test_runtime_pytest*/
 .test_pytest_tmp*/
+.test_home/
+.test_tmp/
 zztest_*/
 .chroma_test/
