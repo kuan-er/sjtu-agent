@@ -886,6 +886,21 @@ def _build_parser_context(local_path: Path, media_type: str = "file", max_chars:
         return "", str(ex)
 
 
+def _parse_fail_context(parse_err: str) -> str:
+    """构建附件解析失败的上下文块：真实原因 + 防幻觉指令（issue #149-4）。
+
+    历史问题（issue #113 复现 + #149）：解析失败时模型会编造"权限不足/目录不在
+    白名单/沙箱限制"等不实说法。这里点名禁止这些说法，只准如实转述原因。
+    """
+    reason = (parse_err or "").strip() or "附件内容提取失败，暂时无法读取"
+    return (
+        f"\n\n（附件内容提取失败。真实原因：{reason}）\n"
+        "请如实向用户转述上面的原因，并给出可执行建议（如安装 OCR/ASR 后端）。"
+        "绝对不要编造技术原因，例如「权限不足 / 目录不在白名单 / 沙箱限制 / 无法访问文件」等"
+        "——这些不是真实原因。若原因确实是空的，就直接说'附件内容提取失败，暂时无法读取附件'。"
+    )
+
+
 # ── 单轮处理超时与进度心跳（可通过 config.json 热调，无需重启） ─────────
 # feishu_capture_timeout：单轮 LLM 处理最大等待秒数（默认 600；<=0 表示不限时，
 #   与 Telegram/WeChat/QQ 等"无整轮硬超时"的端对齐）。注意引擎内部单次请求
@@ -1203,7 +1218,7 @@ def _process_media_in_thread(sender_open_id: str, message_id: str, msg_type: str
         if parsed_ctx:
             user_text += parsed_ctx
         else:
-            user_text += f"\n\n（附件解析失败：{parse_err}）"
+            user_text += _parse_fail_context(parse_err)
         user_text += "\n\n请根据已提取内容回答；若信息不足，再向用户追问。"
         reply, new_messages = _run_turn_detached(conv, user_text, sender_open_id)
         return {"dispatch": "turn", "reply": reply, "messages": new_messages, "user_text": user_text}
