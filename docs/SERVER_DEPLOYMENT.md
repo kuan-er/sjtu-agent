@@ -45,22 +45,34 @@ bash install/install.sh --no-setup --skip-playwright
 ```bash
 # 本机：导出核心凭据（config.json / .env / agent_config.json）
 sjtu-agent export-config --output sjtu-agent-config.tar.gz
+```
+- 需要同时迁移提醒/用户画像/食堂偏好时，导出端加 `--with-state`；
+- 只迁移其中某个时可用 `--state-file reminders.json`（可重复，可选 `reminders.json` / `user_profile.json` / `dining_history.json`）。
 
-# 安全传到服务器（scp 走 SSH 加密）
-scp sjtu-agent-config.tar.gz user@server:
+接下来把核心配置导入服务器。
+
+方案一：走中间文件
+
+```bash
+# 本机：安全传到服务器（scp 走 SSH 加密）
+scp sjtu-agent-config.tar.gz user@server: # user 为服务器登录用户名，server 为服务器公网 ip，运行 curl ifconfig.me 即可
 
 # 服务器：导入；同名文件会先自动备份
 sjtu-agent import-config ~/sjtu-agent-config.tar.gz --yes
 sjtu-agent doctor
 ```
 
-也可以不走中间文件，直接 SSH 管道直传：
+方案二：直接 SSH 管道直传：
 
 ```bash
 sjtu-agent export-config --output - | ssh user@server "sjtu-agent import-config - --yes"
 ```
 
-需要同时迁移提醒/用户画像/食堂偏好时，导出端加 `--with-state`；只迁移其中某个时可用 `--state-file reminders.json`（可重复，可选 `reminders.json` / `user_profile.json` / `dining_history.json`）。导入端同样支持 `--state-file` 选择性导入。归档默认 **24 小时过期**：`--expires-hours` 可调整，`--no-expiry` 关闭；导入端默认拒绝过期归档，确认可信时加 `--allow-expired`。归档文件本身包含明文凭据，请**只在 SSH/scp 中传输，用后删除**；需要落到共享磁盘时使用 `--encrypt`（PBKDF2 + Fernet 加密，密码可设置 `SJTU_AGENT_CONFIG_PASSWORD`）。
+- 导入端同样支持 `--state-file` 选择性导入。
+- 归档默认 **24 小时过期**：`--expires-hours` 可调整，`--no-expiry` 关闭；
+- 导入端默认拒绝过期归档，确认可信时加 `--allow-expired`。
+
+特别提示：归档文件本身包含明文凭据，请**只在 SSH/scp 中传输，用后删除**；需要落到共享磁盘时使用 `--encrypt`（PBKDF2 + Fernet 加密，密码可设置 `SJTU_AGENT_CONFIG_PASSWORD`）。
 
 默认路径：
 
@@ -80,7 +92,7 @@ sjtu-agent export-config --output - | ssh user@server "sjtu-agent import-config 
 ```bash
 sjtu-agent doctor
 sjtu-agent daily-report --test
-sjtu-agent feishu-bot -- --test   # 若配置了飞书
+sjtu-agent feishu-bot --test   # 若配置了飞书
 ```
 
 配置缺失时再补；不建议在服务器直接跑完整交互 setup。

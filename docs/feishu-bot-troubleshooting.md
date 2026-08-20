@@ -7,7 +7,7 @@
 ### 1. 检查凭据是否有效
 
 ```bash
-sjtu-agent feishu-bot -- --test
+sjtu-agent feishu-bot --test
 ```
 
 或手动验证：
@@ -86,10 +86,10 @@ print(type(v).__name__)  # 应该是 list，如果是 str 就是 bug
 
 ```powershell
 # 凭据测试
-sjtu-agent feishu-bot -- --test
+sjtu-agent feishu-bot --test
 
 # whoami 模式（回显 open_id）
-sjtu-agent feishu-bot -- --whoami
+sjtu-agent feishu-bot --whoami
 
 # 检查 psmux 会话
 psmux -L sjtu-agent ls
