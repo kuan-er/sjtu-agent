@@ -2,7 +2,7 @@
 
 本文件记录各版本的用户可见变化。Agent 通过 `get_recent_updates` 读取（问「最近更新了什么」时），不写入 system prompt。
 
-## Unreleased
+## v0.21.2 (2026-08-21)
 - 🚑 致远一号模型 ID 勘误（v0.21.1 引发 403 hotfix）：`models.sjtu.edu.cn` 的 API 只允许访问模型 **`public-models`**，`deepseek-v4-flash` 仅是其产品展示名——zhiyuan 预设/默认模型改回 `public-models`，DeepSeek 官方预设与通用兜底改为 `deepseek-chat`
 
 ## v0.21.1 (2026-08-21)
