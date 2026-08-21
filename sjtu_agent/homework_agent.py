@@ -151,7 +151,7 @@ def _call_llm(prompt: str, llm_client=None, model: str = "") -> str:
         if not agent_cfg.get("api_key"):
             return "[LLM 未配置]"
         llm_client = agent._make_client(agent_cfg)
-        model = agent_cfg.get("model", "deepseek-v4-flash")
+        model = agent_cfg.get("model", "deepseek-chat")
 
     try:
         if agent._is_anthropic_model(model):

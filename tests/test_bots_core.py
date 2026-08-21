@@ -17,8 +17,8 @@ def test_model_supports_vision():
     assert model_supports_vision(None) is False  # 防御 None
 
 
-def test_make_session_default_model_is_v4_flash(monkeypatch):
-    """默认模型应为 deepseek-v4-flash（deepseek-chat 已弃用）。"""
+def test_make_session_generic_fallback_model(monkeypatch):
+    """无任何配置时的通用兜底模型为 deepseek-chat（致远一号由环境注入 public-models）。"""
     from sjtu_agent.bots import _core
 
     monkeypatch.setattr("sjtu_agent.agent.load_agent_config", lambda: {})
@@ -27,7 +27,7 @@ def test_make_session_default_model_is_v4_flash(monkeypatch):
         lambda: None,
     )
     sess = _core.make_session()
-    assert sess["model_box"] == ["deepseek-v4-flash"]
+    assert sess["model_box"] == ["deepseek-chat"]
 
 
 def test_build_date_ctx_contains_semester():

@@ -3,7 +3,7 @@
   "provider": "zhiyuan",
   "base_url": "https://models.sjtu.edu.cn/api/v1",
   "api_key": "YOUR_LLM_API_KEY",
-  "model": "deepseek-v4-flash",
+  "model": "public-models",
 
   "_vision_comment": "可选（v0.7.7）：主模型不支持视觉输入时，用独立视觉模型识图，OCR 兜底。API Key 仅存本地，输入时不回显、不打印。",
   "vision_model": {
