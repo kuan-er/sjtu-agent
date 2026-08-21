@@ -79,7 +79,9 @@ For manual setup, add this to `.env` in your runtime data directory:
 ZHIYUAN_API_KEY=your-api-key
 ```
 
-Default Base URL: `https://models.sjtu.edu.cn/api/v1`. Default model: `deepseek-chat` (Zhiyuan call name for DeepSeek V4 Flash) (DeepSeek V3.2 hosted at SJTU).
+Default Base URL: `https://models.sjtu.edu.cn/api/v1`. Default model: `deepseek-chat` (Zhiyuan call name for DeepSeek V4 Flash).
+
+> 📖 Official Zhiyuan One API guide: <https://claw.sjtu.edu.cn/guide/sjtu-api/> (authoritative for model call names, rate limits, and the campus-network requirement)
 
 Available models:
 

@@ -2,6 +2,9 @@
 
 本文件记录各版本的用户可见变化。Agent 通过 `get_recent_updates` 读取（问「最近更新了什么」时），不写入 system prompt。
 
+## Unreleased
+- 📖 文档：README 中英 / `.env.example` 补充致远一号官方调用指南链接（claw.sjtu.edu.cn/guide/sjtu-api，调用名/限流/校园网要求以官方为准）
+
 ## v0.21.3 (2026-08-21)
 - 🤖 致远一号默认模型按平台文档定回 **`deepseek-chat`**（DeepSeek V4 Flash 常规模式调用名；`deepseek-reasoner` 为思考模式、`minimax`、`qwen` 亦可用），`public-models` 作为团队受限（403）时的公共池备选；引导向导与示例配置同步列出真实调用名
 

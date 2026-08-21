@@ -95,6 +95,8 @@ ZHIYUAN_API_KEY=你的APIKey
 
 默认模型 `deepseek-chat`（致远一号 V4 Flash 常规模式调用名）。DeepSeek 官方、OpenAI 等其他兼容接口可在 Web GUI 或 setup 中选择「自定义」。
 
+> 📖 致远一号 API 官方调用指南：<https://claw.sjtu.edu.cn/guide/sjtu-api/>（模型调用名、限流与校园网要求以此为准）
+
 ### 配置视觉模型（可选）
 
 主模型不支持视觉（如 `deepseek-chat`）时，可额外配置 `qwen-vl-max` 等视觉模型用于识图。`sjtu-agent setup` 会引导配置，详见 [agent_config.example.json](agent_config.example.json)。
