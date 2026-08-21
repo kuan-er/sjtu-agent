@@ -3,6 +3,7 @@
 本文件记录各版本的用户可见变化。Agent 通过 `get_recent_updates` 读取（问「最近更新了什么」时），不写入 system prompt。
 
 ## Unreleased
+- 🤖 默认模型切换：`deepseek-v4-flash` 取代已弃用的 `deepseek-chat`（Zhiyuan/DeepSeek 预设、CLI/Web/各 bot 的默认模型、setup 向导提示与文档同步更新）
 - 🖥 WebUI 修复：聊天客户端与 CLI 对齐——只有 `.env` 的 API Key（如 `ZHIYUAN_API_KEY`）、没有 `agent_config.json` 时，按 provider 预设补默认 `base_url` / `model`，不再默认走 api.openai.com（校园外"WebUI timed out、CLI 正常"的根因）
 
 ## v0.21.0 (2026-08-20)

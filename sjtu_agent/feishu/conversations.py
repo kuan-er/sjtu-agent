@@ -51,7 +51,7 @@ class FeishuConversationManager:
                         if c.get("saved_at", 0) < cutoff:
                             continue
                         agent_cfg = agent.load_agent_config()
-                        c["model_box"] = [agent_cfg.get("model", "deepseek-chat")]
+                        c["model_box"] = [agent_cfg.get("model", "deepseek-v4-flash")]
                         c["client_box"] = [agent._make_client(agent_cfg) if agent_cfg else None]
                         convs.append(c)
                     if convs:
@@ -99,7 +99,7 @@ class FeishuConversationManager:
         return {
             "name": name,
             "messages": [],
-            "model_box": [agent_cfg.get("model", "deepseek-chat")],
+            "model_box": [agent_cfg.get("model", "deepseek-v4-flash")],
             "client_box": [agent._make_client(agent_cfg) if agent_cfg.get("api_key") else None],
             "created_at": _dt.datetime.now().strftime("%m-%d %H:%M"),
         }

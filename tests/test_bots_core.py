@@ -17,6 +17,19 @@ def test_model_supports_vision():
     assert model_supports_vision(None) is False  # 防御 None
 
 
+def test_make_session_default_model_is_v4_flash(monkeypatch):
+    """默认模型应为 deepseek-v4-flash（deepseek-chat 已弃用）。"""
+    from sjtu_agent.bots import _core
+
+    monkeypatch.setattr("sjtu_agent.agent.load_agent_config", lambda: {})
+    monkeypatch.setattr(
+        "sjtu_agent.news_aggregator.profile.ensure_profile_analyzed_async",
+        lambda: None,
+    )
+    sess = _core.make_session()
+    assert sess["model_box"] == ["deepseek-v4-flash"]
+
+
 def test_build_date_ctx_contains_semester():
     from sjtu_agent.bots._core import build_date_ctx
     ctx = build_date_ctx()
