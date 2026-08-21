@@ -2,6 +2,9 @@
 
 本文件记录各版本的用户可见变化。Agent 通过 `get_recent_updates` 读取（问「最近更新了什么」时），不写入 system prompt。
 
+## Unreleased
+- 🤖 致远一号默认模型按平台文档定回 **`deepseek-chat`**（DeepSeek V4 Flash 常规模式调用名；`deepseek-reasoner` 为思考模式、`minimax`、`qwen` 亦可用），`public-models` 作为团队受限（403）时的公共池备选；引导向导与示例配置同步列出真实调用名
+
 ## v0.21.2 (2026-08-21)
 - 🚑 致远一号模型 ID 勘误（v0.21.1 引发 403 hotfix）：`models.sjtu.edu.cn` 的 API 只允许访问模型 **`public-models`**，`deepseek-v4-flash` 仅是其产品展示名——zhiyuan 预设/默认模型改回 `public-models`，DeepSeek 官方预设与通用兜底改为 `deepseek-chat`
 

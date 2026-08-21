@@ -79,13 +79,13 @@ For manual setup, add this to `.env` in your runtime data directory:
 ZHIYUAN_API_KEY=your-api-key
 ```
 
-Default Base URL: `https://models.sjtu.edu.cn/api/v1`. Default model: `public-models` (Zhiyuan API model id) (DeepSeek V3.2 hosted at SJTU).
+Default Base URL: `https://models.sjtu.edu.cn/api/v1`. Default model: `deepseek-chat` (Zhiyuan call name for DeepSeek V4 Flash) (DeepSeek V3.2 hosted at SJTU).
 
 Available models:
 
 | Model ID | Description |
 |----------|-------------|
-| `public-models` | DeepSeek V3.2 (**default**) |
+| `deepseek-chat` | DeepSeek V3.2 (**default**) |
 | `deepseek-reasoner` | DeepSeek V3.2 (reasoning mode) |
 | `glm-5` | GLM 5.0 |
 | `minimax` / `minimax-m2.5` | MiniMax M2.5 |
@@ -98,7 +98,7 @@ For DeepSeek official or other OpenAI-compatible backends, select "Custom" in th
 
 ## Vision Model (Optional, for Image Recognition)
 
-If your main model does not support vision input (e.g. `public-models`), you can configure a separate vision model (e.g. `qwen-vl-max`). When Feishu receives an image, the vision model recognizes it first, with OCR as a fallback. **Choose any one of three configuration methods:**
+If your main model does not support vision input (e.g. `deepseek-chat`), you can configure a separate vision model (e.g. `qwen-vl-max`). When Feishu receives an image, the vision model recognizes it first, with OCR as a fallback. **Choose any one of three configuration methods:**
 
 1. **Interactive**: run `sjtu-agent setup`. After configuring the main model, follow the prompts to configure the vision model (API key input is **not echoed**).
 

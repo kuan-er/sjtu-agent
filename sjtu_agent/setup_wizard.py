@@ -773,14 +773,14 @@ class SetupConversation:
 
     def handle_agent(self, status: dict) -> bool:
         _ZHIYUAN_DEFAULT_BASE = "https://models.sjtu.edu.cn/api/v1"
-        _ZHIYUAN_DEFAULT_MODEL = "public-models"
+        _ZHIYUAN_DEFAULT_MODEL = "deepseek-chat"
 
         import re as _re
         _API_KEY_RE = _re.compile(r'^[A-Za-z0-9_\-]{16,}$')
 
         self.say("先把驱动 SJTU Agent 的大模型 API 配好。这样后面你可以直接进入真正的 agent 对话，而不是只靠固定问答。")
-        self.say("推荐使用交大致远一号 API（OpenAI 兼容接口），Base URL 为 https://models.sjtu.edu.cn/api/v1，模型默认 public-models（API 模型 ID）。")
-        self.say("可用模型：public-models（开放公共模型）、deepseek-reasoner、glm-5、minimax、qwen3coder、qwen3vl。")
+        self.say("推荐使用交大致远一号 API（OpenAI 兼容接口），Base URL 为 https://models.sjtu.edu.cn/api/v1，模型默认 deepseek-chat（DeepSeek V4 Flash 常规模式调用名）。")
+        self.say("可用模型（调用名）：deepseek-chat（V4 Flash 常规）、deepseek-reasoner（V4 Flash 思考）、minimax（MiniMax-M2.7）、qwen（Qwen3.6-27B 多模态）；若团队受限遇到 403，可改用 public-models（公共池）。")
         self.say("请直接把致远一号 API Key 粘贴进来；如果你现在不想配，也可以回复 skip。")
         while True:
             raw = self.prompt()

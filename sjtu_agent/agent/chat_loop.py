@@ -21,7 +21,7 @@ load_dotenv(ENV_PATH)
 _ZHIYUAN_BASE_URL_ENV  = "ZHIYUAN_BASE_URL"
 _ZHIYUAN_API_KEY_ENV   = "ZHIYUAN_API_KEY"
 _ZHIYUAN_DEFAULT_BASE  = "https://models.sjtu.edu.cn/api/v1"
-_ZHIYUAN_DEFAULT_MODEL = "public-models"
+_ZHIYUAN_DEFAULT_MODEL = "deepseek-chat"
 
 
 def _prefetch_ddls_background() -> None:

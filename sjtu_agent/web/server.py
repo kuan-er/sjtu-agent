@@ -47,7 +47,7 @@ PRESETS = {
     "zhiyuan": {
         "label": "致远一号（交大官方）",
         "base_url": "https://models.sjtu.edu.cn/api/v1",
-        "model": "public-models",
+        "model": "deepseek-chat",
         "env_key": "ZHIYUAN_API_KEY",
     },
     "deepseek": {
