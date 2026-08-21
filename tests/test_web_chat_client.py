@@ -32,7 +32,7 @@ def test_zhiyuan_env_only_defaults_base_url(monkeypatch):
         env={"ZHIYUAN_API_KEY": "sk-zhiyuan-test"},
     )
     assert proto == "openai"
-    assert model == "public-models"  # 致远一号 API 的模型 ID（403 证实团队仅可访问 public-models）
+    assert model == "deepseek-chat"  # 致远一号 V4 Flash 常规模式调用名
     assert "models.sjtu.edu.cn" in str(client.base_url)
     assert client.api_key == "sk-zhiyuan-test"
 
