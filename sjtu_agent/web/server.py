@@ -409,15 +409,31 @@ def _build_history(_agent, session_id: str | None) -> list[dict]:
 
 def _get_chat_client():
     """根据当前配置创建客户端。
-    与 agent.py 的 _make_client 保持一致：
+    与 agent.py / chat_loop.load_agent_config 保持一致：
+    - agent_config.json 显式配置优先；
+    - 只有 .env 的 API Key 时，按 provider 预设补默认 base_url / model
+      （修复：Web 侧之前缺这一步，导致没有 agent_config.json、只配了
+      ZHIYUAN_API_KEY 在 .env 的部署里，WebUI 默认走 api.openai.com，
+      校园外连不上就 timed out，而 CLI 正常）；
     - claude 模型 → Anthropic SDK（带 claude-cli UA，兼容中转代理）
     - 其他模型   → OpenAI SDK
     """
     agent_cfg = _read_agent_config()
     env = _read_env()
     provider = str(agent_cfg.get("provider", "") or "").strip().lower()
-    base_url = agent_cfg.get("base_url") or None
-    model = agent_cfg.get("model", "deepseek-chat")
+    if not provider:
+        # 由 .env 反推 provider（与 _get_status 的推断保持一致）
+        if env.get("ANTHROPIC_API_KEY"):
+            provider = "anthropic"
+        elif env.get("ZHIYUAN_API_KEY"):
+            provider = "zhiyuan"
+        elif env.get("DEEPSEEK_API_KEY"):
+            provider = "deepseek"
+        elif env.get("OPENAI_API_KEY"):
+            provider = "openai"
+    preset = PRESETS.get(provider, {})
+    base_url = (agent_cfg.get("base_url") or preset.get("base_url") or None) or None
+    model = agent_cfg.get("model") or preset.get("model") or "deepseek-chat"
     ua = agent_cfg.get("user_agent", "claude-cli/1.0.57")
     api_key = agent_cfg.get("api_key", "")
 
