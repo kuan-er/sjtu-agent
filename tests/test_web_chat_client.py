@@ -32,7 +32,7 @@ def test_zhiyuan_env_only_defaults_base_url(monkeypatch):
         env={"ZHIYUAN_API_KEY": "sk-zhiyuan-test"},
     )
     assert proto == "openai"
-    assert model == "deepseek-chat"
+    assert model == "deepseek-v4-flash"
     assert "models.sjtu.edu.cn" in str(client.base_url)
     assert client.api_key == "sk-zhiyuan-test"
 

@@ -491,7 +491,7 @@ def build_report(report_type: str = "evening") -> str | None:
     try:
         agent_cfg = agent.load_agent_config()
         client = agent._make_client(agent_cfg)
-        model = agent_cfg.get("model", "deepseek-chat")
+        model = agent_cfg.get("model", "deepseek-v4-flash")
 
         if agent._is_anthropic_model(model):
             resp = client.messages.create(
