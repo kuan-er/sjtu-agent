@@ -632,7 +632,7 @@ The Feishu Bot self-checks credentials, ChromaDB, and Agent API connectivity on 
 
 ## Version
 
-Current version: **v0.21.0**. Release history: [Releases](https://github.com/kuan-er/sjtu-agent/releases).
+Current version: **v0.21.1**. Release history: [Releases](https://github.com/kuan-er/sjtu-agent/releases).
 
 ## Release Notes
 
