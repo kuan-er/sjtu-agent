@@ -216,7 +216,7 @@ def _apply_agent_config_updates(updates: dict[str, str]) -> dict[str, str] | Non
     saved = {
         "base_url": updates["base_url"] or current.get("base_url") or "https://models.sjtu.edu.cn/api/v1",
         "api_key": updates["api_key"] or current.get("api_key") or "",
-        "model": updates["model"] or current.get("model") or "deepseek-v4-flash",
+        "model": updates["model"] or current.get("model") or "deepseek-chat",
     }
     # 保留已保存的 vision_model（主模型更新不清掉视觉模型）
     if isinstance(current.get("vision_model"), dict):
@@ -773,14 +773,14 @@ class SetupConversation:
 
     def handle_agent(self, status: dict) -> bool:
         _ZHIYUAN_DEFAULT_BASE = "https://models.sjtu.edu.cn/api/v1"
-        _ZHIYUAN_DEFAULT_MODEL = "deepseek-v4-flash"
+        _ZHIYUAN_DEFAULT_MODEL = "public-models"
 
         import re as _re
         _API_KEY_RE = _re.compile(r'^[A-Za-z0-9_\-]{16,}$')
 
         self.say("先把驱动 SJTU Agent 的大模型 API 配好。这样后面你可以直接进入真正的 agent 对话，而不是只靠固定问答。")
-        self.say("推荐使用交大致远一号 API（OpenAI 兼容接口），Base URL 为 https://models.sjtu.edu.cn/api/v1，模型默认 deepseek-v4-flash。")
-        self.say("可用模型：deepseek-v4-flash、deepseek-reasoner、glm-5、minimax、qwen3coder、qwen3vl。")
+        self.say("推荐使用交大致远一号 API（OpenAI 兼容接口），Base URL 为 https://models.sjtu.edu.cn/api/v1，模型默认 public-models（API 模型 ID）。")
+        self.say("可用模型：public-models（开放公共模型）、deepseek-reasoner、glm-5、minimax、qwen3coder、qwen3vl。")
         self.say("请直接把致远一号 API Key 粘贴进来；如果你现在不想配，也可以回复 skip。")
         while True:
             raw = self.prompt()

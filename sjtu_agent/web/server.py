@@ -47,13 +47,13 @@ PRESETS = {
     "zhiyuan": {
         "label": "致远一号（交大官方）",
         "base_url": "https://models.sjtu.edu.cn/api/v1",
-        "model": "deepseek-v4-flash",
+        "model": "public-models",
         "env_key": "ZHIYUAN_API_KEY",
     },
     "deepseek": {
         "label": "DeepSeek 官方",
         "base_url": "https://api.deepseek.com",
-        "model": "deepseek-v4-flash",
+        "model": "deepseek-chat",
         "env_key": "DEEPSEEK_API_KEY",
     },
     "openai": {
@@ -433,7 +433,7 @@ def _get_chat_client():
             provider = "openai"
     preset = PRESETS.get(provider, {})
     base_url = (agent_cfg.get("base_url") or preset.get("base_url") or None) or None
-    model = agent_cfg.get("model") or preset.get("model") or "deepseek-v4-flash"
+    model = agent_cfg.get("model") or preset.get("model") or "deepseek-chat"
     ua = agent_cfg.get("user_agent", "claude-cli/1.0.57")
     api_key = agent_cfg.get("api_key", "")
 

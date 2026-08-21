@@ -21,7 +21,7 @@ load_dotenv(ENV_PATH)
 _ZHIYUAN_BASE_URL_ENV  = "ZHIYUAN_BASE_URL"
 _ZHIYUAN_API_KEY_ENV   = "ZHIYUAN_API_KEY"
 _ZHIYUAN_DEFAULT_BASE  = "https://models.sjtu.edu.cn/api/v1"
-_ZHIYUAN_DEFAULT_MODEL = "deepseek-v4-flash"
+_ZHIYUAN_DEFAULT_MODEL = "public-models"
 
 
 def _prefetch_ddls_background() -> None:
@@ -155,7 +155,7 @@ def load_agent_config() -> dict:
         return {
             "base_url": "https://api.deepseek.com",
             "api_key":  deepseek_key,
-            "model":    "deepseek-v4-flash",
+            "model":    _ZHIYUAN_DEFAULT_MODEL,
             "_source":  "deepseek_env",
         }
     return {}
@@ -229,7 +229,7 @@ def setup_agent_config() -> dict:
     current = load_agent_config()
     base_url = str(current.get("base_url", "")).strip()
     api_key = str(current.get("api_key", "")).strip()
-    model = str(current.get("model", "")).strip() or "deepseek-v4-flash"
+    model = str(current.get("model", "")).strip() or "deepseek-chat"
 
     if base_url or api_key or model:
         print("检测到已有模型配置，下面逐项询问是否保留。")
@@ -239,11 +239,11 @@ def setup_agent_config() -> dict:
             if api_key and not _ask_keep("API Key", api_key, secret=True):
                 api_key = ""
             if model and not _ask_keep("模型名称", model):
-                model = "deepseek-v4-flash"
+                model = "deepseek-chat"
         except SystemExit:
             print("\n已跳过 API 配置。部分依赖 LLM 的功能将不可用。")
             print("你可以后续运行 sjtu-agent setup 补充配置，或使用 /model 命令修改。\n")
-            return {"base_url": "", "api_key": "", "model": "deepseek-v4-flash"}
+            return {"base_url": "", "api_key": "", "model": "deepseek-chat"}
 
     while True:
         try:
@@ -259,17 +259,17 @@ def setup_agent_config() -> dict:
                 api_key = key_input
 
             model_input = _prompt(
-                f"模型名称（如 deepseek-v4-flash / deepseek-v4-pro，回车保留当前: {model or 'deepseek-v4-flash'}）: "
+                f"模型名称（如 public-models / deepseek-chat，回车保留当前: {model or 'deepseek-v4-flash'}）: "
             )
             if model_input:
                 model = model_input
             if not model:
-                model = "deepseek-v4-flash"
+                model = "deepseek-chat"
         except SystemExit:
             print("\n已跳过 API 配置。部分依赖 LLM 的功能将不可用。")
             print("你可以后续运行 sjtu-agent setup 补充配置，或使用 /model 命令修改。\n")
             # 返回一个"空"配置，让 chat_loop 仍可启动（工具调用不受影响）
-            return {"base_url": "", "api_key": "", "model": "deepseek-v4-flash"}
+            return {"base_url": "", "api_key": "", "model": "deepseek-chat"}
 
         if not api_key:
             print("\n⚠️  API Key 不能为空。")
@@ -443,7 +443,7 @@ def chat_loop(client, model: str):
             updated = {
                 "base_url": new_base  or cur.get("base_url", "https://api.openai.com/v1"),
                 "api_key":  new_key   or cur.get("api_key", ""),
-                "model":    new_model or cur.get("model", "deepseek-v4-flash"),
+                "model":    new_model or cur.get("model", "deepseek-chat"),
             }
             AGENT_CONFIG_PATH.write_text(json.dumps(updated, indent=2, ensure_ascii=False))
             client_box[0] = _make_client(updated)

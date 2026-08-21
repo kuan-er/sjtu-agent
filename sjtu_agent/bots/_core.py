@@ -164,7 +164,7 @@ def make_session(agent_cfg: dict | None = None) -> dict:
     cfg = agent_cfg or load_agent_config()
     return {
         "messages": [],
-        "model_box": [cfg.get("model", "deepseek-v4-flash")],
+        "model_box": [cfg.get("model", "deepseek-chat")],
         "client_box": [_make_client(cfg) if cfg.get("api_key") else None],
     }
 

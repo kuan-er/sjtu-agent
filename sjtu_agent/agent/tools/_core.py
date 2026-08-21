@@ -2665,7 +2665,7 @@ def _classify_canvas_ddls(ddls: list) -> list:
     try:
         agent_cfg = _load_cfg()
         client = _make_llm_client(agent_cfg)
-        model = agent_cfg.get("model", "deepseek-v4-flash")
+        model = agent_cfg.get("model", "deepseek-chat")
 
         # 使用轻量模型调用（非流式，快速返回）
         resp = client.chat.completions.create(
@@ -4244,4 +4244,4 @@ def run_tool(name: str, args: dict) -> str:
 _ZHIYUAN_BASE_URL_ENV = "ZHIYUAN_BASE_URL"
 _ZHIYUAN_API_KEY_ENV  = "ZHIYUAN_API_KEY"
 _ZHIYUAN_DEFAULT_BASE = "https://models.sjtu.edu.cn/api/v1"
-_ZHIYUAN_DEFAULT_MODEL = "deepseek-v4-flash"
+_ZHIYUAN_DEFAULT_MODEL = "public-models"

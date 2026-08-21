@@ -149,7 +149,7 @@ def summarize_session(messages: list[dict]) -> str | None:
         import agent
         cfg = agent.load_agent_config()
         client = agent._make_client(cfg) if cfg.get("api_key") else None
-        model = cfg.get("model", "deepseek-v4-flash")
+        model = cfg.get("model", "deepseek-chat")
         if not client:
             return None
 
