@@ -2,6 +2,9 @@
 
 本文件记录各版本的用户可见变化。Agent 通过 `get_recent_updates` 读取（问「最近更新了什么」时），不写入 system prompt。
 
+## Unreleased
+- 🖥 WebUI 修复：聊天客户端与 CLI 对齐——只有 `.env` 的 API Key（如 `ZHIYUAN_API_KEY`）、没有 `agent_config.json` 时，按 provider 预设补默认 `base_url` / `model`，不再默认走 api.openai.com（校园外"WebUI timed out、CLI 正常"的根因）
+
 ## v0.21.0 (2026-08-20)
 - 📘 服务器部署文档补全：定时推送（remind-check 守护进程）生效链路与排查 + 工作区（`SJTU_AGENT_HOME` / `SJTU_HOMEWORK_DIR`）跨机器三种方案（SSHFS / rsync / 各自独立）（issue #149-3、#149-6）
 - 🩹 附件解析失败如实透出 + 防幻觉：失败上下文携带真实原因，并明确禁止模型编造"权限不足/白名单/沙箱限制"等不实说法（issue #149-4）
