@@ -2,7 +2,7 @@
 
 本文件记录各版本的用户可见变化。Agent 通过 `get_recent_updates` 读取（问「最近更新了什么」时），不写入 system prompt。
 
-## Unreleased
+## v0.21.4 (2026-08-21)
 - 🩹 修复飞书媒体"路径越权"：`parse_local_file` / `read_assignment_file` 允许根目录新增 `DATA_DIR/feishu_media`（bot 下载的图片/文件在此，之前校验越权导致 bot 读不到通讯软件发来的图/附件）
 - 📖 文档：README 中英 / `.env.example` 补充致远一号官方调用指南链接（claw.sjtu.edu.cn/guide/sjtu-api，调用名/限流/校园网要求以官方为准）
 
