@@ -4,6 +4,7 @@ from sjtu_agent.agent.prompts import (
     _BOT_SETUP,
     _CORE_PRINCIPLES,
     _DOMAIN_GUIDE,
+    _EPISTEMIC_DISCIPLINE,
     _PROJECT_IDENTITY,
     _TOOL_ROUTING,
     SYSTEM_PROMPT,
@@ -12,7 +13,10 @@ from sjtu_agent.agent.prompts import (
 
 def test_system_prompt_is_module_concatenation():
     """SYSTEM_PROMPT = 各模块常量拼接（行为不变，仅结构化）。"""
-    assert SYSTEM_PROMPT == _PROJECT_IDENTITY + _CORE_PRINCIPLES + _TOOL_ROUTING + _DOMAIN_GUIDE + _BOT_SETUP
+    assert SYSTEM_PROMPT == (
+        _PROJECT_IDENTITY + _CORE_PRINCIPLES + _EPISTEMIC_DISCIPLINE
+        + _TOOL_ROUTING + _DOMAIN_GUIDE + _BOT_SETUP
+    )
 
 
 def test_no_hardcoded_recent_updates():
