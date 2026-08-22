@@ -3430,7 +3430,9 @@ def tool_list_assignment_files(
 def _resolve_allowed_local_file(file_path: str) -> Path | None:
     """把用户给的文件路径解析到允许读取的根目录内。
 
-    允许：仓库目录、SJTU_HOMEWORK_DIR / assignments、Web GUI 上传目录。
+    允许：仓库目录、SJTU_HOMEWORK_DIR / assignments、Web GUI 上传目录、
+    飞书媒体暂存目录（feishu_media —— bot 下载的图片/文件放这里，
+    不放开会导致 bot 解析附件报"路径越权"）。
     不允许读取运行时目录中的 .env / config.json 等凭据文件。
     """
     raw = Path(file_path)
@@ -3439,6 +3441,7 @@ def _resolve_allowed_local_file(file_path: str) -> Path | None:
         ROOT.resolve(),
         Path(ASSIGNMENTS_DIR).resolve(),
         (Path(DATA_DIR) / "web_attachments").resolve(),
+        (Path(DATA_DIR) / "feishu_media").resolve(),
     )
     if any(path.is_relative_to(root) for root in allowed_roots):
         return path
