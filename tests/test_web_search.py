@@ -86,3 +86,36 @@ def test_web_search_tries_acronym_and_full_name_variants(monkeypatch):
     assert result["ok"] is True
     assert result["results"][0]["title"] == "DSH 定义"
     assert any("DSH" in url and "DeepSeek" not in url for url in queries)
+
+
+def test_web_search_uses_dedicated_proxy_when_configured(monkeypatch):
+    """设置 SJTU_WEB_SEARCH_PROXY 后，web_search 的请求必须走该代理。"""
+    seen = {}
+    monkeypatch.setenv("SJTU_WEB_SEARCH_PROXY", "http://127.0.0.1:7890")
+
+    def fake_get(url, **kwargs):
+        seen.setdefault("proxies", set()).add(
+            tuple(sorted((kwargs.get("proxies") or {}).items()))
+        )
+        raise RuntimeError("offline")  # 只验证代理参数是否传入，不发真实请求
+
+    monkeypatch.setattr("sjtu_agent.agent.tools._web_search.requests.get", fake_get)
+    tool_web_search("proxy check")
+    assert seen["proxies"] == {(
+        ("http", "http://127.0.0.1:7890"),
+        ("https", "http://127.0.0.1:7890"),
+    )}
+
+
+def test_web_search_no_proxy_by_default(monkeypatch):
+    """未配置专用搜索代理时，不主动传 proxies（尊重 HTTPS_PROXY 环境变量）。"""
+    monkeypatch.delenv("SJTU_WEB_SEARCH_PROXY", raising=False)
+    seen = {}
+
+    def fake_get(url, **kwargs):
+        seen["proxies"] = kwargs.get("proxies")
+        raise RuntimeError("offline")
+
+    monkeypatch.setattr("sjtu_agent.agent.tools._web_search.requests.get", fake_get)
+    tool_web_search("no proxy")
+    assert seen["proxies"] is None

@@ -250,7 +250,41 @@ sjtu-agent web-proxy --type caddy --domain sjtu-agent.example.com
 
 **不要**把带明文 HTTP 的 `0.0.0.0:7860` 直接暴露到公网；Web UI 的访问令牌走 Cookie，明文传输会被窃取。
 
-## 9. 已知限制与建议
+## 9. 网络代理与搜索访问
+
+**背景**：大陆机房（如腾讯云）直连 `bing.com` / `duckduckgo.com` 往往被限制或降级，`web_search` 结果差或超时。这里只解决"搜索需要代理"，**不需要也不会让整个服务长期挂代理**。
+
+### 方案一：全局环境变量（最省事，配合 NO_PROXY 保校园直连）
+
+`HTTPS_PROXY` / `HTTP_PROXY` 只会影响**设置了它们的那个进程**（不是全局、不是 VPN）。给 bot 服务设置后，代理只用于它发出去的外网请求；再配 `NO_PROXY` 保证校园站点永远直连（这是"防封号"的关键——**jAccount/校园账号流量绝不走第三方代理**）：
+
+```bash
+export HTTPS_PROXY=http://127.0.0.1:7890   # 换成你代理软件监听的地址:端口
+export HTTP_PROXY=http://127.0.0.1:7890
+export NO_PROXY=*.sjtu.edu.cn,*.sjtu.edu.cn/*,localhost,127.0.0.1,*.qcloud.com
+```
+
+systemd 用户服务记得把环境变量写进 unit（`Environment=`）或用 `systemctl --user set-environment`；直接 psmux 跑的话在启动命令前 `export` 即可。
+
+### 方案二：专用搜索代理（推荐，精准隔离）
+
+只想让 `web_search` 走代理、其余流量（DDL/校园 API/日报/推送）完全直连时，设置**专用环境变量**即可，代码已支持（v0.21.4+ 主线）：
+
+```bash
+export SJTU_WEB_SEARCH_PROXY=http://127.0.0.1:7890
+```
+
+- 设置了它：只有 `web_search`（Bing/DuckDuckGo）的请求走该代理，**其他请求一个字节都不碰代理**；
+- 没设置：行为与原来一致（尊重 `HTTPS_PROXY` 或直连）；
+- 下载加速仍按你原来的习惯手动开/关代理，互不冲突。
+
+### 常见疑惑
+
+- **"长期挂代理会不会封号？"** 搜索流量本身没有账号绑定；真正有风险的是**校园账号流量走境外代理**。所以要么用方案二（搜索专用代理，校园流量天然直连），要么方案一必须配好 `NO_PROXY`。
+- **代理地址端口填什么？** 看你服务器上代理软件的监听地址。常见：Clash/V2Ray 类 `http://127.0.0.1:7890`、`socks5://127.0.0.1:1080`（HTTP(S)_PROXY 建议用 http:// 形式）。验证：`curl -x http://127.0.0.1:7890 -I https://www.bing.com`。
+- **搜索还是差？** 挂上代理后仍差，多半是引擎对机房 IP 的降级；可让模型优先用 `search_campus` 查校内源（不需要代理）。
+
+## 10. 已知限制与建议
 
 - jAccount 风控：服务器 IP 登录校园平台可能触发异地登录。优先复用本机复制的 Cookie；失效后在本地刷新再同步，或手动在服务器上完成一次带二次验证的登录。
 - Canvas / AI 好课 / phycai 的自动登录依赖 Playwright Chromium；无桌面 Linux 也能 headless 运行，但要先装系统依赖（`playwright install --with-deps chromium`）。
