@@ -9,6 +9,7 @@ sjtu_agent/agent/tools/_web_search.py — 公开网页搜索工具。
 from __future__ import annotations
 
 import html
+import os
 import re
 import urllib.parse
 
@@ -56,12 +57,27 @@ def _clean(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _proxy_config() -> dict | None:
+    """web_search 专用代理：只让搜索引擎请求走代理，其余流量完全不碰。
+
+    设置环境变量 SJTU_WEB_SEARCH_PROXY=http://host:port 后，本工具固定走该
+    代理（覆盖 HTTPS_PROXY 全局项）；未设置时保持默认（尊重 HTTP_PROXY /
+    HTTPS_PROXY 环境变量，或直连）。适合"服务器配了代理但不想全局开、
+    也不担心校园账号走代理"的场景。
+    """
+    proxy = os.environ.get("SJTU_WEB_SEARCH_PROXY", "").strip()
+    if not proxy:
+        return None
+    return {"http": proxy, "https": proxy}
+
+
 def _search_bing(query: str, max_results: int) -> list[dict]:
     url = "https://www.bing.com/search?q=" + urllib.parse.quote(query)
     resp = requests.get(
         url,
         headers={"User-Agent": _USER_AGENT, "Accept-Language": "zh-CN,zh;q=0.9"},
         timeout=12,
+        proxies=_proxy_config(),
     )
     resp.raise_for_status()
     page = resp.text
@@ -91,6 +107,7 @@ def _search_duckduckgo(query: str, max_results: int) -> list[dict]:
         url,
         headers={"User-Agent": _USER_AGENT, "Accept-Language": "zh-CN,zh;q=0.9"},
         timeout=12,
+        proxies=_proxy_config(),
     )
     resp.raise_for_status()
     page = resp.text
