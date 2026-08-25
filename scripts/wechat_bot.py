@@ -74,6 +74,9 @@ _logger = get_logger("wechat_bot")
 # ── ilink 接口常量 ─────────────────────────────────────────────────────────────
 
 ILINK_BASE = "https://ilinkai.weixin.qq.com"
+ILINK_CHANNEL_VERSION = "1.0.3"
+# iLink encodes 1.0.3 as major << 16 | minor << 8 | patch.
+ILINK_APP_CLIENT_VERSION = "65539"
 
 _ANSI_RE = re.compile(r'\x1b\[[0-9;]*[mKABCDEFGHJKST]')
 _TMP_DIR = Path(tempfile.mkdtemp(prefix="sjtu_wechat_"))
@@ -99,11 +102,13 @@ class ILinkClient:
             "AuthorizationType": "ilink_bot_token",
             "Authorization": f"Bearer {self.token}",
             "X-WECHAT-UIN": uin,
+            "iLink-App-Id": "bot",
+            "iLink-App-ClientVersion": ILINK_APP_CLIENT_VERSION,
         }
 
     def _post(self, endpoint: str, body: dict) -> dict:
         """POST 到 ilink bot 接口，自动注入 base_info 和 Content-Length。"""
-        body["base_info"] = {"channel_version": "1.0.3"}
+        body["base_info"] = {"channel_version": ILINK_CHANNEL_VERSION}
         raw = json.dumps(body, ensure_ascii=False).encode("utf-8")
         headers = self._headers()
         headers["Content-Length"] = str(len(raw))
@@ -113,9 +118,17 @@ class ILinkClient:
             headers=headers,
             timeout=35,
         )
+        resp.raise_for_status()
         text = resp.text.strip()
         if text and text != "{}":
-            return resp.json()
+            data = resp.json()
+            ret = data.get("ret", 0)
+            errcode = data.get("errcode", 0)
+            if ret not in (None, 0) or errcode not in (None, 0):
+                code = errcode or ret
+                errmsg = data.get("errmsg") or "unknown error"
+                raise RuntimeError(f"iLink {endpoint} failed ({code}): {errmsg}")
+            return data
         return {"ret": 0}
 
     # ---- 消息接收 -------------------------------------------------------------
