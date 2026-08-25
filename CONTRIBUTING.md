@@ -42,15 +42,15 @@ sjtu-agent setup        # 交互式配置向导
 
 ---
 
-## AI 辅助编程
+## Coding Agent 辅助开发
 
-我们欢迎使用 AI 工具（Claude Code、Copilot、Cursor、Codex 等）辅助开发——项目自身的多数代码也是借助 AI 完成的。只需注意以下三点：
+我们欢迎使用 **Coding Agent**（Claude Code、Codex、Cursor、DeepSeek Harness / DSH 等）辅助开发——项目自身的多数代码也是借助 Coding Agent 完成的。记住 **Agent = Model + Harness**：模型提供能力，Harness（提示词、工具、流程约束）决定可靠性，两者都值得认真打磨。只需注意以下三点：
 
-1. **功能正确、测试通过**。让 AI 帮你跑 `pytest tests/ -q`，全部绿灯再提交。如果加了新功能，让 AI 帮你写测试。
+1. **功能正确、测试通过**。让 Coding Agent 帮你跑 `pytest tests/ -q`，全部绿灯再提交。如果加了新功能，让 Coding Agent 帮你写测试。
 
-2. **安全你自己把关**。AI 可能忽略路径穿越、SSRF、凭据泄露等问题。提交前快速自查：有没有新的 HTTP 请求没校验 URL？有没有新的文件路径没防穿越？有没有不小心打印了 token？
+2. **安全你自己把关**。Coding Agent 可能忽略路径穿越、SSRF、凭据泄露等问题。提交前快速自查：有没有新的 HTTP 请求没校验 URL？有没有新的文件路径没防穿越？有没有不小心打印了 token？
 
-3. **PR 描述说清楚做了什么**。如果代码主要靠 AI 生成，在 PR 里标注即可——这不丢人，项目维护者自己也这么开发。
+3. **PR 描述说清楚做了什么**。如果代码主要靠 Coding Agent 生成，在 PR 里标注即可——这不丢人，项目维护者自己也这么开发。
 
 ---
 

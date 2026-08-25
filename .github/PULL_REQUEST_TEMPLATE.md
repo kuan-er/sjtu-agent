@@ -57,7 +57,7 @@ Fixes #N
 - [ ] diff 只包含与功能直接相关的源码和测试，无临时脚本 / 中间产物 / 大二进制
 - [ ] 无凭据、Token、`.env`、`config.json` 内容；截图已脱敏
 - [ ] 用户可见行为变化已补充 CHANGELOG（Unreleased 节）
-- [ ] 若主要借助 AI（Claude Code / Copilot / Codex 等）生成，已在描述中标注
+- [ ] 若主要借助 Coding Agent（Claude Code / Codex / Cursor / DSH 等）生成，已在描述中标注
 
 ## 备注
 
