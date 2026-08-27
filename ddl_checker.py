@@ -2243,9 +2243,29 @@ def fetch_schedule(cfg: dict, year: str = "", term: str = "", refresh: bool = Fa
     return result
 
 
+def _effective_semester_start(cfg: dict, now=None) -> str:
+    """生效的学期第一周周一：官方校历优先，config['semester_start'] 兜底。
+
+    校历（academic_calendar.json）覆盖当天所在学期时直接采用其 start_date——
+    教学周以校历为准，避免新学期沿用上学期的旧配置导致周次过滤失效；
+    校历未覆盖（寒暑假/未收录学期）时回退 config 中手动设置的值。
+    """
+    from datetime import date as _date
+    target = now or NOW.date()
+    try:
+        from sjtu_agent.calendar import AcademicCalendar
+        from sjtu_agent.paths import DATA_DIR
+        cal_start = AcademicCalendar(DATA_DIR).get_semester_start(target)
+        if cal_start:
+            return cal_start.isoformat()
+    except Exception:
+        pass  # 校历文件缺失/损坏时静默走旧配置，不阻断课表查询
+    return str(cfg.get("semester_start", "") or "")
+
+
 def _current_week_num(cfg: dict) -> int | None:
-    """计算当前是第几教学周；需要 config 中有 semester_start（学期第一周周一的日期 YYYY-MM-DD）。"""
-    start_str = cfg.get("semester_start", "")
+    """计算当前是第几教学周；周次锚点由 _effective_semester_start 决定。"""
+    start_str = _effective_semester_start(cfg)
     if not start_str:
         return None
     try:
@@ -2280,8 +2300,8 @@ def get_schedule_for_date(cfg: dict, date_str: str = "", refresh: bool = False) 
         except ValueError:
             return {"error": f"日期格式错误: {date_str}，请使用 YYYY-MM-DD"}
 
-    # 计算第几周
-    start_str = cfg.get("semester_start", "")
+    # 计算第几周（校历优先，config 兜底）
+    start_str = _effective_semester_start(cfg, now=target)
     week_num: int | None = None
     if start_str:
         try:

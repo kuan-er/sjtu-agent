@@ -91,6 +91,21 @@ class AcademicCalendar:
                 continue
         return ""
 
+    def get_semester_start(self, date: _dt.date | None = None) -> _dt.date | None:
+        """Start date (week-1 Monday) of the calendar semester containing *date*."""
+        if date is None:
+            date = _dt.date.today()
+        self.load()
+        for key, sem in sorted(self._data.get("semesters", {}).items()):
+            try:
+                start = _dt.date.fromisoformat(sem["start_date"])
+                end = _dt.date.fromisoformat(sem["end_date"])
+                if start <= date <= end:
+                    return start
+            except (KeyError, ValueError):
+                continue
+        return None
+
     def get_context(self, date: _dt.date | None = None) -> str:
         """Build a prompt-ready context string for the given date."""
         if date is None:
