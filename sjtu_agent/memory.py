@@ -27,6 +27,11 @@ def _get_client(persist_dir: str):
 
     chromadb 是可选依赖（[memory] extra）。未安装时抛清晰的 RuntimeError，
     由 store_memory/search_memory 捕获后优雅降级（语义记忆功能不可用）。
+
+    安全约定（#177）：只用嵌入式 PersistentClient（进程内、本地 SQLite，
+    无网络监听）。不要改用 HttpClient 或启动 chroma server——chromadb
+    Python 服务器模式存在预鉴权 RCE（CVE-2026-45829 "ChromaToast"），
+    服务器形态会让本地优先的桌面应用暴露出远程攻击面。
     """
     global _client
     if _client is not None:
