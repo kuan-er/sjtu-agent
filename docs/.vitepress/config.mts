@@ -13,10 +13,20 @@ export default defineConfig({
   ],
   themeConfig: {
     nav: [
+      { text: '新手指南', link: '/guide/' },
       { text: '项目展示页', link: 'https://kuan-er.github.io/sjtu-agent' },
       { text: 'GitHub', link: 'https://github.com/kuan-er/sjtu-agent' },
     ],
     sidebar: [
+      {
+        text: '新手指南',
+        items: [
+          { text: '先看这里（总览）', link: '/guide/' },
+          { text: 'AI 使用基础', link: '/guide/ai-basics' },
+          { text: '从零安装', link: '/guide/install' },
+          { text: '日常话术库', link: '/guide/cookbook' },
+        ],
+      },
       {
         text: '开始',
         items: [
