@@ -139,3 +139,28 @@ class TestSemester:
     def test_next_semester_start(self, cal):
         assert cal.next_semester_start(_dt.date(2026, 8, 16)) == _dt.date(2026, 9, 14)
         assert cal.next_semester_start(_dt.date(2027, 1, 20)) is None
+
+
+class TestFallSemesterStart:
+    """2026-2027 秋季学期：官方校历（jwc.sjtu.edu.cn）第1周周一 = 2026-09-14。"""
+
+    def test_get_semester_start_inside_term(self, cal):
+        assert cal.get_semester_start(_dt.date(2026, 9, 14)) == _dt.date(2026, 9, 14)
+        assert cal.get_semester_start(_dt.date(2026, 12, 25)) == _dt.date(2026, 9, 14)
+        assert cal.get_semester_start(_dt.date(2027, 1, 17)) == _dt.date(2026, 9, 14)
+
+    def test_get_semester_start_outside_term(self, cal):
+        assert cal.get_semester_start(_dt.date(2026, 9, 13)) is None
+        assert cal.get_semester_start(_dt.date(2027, 1, 18)) is None
+
+    def test_new_year_day_holiday(self, cal):
+        is_hol, name = cal.is_holiday(_dt.date(2027, 1, 1))
+        assert is_hol is True
+        assert "元旦" in name
+
+    def test_end_date_covers_exam_week(self, cal):
+        """考试周（第18周，最后2周之末）仍在学期窗口内，1/18 起才算寒假。"""
+        sem = cal.get_semester(_dt.date(2027, 1, 15))
+        assert sem == "2026-2027-1"
+        ctx = cal.get_context(_dt.date(2027, 1, 20))
+        assert "寒假" in ctx
