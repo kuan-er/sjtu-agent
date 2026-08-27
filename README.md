@@ -51,6 +51,8 @@
 
 ## 快速开始
 
+> 🧭 **第一次接触 AI 工具 / 第一次配置开发环境？** 不要直接往下看，从文档站的[新手指南](https://kuan-er.github.io/sjtu-agent/docs/guide/)开始：[AI 使用基础](https://kuan-er.github.io/sjtu-agent/docs/guide/ai-basics) → [从零安装](https://kuan-er.github.io/sjtu-agent/docs/guide/install) → [日常话术库](https://kuan-er.github.io/sjtu-agent/docs/guide/cookbook)。下面的内容是给熟练玩家的速查。
+
 ### macOS / Linux
 
 ```bash

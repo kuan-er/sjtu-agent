@@ -4,6 +4,8 @@ SJTU Agent 是面向上海交通大学学生的校园助手，提供终端对话
 
 ## 快速导航
 
+**第一次接触 AI 工具？** 从[新手指南](guide/index.md)开始：[AI 使用基础](guide/ai-basics.md) → [从零安装](guide/install.md) → [日常话术库](guide/cookbook.md)
+
 - [安装与快速开始](https://github.com/kuan-er/sjtu-agent#%E5%BF%AB%E9%80%9F%E5%BC%80%E5%A7%8B)
 - [Web GUI](WEB_GUI_REDESIGN.md)
 - [Textual TUI](TUI.md)

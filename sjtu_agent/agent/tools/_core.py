@@ -1546,6 +1546,9 @@ def _serialize_lab(lab: dict | None) -> dict | None:
     }
 
 
+_SETUP_GUIDE_URL = "https://kuan-er.github.io/sjtu-agent/docs/guide/install/"
+
+
 def tool_check_setup() -> dict:
     env_user  = os.environ.get("JACCOUNT_USERNAME", "")
     env_pass  = os.environ.get("JACCOUNT_PASSWORD", "")
@@ -1561,7 +1564,7 @@ def tool_check_setup() -> dict:
     def has_cookies(key: str) -> bool:
         return bool(cfg.get(key))
 
-    return {
+    result = {
         "agent": {
             "configured": bool(agent_cfg.get("api_key") and agent_cfg.get("model")),
             "base_url": agent_cfg.get("base_url") or None,
@@ -1608,6 +1611,20 @@ def tool_check_setup() -> dict:
         },
         "config_file_exists": CONFIG_PATH.exists(),
     }
+
+    # 未配置的项附带新手教程链接，doctor 输出与 LLM 引导都能直接引用
+    for area, ready_key in (
+        ("agent", "configured"),
+        ("jaccount", "has_credentials"),
+        ("canvas", "has_token"),
+        ("aihaoke", "has_cookies"),
+        ("phycai", "has_cookies"),
+        ("icourse", "has_cookies"),
+        ("course_community", "has_cookies"),
+    ):
+        if not result[area].get(ready_key):
+            result[area]["help_url"] = _SETUP_GUIDE_URL
+    return result
 
 
 def tool_setup_canvas(open_browser: bool = True, auto_create: bool = False, token_purpose: str = "SJTU Agent") -> dict:
