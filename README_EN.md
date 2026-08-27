@@ -25,6 +25,8 @@ If this project helps you, please consider giving it a ⭐ Star!
 
 ## Installation
 
+> 🧭 **New to AI tools or setting up a dev environment?** Start with the beginner guide on the docs site instead: [Get Started](https://kuan-er.github.io/sjtu-agent/docs/guide/) → [AI Basics](https://kuan-er.github.io/sjtu-agent/docs/guide/ai-basics) → [Install from Scratch](https://kuan-er.github.io/sjtu-agent/docs/guide/install) → [Prompt Cookbook](https://kuan-er.github.io/sjtu-agent/docs/guide/cookbook). Everything below is the quick reference for experienced users.
+
 macOS / Linux:
 
 ```bash
