@@ -410,6 +410,8 @@ def _build_recommendations(status: dict) -> list[str]:
         recommendations.append("[可选] 在 Chrome 登录教学平台后，重跑 setup 或 setup-config 导入 cookie——AI 好课/物理实验/中国大学 MOOC 需要")
     if not (status["shuiyuan"]["has_api_key"] or status["shuiyuan"]["has_cookies"]):
         recommendations.append("[可选] 需要水源论坛搜索时，之后在对话里让 agent 配置水源即可")
+    if recommendations:
+        recommendations.append("新手图文教程：https://kuan-er.github.io/sjtu-agent/docs/guide/")
     return recommendations
 
 
@@ -603,6 +605,12 @@ def _run_automatic_setup(args: argparse.Namespace) -> int:
     else:
         print(f"The main agent is not ready yet. Add LLM settings in {AGENT_CONFIG_PATH} and then run: sjtu-agent")
     print("You can rerun this command any time: sjtu-agent setup")
+    if status["agent"]["configured"]:
+        print("\n接下来推荐做三件事：")
+        print("  1) 运行 sjtu-agent 开始对话，先问一句「这周有什么作业要交？」验证数据链路")
+        print("  2) 运行 sjtu-agent web 打开网页版界面（或 pip install -e \".[tui]\" 体验全屏终端）")
+        print("  3) 想在飞书 / 微信 / QQ 里随口使唤它？看 README「多平台 Bot」章节绑定")
+        print("新手指南：https://kuan-er.github.io/sjtu-agent/docs/guide/")
     return 0
 
 
@@ -1161,6 +1169,7 @@ class SetupConversation:
                         "先不", "不用", "不需要", "后面再说"}:
                 self.say("好的，这次 setup 到这里结束。之后你随时可以直接运行 sjtu-agent。")
                 self.say("如果以后想重新检查环境，直接运行 sjtu-agent setup 或 sjtu-agent doctor。")
+                self.say("新手指南和日常玩法示例：https://kuan-er.github.io/sjtu-agent/docs/guide/")
                 return 0
             # 其他命令（status / help / quit 等）仍走 handle_common
             intent = self.handle_common(raw, "finish", status)
@@ -1172,6 +1181,7 @@ class SetupConversation:
             if intent == "skip":
                 self.say("好的，这次 setup 到这里结束。之后你随时可以直接运行 sjtu-agent。")
                 self.say("如果以后想重新检查环境，直接运行 sjtu-agent setup 或 sjtu-agent doctor。")
+                self.say("新手指南和日常玩法示例：https://kuan-er.github.io/sjtu-agent/docs/guide/")
                 return 0
             # 未识别 → 明确的 y/N 提示，不再含糊重播
             self.say("请回复 y 启动主对话，或 n 结束 setup。")

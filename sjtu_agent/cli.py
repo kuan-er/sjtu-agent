@@ -68,6 +68,19 @@ def _run_module(module_name: str, script_args: list[str] | None = None) -> int:
         sys.argv = old_argv
 
 
+def _missing_required_setup(setup: dict) -> list[str]:
+    """从 check_setup 结果里挑出必填但未配置的项（用于 doctor 的人类可读提示）。"""
+    return [
+        label
+        for label, ok in (
+            ("大模型 API", setup.get("agent", {}).get("configured")),
+            ("jAccount 账号", setup.get("jaccount", {}).get("has_credentials")),
+            ("Canvas Token", setup.get("canvas", {}).get("has_token")),
+        )
+        if not ok
+    ]
+
+
 def _cmd_doctor(_: argparse.Namespace) -> int:
     import agent
 
@@ -77,6 +90,10 @@ def _cmd_doctor(_: argparse.Namespace) -> int:
         "setup": agent.tool_check_setup(),
     }
     print_json(payload)
+    required_missing = _missing_required_setup(payload["setup"])
+    if required_missing:
+        print(f"\n[!] 必填项尚未配置：{'、'.join(required_missing)}")
+        print("    按新手教程补配：https://kuan-er.github.io/sjtu-agent/docs/guide/install/")
     return 0
 
 

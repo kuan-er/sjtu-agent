@@ -374,7 +374,11 @@ def chat_loop(client, model: str):
     if all_ok:
         uname = setup["jaccount"].get("username") or ""
         print(f"✅ 所有平台已就绪（{uname}）\n")
-        print("输入问题继续对话，输入 quit 退出。\n")
+        print("试试这样问（直接说人话即可，不必背命令）：")
+        print("  · 这周有什么作业要交？")
+        print("  · 明天上午有课吗？")
+        print("  · 帮我记一下明天 14:00 提醒我交实验报告")
+        print("更多玩法见话术库：https://kuan-er.github.io/sjtu-agent/docs/guide/cookbook/\n")
     else:
         # 有未完成配置，让 LLM 引导
         setup_json = json.dumps(setup, ensure_ascii=False)
