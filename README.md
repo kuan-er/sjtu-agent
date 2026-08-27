@@ -372,4 +372,4 @@ npm run docs:build           # 构建文档站
 
 ## 版本
 
-当前版本：**v0.22.0**。发布历史见 [Releases](https://github.com/kuan-er/sjtu-agent/releases)。
+当前版本：**v0.23.0**。发布历史见 [Releases](https://github.com/kuan-er/sjtu-agent/releases)。
