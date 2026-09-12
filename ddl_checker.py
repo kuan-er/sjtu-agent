@@ -2090,6 +2090,16 @@ def _parse_jcs(jcs: str) -> tuple[int, int]:
     return start, end
 
 
+def _jwxt_probe_data() -> dict:
+    """JWXT 会话探测用的学期参数：跟随当前学期动态推导，不硬编码。
+
+    教务系统按学期归档课表，探测参数若停留在旧学期，开学切换后
+    有效会话也可能被判为过期，触发不必要的 Playwright 重新登录。
+    """
+    year, xqm = _auto_year_term()
+    return {"xnm": year, "xqm": xqm}
+
+
 def _get_jwxt_cookies(cfg: dict) -> dict | None:
     """获取 JWXT session cookies，优先复用已保存的，失效时走 Playwright 刷新。"""
     saved = cfg.get("jwxt_cookies", {})
@@ -2097,7 +2107,7 @@ def _get_jwxt_cookies(cfg: dict) -> dict | None:
         try:
             r = requests.post(
                 "https://i.sjtu.edu.cn/kbcx/xskbcx_cxXsKb.html",
-                data={"xnm": "2025", "xqm": "12"},
+                data=_jwxt_probe_data(),
                 cookies=saved,
                 headers={"User-Agent": "Mozilla/5.0"},
                 timeout=10,

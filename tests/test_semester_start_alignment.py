@@ -32,3 +32,24 @@ def test_stale_cfg_cannot_produce_weeks_in_new_term():
     start_str = dc._effective_semester_start(cfg, now=_dt.date(2026, 9, 15))
     week = (_dt.date(2026, 9, 15) - _dt.date.fromisoformat(start_str)).days // 7 + 1
     assert week == 1
+
+
+def test_jwxt_probe_follows_current_term(monkeypatch):
+    """JWXT 会话探测学期参数随当前日期动态推导（开学切换不再用旧学期码）。"""
+    import datetime as dt
+
+    class _FakeNow(dt.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 9, 15, tzinfo=tz) if tz else cls(2026, 9, 15)
+
+    monkeypatch.setattr(dc, "NOW", _FakeNow(2026, 9, 15))
+    assert dc._jwxt_probe_data() == {"xnm": "2026", "xqm": "3"}
+
+    class _SpringNow(dt.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2027, 3, 10, tzinfo=tz) if tz else cls(2027, 3, 10)
+
+    monkeypatch.setattr(dc, "NOW", _SpringNow(2027, 3, 10))
+    assert dc._jwxt_probe_data() == {"xnm": "2026", "xqm": "12"}
