@@ -141,6 +141,20 @@ class TestSemester:
         assert cal.next_semester_start(_dt.date(2027, 1, 20)) is None
 
 
+class TestMakeupClassMapping:
+    """2026 国庆调休的官方课表映射（校通知 2025-11-26）。"""
+
+    def test_sep20_follows_week3_friday(self, cal):
+        assert cal.get_makeup_class(_dt.date(2026, 9, 20)) == {"week": 3, "weekday": 5}
+
+    def test_oct10_follows_week4_tuesday(self, cal):
+        assert cal.get_makeup_class(_dt.date(2026, 10, 10)) == {"week": 4, "weekday": 2}
+
+    def test_normal_day_has_no_mapping(self, cal):
+        assert cal.get_makeup_class(_dt.date(2026, 9, 15)) is None
+        assert cal.get_makeup_class(_dt.date(2026, 10, 1)) is None
+
+
 class TestFallSemesterStart:
     """2026-2027 秋季学期：官方校历（jwc.sjtu.edu.cn）第1周周一 = 2026-09-14。"""
 
