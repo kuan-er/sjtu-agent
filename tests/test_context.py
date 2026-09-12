@@ -109,3 +109,37 @@ def test_trim_clears_then_folds():
     n = trim_session(msgs, budget=400)
     assert n > 0
     assert _session_history_cost(msgs) <= 400
+
+
+# ── 多模态计费与单轮保护（deepseek-flash 发图实测反馈） ──────────────────────
+
+def test_multimodal_image_cost_is_fixed_not_base64_length():
+    """图片块按固定视觉成本计费，绝不按 base64 长度计（否则一张图击穿预算）。"""
+    from sjtu_agent.agent import context
+    huge_b64 = "A" * 3_000_000
+    msgs = [
+        {"role": "system", "content": "S"},
+        {"role": "user", "content": [
+            {"type": "text", "text": "这是什么"},
+            {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + huge_b64}},
+        ]},
+    ]
+    cost = context._message_cost(msgs[1])
+    assert cost < 10_000  # base64 按长度算是百万级"token"
+    assert trim_session(msgs) == 0
+    assert any(isinstance(m.get("content"), list) for m in msgs)  # 图片消息仍在
+
+
+def test_single_turn_never_folded():
+    """唯一/最新用户消息绝不折叠——折叠掉模型只会说'看不到你的问题'。"""
+    msgs = [
+        {"role": "system", "content": "S"},
+        {"role": "user", "content": "帮我看看这个" + "x" * 500_000},
+    ]
+    n = trim_session(msgs, budget=1000)
+    assert n == 0
+    assert any(m.get("role") == "user" for m in msgs)
+    assert not any(
+        m.get("role") == "system" and "已折叠" in str(m.get("content", ""))
+        for m in msgs
+    )

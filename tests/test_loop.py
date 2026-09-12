@@ -80,3 +80,25 @@ def test_converge_openai_appends_fallback_on_failure(monkeypatch):
     runner._converge_openai(client, "deepseek-chat", msgs)
     assert msgs[-1]["role"] == "assistant"
     assert "工具调用上限" in msgs[-1]["content"]
+
+
+def test_strip_dsml_blocks_real_sample():
+    """deepseek 流式偶发把工具调用以 DSML 原文混入正文（用户实测截图）。"""
+    from sjtu_agent.agent.runner import _strip_dsml_blocks
+    raw = (
+        "我来搜索一下。\n"
+        "<｜｜DSML｜｜ calls>\n"
+        '<｜｜DSML｜｜ invoke name="web_search">\n'
+        '<｜｜DSML｜｜ parameter name="query" string="true">"Quasar" OpenAI next model after Astra 2026</｜｜DSML｜｜ parameter>\n'
+        "</｜｜DSML｜｜ invoke>\n"
+        "</｜｜DSML｜｜ calls>"
+    )
+    out = _strip_dsml_blocks(raw)
+    assert out == "我来搜索一下。"
+    assert "DSML" not in out
+
+
+def test_strip_dsml_blocks_unclosed_and_clean():
+    from sjtu_agent.agent.runner import _strip_dsml_blocks
+    assert _strip_dsml_blocks('回答：<｜｜DSML｜｜ invoke name="web_search">') == "回答："
+    assert _strip_dsml_blocks("普通回复，没有标记") == "普通回复，没有标记"
