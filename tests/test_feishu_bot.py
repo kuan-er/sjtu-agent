@@ -721,6 +721,9 @@ def test_parse_fail_context_includes_reason_and_anti_hallucination():
     assert "paddleocr backend is not installed" in ctx
     assert "如实" in ctx and "不要编造" in ctx
     assert "权限" in ctx or "白名单" in ctx  # 点名被禁止的说法，堵死幻觉
+    # 防注意力漂移：实测模型收到解析失败上下文后会跑去汇报配置状态（用户反馈）
+    assert "不要转而去检查或汇报配置状态" in ctx
+    assert "check_setup" in ctx
 
 
 def test_parse_fail_context_empty_reason_says_unknown():
