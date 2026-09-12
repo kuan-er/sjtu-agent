@@ -53,3 +53,39 @@ def test_jwxt_probe_follows_current_term(monkeypatch):
 
     monkeypatch.setattr(dc, "NOW", _SpringNow(2027, 3, 10))
     assert dc._jwxt_probe_data() == {"xnm": "2026", "xqm": "12"}
+
+
+def test_schedule_for_date_applies_makeup_substitution(monkeypatch):
+    """调休补课日查询：9/20 应返回第3周周五的课程，而非自然周日/第1周的课程。"""
+    fake = {
+        "courses": [
+            {"name": "秋3周五的课", "day": 5, "weeks": [3], "teacher": "T1"},
+            {"name": "第1周周五的课", "day": 5, "weeks": [1], "teacher": "T2"},
+            {"name": "周日的课", "day": 7, "weeks": [1], "teacher": "T3"},
+        ]
+    }
+    monkeypatch.setattr(dc, "fetch_schedule", lambda cfg, refresh=False: fake)
+
+    result = dc.get_schedule_for_date({}, date_str="2026-09-20")
+
+    names = [c["name"] for c in result["courses"]]
+    assert names == ["秋3周五的课"]
+    assert result["weekday"] == "周五"
+    assert "调休补课日" in result["week_info"]
+    assert "第 3 周" in result["week_info"]
+
+
+def test_schedule_for_date_normal_day_unaffected(monkeypatch):
+    """非调休日：仍按自然日期的星期+周次过滤。"""
+    fake = {
+        "courses": [
+            {"name": "第1周周二的课", "day": 2, "weeks": [1], "teacher": "T"},
+            {"name": "第2周周二的课", "day": 2, "weeks": [2], "teacher": "T"},
+        ]
+    }
+    monkeypatch.setattr(dc, "fetch_schedule", lambda cfg, refresh=False: fake)
+
+    result = dc.get_schedule_for_date({}, date_str="2026-09-15")
+
+    assert [c["name"] for c in result["courses"]] == ["第1周周二的课"]
+    assert "调休" not in result["week_info"]

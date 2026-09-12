@@ -2326,12 +2326,26 @@ def get_schedule_for_date(cfg: dict, date_str: str = "", refresh: bool = False) 
         return result
 
     weekday = target.isoweekday()   # 1=周一 … 7=周日
+
+    # 调休补课日（校通知指定执行某周某天的课表）：覆盖该日期自然所属的周/星期
+    makeup_note = ""
+    try:
+        from sjtu_agent.calendar import AcademicCalendar
+        from sjtu_agent.paths import DATA_DIR
+        mk = AcademicCalendar(DATA_DIR).get_makeup_class(target)
+    except Exception:
+        mk = None
+    if mk:
+        week_num = mk["week"]
+        weekday = mk["weekday"]
+        makeup_note = f"（调休补课日，按第{mk['week']}周{_WEEKDAY_CN[mk['weekday']]}课表执行）"
+
     day_courses = [
         c for c in result["courses"]
         if c["day"] == weekday and (week_num is None or week_num in c["weeks"])
     ]
 
-    week_info = f"第 {week_num} 周" if week_num else "（未配置 semester_start，不过滤周次）"
+    week_info = f"第 {week_num} 周{makeup_note}" if week_num else "（未配置 semester_start，不过滤周次）"
     return {
         "date":      target.isoformat(),
         "weekday":   _WEEKDAY_CN[weekday],

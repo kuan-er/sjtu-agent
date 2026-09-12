@@ -33,6 +33,7 @@ class AcademicCalendar:
         # cache: flat lookup built from all semesters
         self._all_holidays: dict[str, str] | None = None
         self._all_makeup: dict[str, str] | None = None
+        self._all_makeup_classes: dict[str, dict] | None = None
 
     def load(self) -> dict:
         """Load raw JSON. Returns empty structure on any error."""
@@ -54,11 +55,14 @@ class AcademicCalendar:
         self.load()
         self._all_holidays = {}
         self._all_makeup = {}
+        self._all_makeup_classes = {}
         for key, sem in self._data.get("semesters", {}).items():
             for date_str, name in sem.get("holidays", {}).items():
                 self._all_holidays[date_str] = name
             for date_str, note in sem.get("makeup_days", {}).items():
                 self._all_makeup[date_str] = note
+            for date_str, mapping in sem.get("makeup_schedule", {}).items():
+                self._all_makeup_classes[date_str] = mapping
 
     # ── public API ──────────────────────────────────────────────────────
 
@@ -75,6 +79,22 @@ class AcademicCalendar:
         key = date.isoformat()
         note = self._all_makeup.get(key, "")
         return (bool(note), note)
+
+    def get_makeup_class(self, date: _dt.date) -> dict | None:
+        """Official course-schedule substitution for a makeup workday.
+
+        Returns {"week": int, "weekday": int} (weekday: 1=Monday … 7=Sunday)
+        when the school notice prescribes executing another week/day's
+        timetable on *date* (e.g. 2026-09-20 → week-3 Friday), else None.
+        """
+        self._ensure_flattened()
+        mapping = self._all_makeup_classes.get(date.isoformat())
+        if not mapping:
+            return None
+        try:
+            return {"week": int(mapping["week"]), "weekday": int(mapping["weekday"])}
+        except (KeyError, TypeError, ValueError):
+            return None
 
     def get_semester(self, date: _dt.date | None = None) -> str:
         """Return the semester key active on *date* (e.g. '2025-2026-2')."""
