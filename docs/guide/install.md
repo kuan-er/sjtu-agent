@@ -98,17 +98,17 @@ sjtu-agent doctor   # 应显示大模型已配置 + 各项路径正常
 
 ## 省力路线：让 Coding Agent 替你装
 
-照抄命令遇到报错不想自己查？可以请一个 **Coding Agent**（如 ZCode、Claude Code 等——能读写文件、执行命令、自动排错的 AI 助手）代劳。这不只是偷懒：**熟练指挥 AI Agent 干活，本身就是大学四年最值得练的能力之一**。本项目自己也大量靠 Coding Agent 开发（见 [CONTRIBUTING](https://github.com/kuan-er/sjtu-agent/blob/main/CONTRIBUTING.md) 的「Coding Agent 辅助开发」）。
+照抄命令遇到报错不想自己查？可以请一个 **Coding Agent** 代劳——能读写文件、执行命令、自动排错的 AI 助手。推荐 **[ZCode](https://zcode.z.ai/cn)**（智谱官方，GLM 系模型的配套 Agent 工具，Windows / macOS / Linux 桌面端，[安装三步约 2 分钟](https://zcode.z.ai/cn/docs/install)；工具本体免费，模型调用需登录智谱账号订阅，以[官网说明](https://zcode.z.ai/cn/docs/configuration)为准）。同类还有 Claude Code 等。这不只是偷懒：**熟练指挥 AI Agent 干活，本身就是大学四年最值得练的能力之一**。本项目自己也大量靠 Coding Agent 开发（见 [CONTRIBUTING](https://github.com/kuan-er/sjtu-agent/blob/main/CONTRIBUTING.md) 的「Coding Agent 辅助开发」）。
 
-用法很简单——把仓库克隆下来，在项目目录里启动它，说人话就行：
+用法很简单——先把仓库克隆下来，再让 ZCode 打开这个文件夹，说人话就行：
 
 ```bash
 git clone https://github.com/kuan-er/sjtu-agent.git
-cd sjtu-agent
-zcode
 ```
 
-然后直接对它说：
+1. 按[官网指引](https://zcode.z.ai/cn/docs/install)安装并登录 ZCode；
+2. 在 ZCode 里打开 `sjtu-agent` 文件夹作为工作区；
+3. 对话框里直接说：
 
 ```text
 我是新手，第一次配置开发环境。请按 docs/guide/install.md 的流程帮我安装并配置这个项目，
