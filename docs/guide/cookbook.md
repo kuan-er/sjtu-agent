@@ -111,7 +111,7 @@ GitHub 上有没有好用的 LaTeX resume 模板仓库？
 （上传课件 PDF 后）帮我把这份课件划一下考试重点
 ```
 
-支持图片（配视觉模型）、OCR、PDF 解析；部分解析后端需按提示一键安装（`sjtu-agent install-parse-backends`）。
+支持图片、OCR、PDF 解析（主模型选 DeepSeek 官方 `deepseek-flash` 则原生看图，无需额外配置；其他纯文本主模型可在 setup 里配一个视觉模型兜底）；部分解析后端需按提示一键安装（`sjtu-agent install-parse-backends`）。
 
 ## 🧠 让它越来越懂你
 
