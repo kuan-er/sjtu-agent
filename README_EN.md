@@ -98,11 +98,11 @@ Available models:
 
 **How to apply:** Go to [zhiyuan.sjtu.edu.cn](https://zhiyuan.sjtu.edu.cn), log in with jAccount, create a key under "API Management".
 
-For DeepSeek official or other OpenAI-compatible backends, select "Custom" in the web config page and fill in your API key, Base URL, and model name.
+For DeepSeek official, use model `deepseek-flash` (V4.1 Flash, **native vision** — no separate vision model needed); for other OpenAI-compatible backends, select "Custom" in the web config page and fill in your API key, Base URL, and model name.
 
 ## Vision Model (Optional, for Image Recognition)
 
-If your main model does not support vision input (e.g. `deepseek-chat`), you can configure a separate vision model (e.g. `qwen-vl-max`). When Feishu receives an image, the vision model recognizes it first, with OCR as a fallback. **Choose any one of three configuration methods:**
+If your main model does not support vision input (e.g. Zhiyuan's `deepseek-chat`), you can configure a separate vision model (e.g. `qwen-vl-max`). When Feishu receives an image, the vision model recognizes it first, with OCR as a fallback. Alternatively, DeepSeek official `deepseek-flash` (V4.1 Flash) supports vision natively — skip this section entirely. **Choose any one of three configuration methods:**
 
 1. **Interactive**: run `sjtu-agent setup`. After configuring the main model, follow the prompts to configure the vision model (API key input is **not echoed**).
 

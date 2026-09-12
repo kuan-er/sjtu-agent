@@ -53,7 +53,7 @@ PRESETS = {
     "deepseek": {
         "label": "DeepSeek 官方",
         "base_url": "https://api.deepseek.com",
-        "model": "deepseek-chat",
+        "model": "deepseek-flash",
         "env_key": "DEEPSEEK_API_KEY",
     },
     "openai": {
