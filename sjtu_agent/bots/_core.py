@@ -150,6 +150,7 @@ def model_supports_vision(model: str) -> bool:
         "vision", "gpt-4o", "gpt-4-turbo", "claude-3", "claude-4",
         "gemini", "qwen-vl", "qwen3vl", "glm-4v", "internvl",
         "sonnet-4", "opus-4", "haiku-4",
+        "deepseek-flash",  # V4.1 Flash（官方 API）原生多模态
     ])
 
 

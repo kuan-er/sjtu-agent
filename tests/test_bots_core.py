@@ -122,3 +122,13 @@ def test_stable_prefix_system_has_no_date(monkeypatch):
     core.run_one_turn(sess2, "你好")
     assert "当前学期" in sess2["messages"][1]["content"]
     assert "你好" in sess2["messages"][1]["content"]
+
+
+def test_model_supports_vision_deepseek_flash():
+    """deepseek-flash（V4.1 Flash）原生多模态：主模型直接识图，无需独立视觉模型。"""
+    from sjtu_agent.bots._core import model_supports_vision
+    assert model_supports_vision("deepseek-flash") is True
+    # 致远一号的 deepseek-chat 仍是纯文本调用名
+    assert model_supports_vision("deepseek-chat") is False
+    # 旧实验视觉名含 vision 关键字，继续命中
+    assert model_supports_vision("deepseek-v4-flash-vision-exp") is True

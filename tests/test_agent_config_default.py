@@ -26,3 +26,16 @@ def test_load_agent_config_zhiyuan_env_uses_deepseek_chat(monkeypatch):
 
 def test_zhiyuan_default_model_constant_is_deepseek_chat():
     assert chat_loop._ZHIYUAN_DEFAULT_MODEL == "deepseek-chat"
+
+def test_load_agent_config_deepseek_env_uses_deepseek_flash(monkeypatch):
+    """DeepSeek 官方 API 兜底预设：deepseek-flash（V4.1 Flash，原生视觉）。"""
+    monkeypatch.delenv("ZHIYUAN_API_KEY", raising=False)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-official")
+
+    cfg = chat_loop.load_agent_config()
+    assert cfg["model"] == "deepseek-flash"
+    assert cfg["base_url"] == "https://api.deepseek.com"
+
+
+def test_deepseek_default_model_constant():
+    assert chat_loop._DEEPSEEK_DEFAULT_MODEL == "deepseek-flash"

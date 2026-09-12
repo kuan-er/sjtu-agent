@@ -861,8 +861,9 @@ class SetupConversation:
         返回 True 表示正常结束（已保存或已跳过）；返回 False 表示用户选择退出 setup。
         """
         self.say("\n接下来是可选的「视觉模型」配置。")
-        self.say("如果你的主模型（如 deepseek）不支持识图，可以单独配一个视觉模型（如 qwen-vl-max），"
-                 "飞书收到图片时优先用它识图。不想配可以回复 skip。")
+        self.say("如果你的主模型不支持识图，可以单独配一个视觉模型（如 qwen-vl-max），"
+                 "飞书收到图片时优先用它识图。")
+        self.say("提示：DeepSeek 官方的 deepseek-flash（V4.1 Flash）已原生支持视觉，选它做主模型可以跳过本步。不想配可以回复 skip。")
         while True:
             raw = self.prompt()
             intent = self.handle_common(raw, "vision", status)

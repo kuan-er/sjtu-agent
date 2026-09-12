@@ -22,6 +22,8 @@ _ZHIYUAN_BASE_URL_ENV  = "ZHIYUAN_BASE_URL"
 _ZHIYUAN_API_KEY_ENV   = "ZHIYUAN_API_KEY"
 _ZHIYUAN_DEFAULT_BASE  = "https://models.sjtu.edu.cn/api/v1"
 _ZHIYUAN_DEFAULT_MODEL = "deepseek-chat"
+# DeepSeek 官方 API（api.deepseek.com）：V4.1 Flash 调用名，原生支持视觉输入
+_DEEPSEEK_DEFAULT_MODEL = "deepseek-flash"
 
 
 def _prefetch_ddls_background() -> None:
@@ -155,7 +157,7 @@ def load_agent_config() -> dict:
         return {
             "base_url": "https://api.deepseek.com",
             "api_key":  deepseek_key,
-            "model":    _ZHIYUAN_DEFAULT_MODEL,
+            "model":    _DEEPSEEK_DEFAULT_MODEL,
             "_source":  "deepseek_env",
         }
     return {}
