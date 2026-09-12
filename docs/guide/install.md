@@ -96,6 +96,33 @@ bash install/install.sh
 sjtu-agent doctor   # 应显示大模型已配置 + 各项路径正常
 ```
 
+## 省力路线：让 Coding Agent 替你装
+
+照抄命令遇到报错不想自己查？可以请一个 **Coding Agent**（如 ZCode、Claude Code 等——能读写文件、执行命令、自动排错的 AI 助手）代劳。这不只是偷懒：**熟练指挥 AI Agent 干活，本身就是大学四年最值得练的能力之一**。本项目自己也大量靠 Coding Agent 开发（见 [CONTRIBUTING](https://github.com/kuan-er/sjtu-agent/blob/main/CONTRIBUTING.md) 的「Coding Agent 辅助开发」）。
+
+用法很简单——把仓库克隆下来，在项目目录里启动它，说人话就行：
+
+```bash
+git clone https://github.com/kuan-er/sjtu-agent.git
+cd sjtu-agent
+zcode
+```
+
+然后直接对它说：
+
+```text
+我是新手，第一次配置开发环境。请按 docs/guide/install.md 的流程帮我安装并配置这个项目，
+我的系统是 Windows。每一步做什么先简单告诉我，遇到报错你来排查。
+```
+
+它会自动读仓库里的 [AGENTS.md](https://github.com/kuan-er/sjtu-agent/blob/main/AGENTS.md) 获取项目引导，替你跑安装脚本、解释向导选项、卡住时看日志找原因。你只需要在它停下来提问时回答（选哪个、要不要装）。
+
+::: warning 唯一要自己动手的：输入凭据
+jAccount 密码、API Key 这类敏感信息，**在向导提示时自己敲进去**，不要粘贴到和 Agent 的聊天里——聊天内容会留在会话记录中。让 Agent 干活，但凭据不外借（与[安全三原则](./ai-basics.md#安全三原则)一脉相承）。
+:::
+
+装完出问题也可以随时叫它帮忙：把 `sjtu-agent doctor` 的输出贴给它（注意先删掉里面的 Key），让它对照本页排错。
+
 ## 第五步：第一次对话
 
 ```bash
