@@ -15,12 +15,17 @@
 
 from __future__ import annotations
 
-# 历史（不含 system）的质量预算。1M 下远低于容量上限，触发=抗腐烂。
-SESSION_QUALITY_BUDGET = 64_000
+# 历史（不含 system）的质量预算。1M 窗口下远低于容量上限，触发=抗腐烂。
+# 2026 起推理模型成为默认，预算不宜再压到几十 K（用户实测反馈）。
+SESSION_QUALITY_BUDGET = 256_000
 # 折叠时保留最近几轮原文（模型最可能需要引用近况）
 KEEP_RECENT_TURNS = 3
 # 清理 tool 结果时保留最近几轮的（模型可能还在引用）
 KEEP_RECENT_TOOL_RESULTS = 2
+# 多模态图片块的固定估算成本：按视觉 token 实际量级计，绝不按 base64
+# 长度计——一张图的 data URL 有数 MB 字符，按长度计会瞬间击穿预算，
+# 把图片消息本身折叠掉（实测导致"模型说看不到对话"）。
+_IMAGE_BLOCK_TOKEN_COST = 1_500
 
 _TOOL_RESULT_PLACEHOLDER = "[工具结果已清理（效果已持久化），如需详情可重新查询]"
 
@@ -32,12 +37,32 @@ def _estimate_tokens(text: object) -> int:
     return max(1, len(str(text)) // 3)
 
 
+def _message_cost(m: dict) -> int:
+    """单条消息的估算 token 成本。多模态 content(list) 只计文本块，
+    图片块按固定视觉成本计（与 base64 长度解耦）。"""
+    content = m.get("content")
+    if content is None:
+        return 0
+    if isinstance(content, str):
+        return _estimate_tokens(content)
+    if isinstance(content, list):
+        cost = 0
+        for blk in content:
+            if isinstance(blk, dict):
+                if blk.get("type") == "image_url":
+                    cost += _IMAGE_BLOCK_TOKEN_COST
+                else:
+                    cost += _estimate_tokens(blk.get("text") or "")
+            else:
+                cost += _estimate_tokens(str(blk))
+        return cost
+    return _estimate_tokens(str(content))
+
+
 def _session_history_cost(messages: list) -> int:
     """非 system 消息的估算 token 总量。"""
     return sum(
-        _estimate_tokens(m.get("content", ""))
-        for m in messages
-        if m.get("role") != "system"
+        _message_cost(m) for m in messages if m.get("role") != "system"
     )
 
 
@@ -112,8 +137,12 @@ def trim_session(
     users = _user_indices(messages)
     if not users:
         return cleared
-    # 保护最近 KEEP_RECENT_TURNS 轮（含其 tool 结果），只折叠更早的
-    protected_start = users[-KEEP_RECENT_TURNS] if len(users) > KEEP_RECENT_TURNS else None
+    # 保护最近 KEEP_RECENT_TURNS 轮（含其 tool 结果），只折叠更早的。
+    # 轮数不足时保护到第一条用户消息——绝不允许把唯一的/最新的用户消息
+    # 折叠掉（否则模型看到空历史，只会说"看不到你的问题"）。
+    protected_start = (
+        users[-KEEP_RECENT_TURNS] if len(users) > KEEP_RECENT_TURNS else users[0]
+    )
 
     folded: list = []
     removed = 0

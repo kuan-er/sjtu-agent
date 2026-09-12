@@ -162,6 +162,22 @@ def _anthropic_tools() -> list:
     return result
 
 
+# deepseek 模型的原生工具调用标记（服务端流式偶发未解析，混入正文）
+_DSML_BLOCK_RE = re.compile(
+    r"<[｜|]*DSML[｜|]* calls>.*?<[｜|]*/[｜|]*DSML[｜|]* calls>"
+    r"|<[｜|]*DSML[｜|]*[^>]*>.*?<[｜|]*/[｜|]*DSML[｜|]*[^>]*>"
+    r"|<[｜|]*DSML[｜|]*[^>]*>.*$",
+    re.S,
+)
+
+
+def _strip_dsml_blocks(text: str) -> str:
+    """剥离正文里混入的 DSML 工具调用标记，保留 surrounding 正文。"""
+    if not text or "DSML" not in text:
+        return text
+    return _DSML_BLOCK_RE.sub("", text).strip()
+
+
 def _stream_with_think_tags(stream, spinner: "Spinner") -> tuple[str, str, dict]:
     """
     消费 OpenAI 兼容的流式响应，处理两种思考格式：
@@ -319,6 +335,26 @@ def _run_one_turn_openai(client: OpenAI, model: str, messages: list) -> None:
             spinner.stop()
             raise
         spinner.stop()  # 无思考内容时 _stream_with_think_tags 不会停 spinner，在此兜底
+
+        # ── DSML 防御：deepseek 流式偶发把工具调用以原生 DSML 标记混入正文
+        # （服务端未解析为结构化 tool_calls），原样返回会直接漏给用户。
+        # 处理：剥离标记；若本轮没有任何结构化工具调用，则要求模型重发。
+        if clean_content and "DSML" in clean_content:
+            clean_content = _strip_dsml_blocks(clean_content)
+            if not tool_calls_map:
+                if clean_content:
+                    print_markdown_message("Agent", clean_content)
+                messages.append({"role": "assistant", "content": clean_content or None})
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "（系统提示：你上一条回复里的工具调用以 DSML 标记原文混入了正文，"
+                        "没有被服务端解析为工具调用，用户不会看到它执行。"
+                        "请把同样的工具调用重新发起一次——必须走结构化 tool_calls 通道，"
+                        "不要把 DSML 标记写进回复文本。）"
+                    ),
+                })
+                continue
 
         # ── 渲染正文（markdown）──────────────────────────────────────────
         if clean_content:
