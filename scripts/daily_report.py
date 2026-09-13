@@ -27,6 +27,7 @@ sys.path.insert(0, str(ROOT))
 from sjtu_agent.paths import CONFIG_PATH, DAILY_REPORT_LOG_PATH
 from sjtu_agent.config import cfg as _cfg
 from sjtu_agent.logging import get_logger
+from sjtu_agent import timeutils as tu
 
 import agent
 import ddl_checker as dc
@@ -284,8 +285,11 @@ def build_report(report_type: str = "evening") -> str | None:
 
     安静日（无 DDL/课表/新闻）时返回 None，调用方跳过推送。
     """
-    now = dt.datetime.now(dc.CST)
+    now = tu.school_now()
     date_str = f"{now.strftime('%Y年%m月%d日')}（星期{_WEEKDAY_ZH[now.weekday()]}）"
+    if tu.differs_locally(now):
+        # 身处非 +8 时区（交换/访学/回国）：日期按校园时间，同时标注用户当地
+        date_str += f"（你当地 {tu.fmt_zh(now.astimezone(tu.user_tz()))}）"
     hour = now.hour
     if report_type == "morning":
         label = "晨间学习早报"
