@@ -302,11 +302,17 @@ def setup_agent_config() -> dict:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def _build_date_ctx() -> str:
+def _build_date_ctx(now: "datetime | None" = None) -> str:
     """当前时间 + 学期上下文（每次调用刷新，注入到用户消息而非 system 前缀，
-    保持 system prompt 稳定 → DeepSeek 前缀缓存命中）。"""
+    保持 system prompt 稳定 → DeepSeek 前缀缓存命中）。
+
+    now 可注入（测试用）；缺省取校园时间（北京时间）。用户时区 ≠ 北京时
+    （config user_timezone 或系统时区）时附双时区语境，Agent 对"现在/今天"
+    的回答才不会误导身处异时区的同学。
+    """
     import datetime as _dt
-    _now = _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=8)))
+    from sjtu_agent import timeutils as _tu
+    _now = now or _tu.school_now()
     _year = _now.year
     _month = _now.month
     # 判断当前学期：9-1月=第1学期(秋), 2-6月=第2学期(春), 7-8月=第3学期(夏)
@@ -325,7 +331,7 @@ def _build_date_ctx() -> str:
         _cur_xqm = "3"
         _prev_xnm = _year - 1
         _prev_xqm = "2"
-    return (
+    ctx_main = (
         f"\n\n## 当前时间（自动注入，每次对话刷新）\n"
         f"现在：{_now.strftime('%Y年%m月%d日 %H:%M')}，星期{'一二三四五六日'[_now.weekday()]}。\n"
         f"当前学期：{_cur_xnm}-{_cur_xnm+1}学年第{_cur_xqm}学期。\n"
@@ -335,7 +341,19 @@ def _build_date_ctx() -> str:
         f"（query_grades: year='{_cur_xnm}', semester='{_cur_xqm}'）。\n"
         f"「本学年」= {_cur_xnm}学年"
         f"（query_grades: year='{_cur_xnm}', semester=''）。"
-    ) + _calendar_context(_now.date())
+    )
+    # 用户时区 ≠ 北京时间（交换学期/海外/回国）时附双时区语境
+    try:
+        if _tu.differs_locally(_now):
+            _local = _now.astimezone(_tu.user_tz())
+            ctx_main += (
+                f"用户系统时区为 {_tu.user_tz_name()}，当地时间 {_local:%m月%d日 %H:%M}。"
+                "涉及用户个人安排（提醒、日程）优先按用户当地时间；"
+                "课程、DDL、校历一律按北京时间。\n"
+            )
+    except Exception:
+        pass  # 时区探测失败不阻断对话
+    return ctx_main + _calendar_context(_now.date())
 
 
 def _calendar_context(date) -> str:

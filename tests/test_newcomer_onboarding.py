@@ -87,3 +87,33 @@ def test_missing_required_setup_skips_ready_items():
         "canvas": {"has_token": False},
     }
     assert cli._missing_required_setup(ready) == ["Canvas Token"]
+
+
+def test_date_ctx_includes_local_time_when_abroad(monkeypatch):
+    """用户时区 ≠ 北京时间时，日期上下文附双时区语境（交换/海外同学）。"""
+    import datetime as dt
+    from sjtu_agent import timeutils as tu
+
+    monkeypatch.setattr(
+        tu, "_read_config", lambda: {"user_timezone": "America/New_York"}
+    )
+    now = dt.datetime(2026, 9, 14, 9, 0, tzinfo=dt.timezone(dt.timedelta(hours=8)))
+    ctx = _chat_loop_mod._build_date_ctx(now=now)
+    assert "美国" not in ctx  # 不写死国家名，用时区名
+    assert "America/New_York" in ctx
+    assert "当地时间" in ctx
+    assert "9月13日" in ctx  # 纽约还是 13 日晚
+    assert "北京时间" in ctx
+
+
+def test_date_ctx_omits_local_line_when_in_china(monkeypatch):
+    import datetime as dt
+    from sjtu_agent import timeutils as tu
+
+    monkeypatch.setattr(
+        tu, "_read_config", lambda: {"user_timezone": "Asia/Shanghai"}
+    )
+    now = dt.datetime(2026, 9, 14, 9, 0, tzinfo=dt.timezone(dt.timedelta(hours=8)))
+    ctx = _chat_loop_mod._build_date_ctx(now=now)
+    assert "当地时间" not in ctx
+    assert "当前学期" in ctx
