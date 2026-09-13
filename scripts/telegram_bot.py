@@ -520,7 +520,7 @@ def _format_reminders_for_telegram(raw_json: str) -> str:
 def _latex_to_unicode(text: str) -> str:
     """
     将 LaTeX 数学公式转换为可读的 Unicode 文本。
-    处理行内公式 \(...\) 和块级公式 \[...\] 及 $$...$$。
+    处理行内公式 \\(...\\) 和块级公式 \\[...\\] 及 $$...$$。
     """
     import re as _re
 

@@ -20,8 +20,8 @@ def test_install_ps1_project_dir_is_parent():
 
 
 def test_readme_uses_install_prefix():
-    """README 安装命令应为 install/install.sh / install\install.ps1。"""
+    """README 安装命令应为 install/install.sh / install\\install.ps1。"""
     readme = Path("README.md").read_text(encoding="utf-8")
     assert "bash install/install.sh" in readme
-    assert ".\install\install.ps1" in readme
+    assert ".\\install\\install.ps1" in readme
     assert "bash install.sh" not in readme.replace("bash install/install.sh", "")
