@@ -280,16 +280,31 @@ def _section_has_content(key: str, all_ddls: list, schedule_raw, lab_raw,
     return True  # tips 等始终保留
 
 
+def _build_date_header(now: "dt.datetime") -> tuple[str, bool]:
+    """日报头行日期串 + 是否异地（用户时区 ≠ 北京时间）。
+
+    同区：北京日期（校园即本地）。异区：推送与「晨/午/晚」标签按用户本地
+    时钟触发，头行日期也以用户当地为主，北京时间只作校园时钟参考——
+    课程/DDL 事实仍是北京时间（由 data_ctx 的时区语境向 LLM 说明）。
+    """
+    local_now = now.astimezone(tu.user_tz())
+    if tu.differs_locally(now):
+        date_str = (
+            f"{local_now.strftime('%Y年%m月%d日')}（星期{_WEEKDAY_ZH[local_now.weekday()]}，你当地）"
+            f" · 北京时间 {now.strftime('%m月%d日')}"
+        )
+        return date_str, True
+    return f"{now.strftime('%Y年%m月%d日')}（星期{_WEEKDAY_ZH[now.weekday()]}）", False
+
+
 def build_report(report_type: str = "evening") -> str | None:
     """收集数据 → 调用 AI 生成中文汇报 → 返回 HTML 格式字符串。
 
     安静日（无 DDL/课表/新闻）时返回 None，调用方跳过推送。
     """
     now = tu.school_now()
-    date_str = f"{now.strftime('%Y年%m月%d日')}（星期{_WEEKDAY_ZH[now.weekday()]}）"
-    if tu.differs_locally(now):
-        # 身处非 +8 时区（交换/访学/回国）：日期按校园时间，同时标注用户当地
-        date_str += f"（你当地 {tu.fmt_zh(now.astimezone(tu.user_tz()))}）"
+    local_now = now.astimezone(tu.user_tz())
+    date_str, abroad = _build_date_header(now)
     hour = now.hour
     if report_type == "morning":
         label = "晨间学习早报"
@@ -423,7 +438,16 @@ def build_report(report_type: str = "evening") -> str | None:
     }
 
     # 构建 data_ctx（DDL 详情和校历始终包含，供 LLM 参考）
-    data_ctx = f"""当前时间：{date_str} {now.strftime('%H:%M')}
+    tz_note = ""
+    if abroad:
+        tz_note = (
+            f"\n【时区语境】用户当前在 {tu.user_tz_name()}（非东八区）。"
+            f"本报告按用户当地时间推送（现在用户当地 {tu.fmt_zh(local_now)}）；"
+            "下文所有课程与 DDL 时间均为北京时间，「今日/明日」指北京校历日。"
+            "生成内容时请保持这一区分，可自然地在开头提醒一句时差"
+            "（例如晚课对应对方的上午/凌晨时段），不要混用两种日期。\n"
+        )
+    data_ctx = f"""当前时间：{date_str} {now.strftime('%H:%M')}{tz_note}
 
 【DDL 汇总（共 {len(all_ddls)} 项未完成）】
 今日截止（{len(today_ddls)} 项）：

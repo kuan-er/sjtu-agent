@@ -65,3 +65,34 @@ def test_differs_locally_boundary(tz_config):
     tz_config["user_timezone"] = "Asia/Shanghai"
     now = tu.school_now()
     assert tu.differs_locally(now) is False
+
+
+def test_daily_report_header_abroad_leads_local(monkeypatch):
+    """异地日报头行：用户当地日期在前（对齐晨/午/晚标签），北京时间为参考。
+
+    回归用户实测：PDT 机器本地周日晚触发，旧头行读成"09/14 晚报 · 你当地
+    09/13"，日期错乱。正确语义：头行锚用户当地日，课程/DDL 事实仍北京时间。
+    """
+    from scripts import daily_report as dr
+    from zoneinfo import ZoneInfo
+
+    monkeypatch.setattr(tu, "_read_config", lambda: {"user_timezone": "America/Los_Angeles"})
+    # 北京 09-14（周一）13:00 = PDT 09-13（周日）22:00 —— 用户周日晚的"晚报"
+    now = _dt.datetime(2026, 9, 14, 13, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+    header, abroad = dr._build_date_header(now)
+
+    assert abroad is True
+    assert header.startswith("2026年09月13日（星期日，你当地）")
+    assert "北京时间 09月14日" in header
+
+
+def test_daily_report_header_home_single_timezone(monkeypatch):
+    from scripts import daily_report as dr
+
+    monkeypatch.setattr(tu, "_read_config", lambda: {"user_timezone": "Asia/Shanghai"})
+    now = _dt.datetime(2026, 9, 14, 22, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+    header, abroad = dr._build_date_header(now)
+
+    assert abroad is False
+    assert header == "2026年09月14日（星期一）"
+    assert "你当地" not in header
