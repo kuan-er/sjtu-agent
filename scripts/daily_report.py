@@ -228,7 +228,11 @@ def _build_care_note() -> str:
         from sjtu_agent.memory import get_care_suggestions
         suggestion = get_care_suggestions(open_id)
         if suggestion:
-            return f"\n用户近期的关注和动态：{suggestion}\n在行动建议中适当提及这些内容，让用户感到被关注。"
+            return (
+                f"\n用户近 7 天的关注（供参考，非必用）：{suggestion}\n"
+                "仅当与上下文中的 DDL/课程/时段确实相关时，才在行动建议里带一句；"
+                "无关就不要提，更不要把没出现在上下文里的事情写进建议。"
+            )
     except Exception:
         pass
     return ""
@@ -297,6 +301,11 @@ def _build_date_header(now: "dt.datetime") -> tuple[str, bool]:
     return f"{now.strftime('%Y年%m月%d日')}（星期{_WEEKDAY_ZH[now.weekday()]}）", False
 
 
+def _active_ddls(all_ddls: list) -> list:
+    """AI 上下文只保留未过期的 DDL（过期条目会被行动建议反复翻旧账）。"""
+    return [d for d in all_ddls if not d.get("expired")]
+
+
 def build_report(report_type: str = "evening") -> str | None:
     """收集数据 → 调用 AI 生成中文汇报 → 返回 HTML 格式字符串。
 
@@ -356,7 +365,11 @@ def build_report(report_type: str = "evening") -> str | None:
         submitted = "✅ 已提交" if d.get("submitted") else ""
         return f"[{d['platform']}] {d['course']} · {d['name']}  截止:{d['due']}  {urgency} {submitted}".strip()
 
-    ddl_section = "\n".join(_fmt_ddl(d) for d in all_ddls) if all_ddls else "（所有作业均已完成或无作业）"
+    # AI 上下文里只放未过期的 DDL——过期条目（如早已截止/被取消的作业）
+    # 留在上下文里会一直被行动建议翻出来讲（用户实测："塞一些奇奇怪怪的
+    # 东西一直留着"）。今天的/本周的分组本来就已过滤，这里对齐全量列表。
+    active_ddls = _active_ddls(all_ddls)
+    ddl_section = "\n".join(_fmt_ddl(d) for d in active_ddls) if active_ddls else "（所有作业均已完成或无作业）"
 
     # 从 schedule 提取课程列表文字
     def _fmt_schedule(s):
@@ -434,7 +447,7 @@ def build_report(report_type: str = "evening") -> str | None:
 {_fmt_jwc(jwc_raw)}"""),
         "news": (f"""📰 <b>校园动态</b>：从校园新闻中选取1-2条最相关或有趣的摘要（如无则写"暂无"）
 {news_raw or "（暂无）"}"""),
-        "tips": "💡 <b>行动建议</b>：根据当前 DDL 紧急程度和时段，用1-2句话给出具体建议",
+        "tips": "💡 <b>行动建议</b>：根据当前 DDL 紧急程度和时段，用1-2句话给出具体建议。只能引用上文出现过的 DDL/课程/时段；上文没有的事情（已截止的旧作业、没提到的课程资料等）不要编造或提及",
     }
 
     # 构建 data_ctx（DDL 详情和校历始终包含，供 LLM 参考）

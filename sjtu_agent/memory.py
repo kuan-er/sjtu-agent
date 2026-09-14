@@ -175,25 +175,41 @@ def summarize_session(messages: list[dict]) -> str | None:
         return None
 
 
-def get_care_suggestions(user_id: str, n: int = 5) -> str | None:
-    """Return a care suggestion string based on recent memories, or None.
+CARE_SUGGESTION_MAX_AGE_DAYS = 7
 
-    Scans the most recently stored memories for actionable follow-ups:
-    exams coming up, courses the user mentioned, topics they're interested in.
+
+def get_care_suggestions(user_id: str, n: int = 10) -> str | None:
+    """Return a care suggestion string based on *recent* memories, or None.
+
+    日报的行动建议引用记忆。只取近 N 天（默认 7）的记忆——语义检索本身
+    只按相似度排序，不筛时间，几周前的旧记忆（如早已结束的作业、随口
+    提过的资源）会被原样捞出来塞进建议里（用户实测反馈："日报喜欢塞
+    一些奇奇怪怪的东西一直留着"）。
     """
     memories = search_memory(user_id, "exam test study course deadline", n=n)
     if not memories:
         return None
 
-    recent = [m for m in memories if "备考" in m["text"] or "考试" in m["text"]
-              or "作业" in m["text"] or "截止" in m["text"] or "课程" in m["text"]
-              or "学习" in m["text"] or "准备" in m["text"]]
-    if not recent:
+    cutoff = datetime.now(CST) - timedelta(days=CARE_SUGGESTION_MAX_AGE_DAYS)
+    fresh = []
+    for m in memories:
+        try:
+            ts = _dt_from_iso((m.get("metadata") or {}).get("timestamp", ""))
+            if ts is not None and ts < cutoff:
+                continue  # 太旧，不再出现在日报里
+        except Exception:
+            pass  # 无时间戳的旧条目按存在处理，由下方关键词过滤兜底
+        text = m["text"]
+        if any(kw in text for kw in ("备考", "考试", "作业", "截止", "课程", "学习", "准备")):
+            fresh.append(text)
+    if not fresh:
         return None
 
-    return "基于你对以下内容的关注：" + "；".join(
-        m["text"][:80] for m in recent[:3]
-    )
+    return "基于你近期的关注：" + "；".join(t[:80] for t in fresh[:3])
+
+
+def _dt_from_iso(value: str):
+    return datetime.fromisoformat(value) if value else None
 
 
 def build_memory_context(user_id: str, current_msg: str, n: int = 3) -> str:

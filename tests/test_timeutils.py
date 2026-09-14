@@ -96,3 +96,60 @@ def test_daily_report_header_home_single_timezone(monkeypatch):
     assert abroad is False
     assert header == "2026年09月14日（星期一）"
     assert "你当地" not in header
+
+
+# ── 日报"翻旧账"治理：记忆新鲜度 + 过期 DDL 过滤 ────────────────────────────
+
+def test_care_suggestions_drop_stale_memories(monkeypatch):
+    """几周前的旧记忆不再进日报行动建议（用户实测'塞奇奇怪怪的东西一直留着'）。"""
+    from sjtu_agent import memory
+
+    old_ts = (memory.datetime.now(memory.CST) - memory.timedelta(days=20)).isoformat()
+    new_ts = (memory.datetime.now(memory.CST) - memory.timedelta(days=2)).isoformat()
+    monkeypatch.setattr(
+        memory, "search_memory",
+        lambda uid, q, n=10: [
+            {"text": "嵌入式小资源合集，以后轻松看看", "metadata": {"timestamp": old_ts}},
+            {"text": "下周要准备操作系统期中考试", "metadata": {"timestamp": new_ts}},
+        ],
+    )
+    out = memory.get_care_suggestions("u1")
+    assert out is not None
+    assert "操作系统" in out
+    assert "嵌入式" not in out
+
+
+def test_care_suggestions_none_when_all_stale(monkeypatch):
+    from sjtu_agent import memory
+
+    old_ts = (memory.datetime.now(memory.CST) - memory.timedelta(days=30)).isoformat()
+    monkeypatch.setattr(
+        memory, "search_memory",
+        lambda uid, q, n=10: [{"text": "备考线性代数", "metadata": {"timestamp": old_ts}}],
+    )
+    assert memory.get_care_suggestions("u1") is None
+
+
+def test_daily_report_filters_expired_ddls_from_context():
+    """过期 DDL 不再进 AI 上下文（旧作业被行动建议反复翻出来讲）。"""
+    from scripts import daily_report as dr
+
+    ddls = [
+        {"name": "被腰斩的大作业", "expired": True, "hours_left": -100},
+        {"name": "有效作业", "expired": False, "hours_left": 30},
+    ]
+    active = dr._active_ddls(ddls)
+    assert [d["name"] for d in active] == ["有效作业"]
+
+
+def test_care_note_instructs_no_forced_mentions(monkeypatch):
+    from scripts import daily_report as dr
+
+    monkeypatch.setattr(dr._cfg, "raw", lambda: {"feishu_open_id": "ou_x"})
+    monkeypatch.setattr(
+        "sjtu_agent.memory.get_care_suggestions",
+        lambda uid: "基于你近期的关注：准备操作系统期中考试",
+    )
+    note = dr._build_care_note()
+    assert "非必用" in note
+    assert "不要" in note and ("编造" in note or "没出现在上下文" in note)
