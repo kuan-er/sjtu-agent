@@ -1132,7 +1132,11 @@ def _process_in_thread(sender_open_id: str, message_id: str, text: str) -> None:
         return
     except Exception as e:
         _logger.warning(f"[feishu] 处理出错：{e}")
-        _reply_text(message_id, f"出错了：{e}")
+        _reply_text(
+            message_id,
+            f"出错了：{type(e).__name__}: {e}\n请稍后重试一次；若同一会话反复出现，"
+            "发送 /new 新开会话可绕过（旧会话可能残留了异常中断的工具调用）。",
+        )
         return
     else:
         # 成功：仍在锁内，把工作副本原子提交回会话

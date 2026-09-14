@@ -102,3 +102,93 @@ def test_strip_dsml_blocks_unclosed_and_clean():
     from sjtu_agent.agent.runner import _strip_dsml_blocks
     assert _strip_dsml_blocks('回答：<｜｜DSML｜｜ invoke name="web_search">') == "回答："
     assert _strip_dsml_blocks("普通回复，没有标记") == "普通回复，没有标记"
+
+
+# ── 工具参数损坏防御 + 悬空 tool_calls 自愈（飞书"出错了：Expecting ',' delimiter"）──
+
+def test_parse_tool_args_repairs_trailing_garbage():
+    """尾随垃圾可修复：合法 JSON 前缀被采用。"""
+    from sjtu_agent.agent.runner import _parse_tool_args
+    args, err = _parse_tool_args('{"query": "Quasar"} <杂音>')
+    assert err == ""
+    assert args == {"query": "Quasar"}
+
+
+def test_parse_tool_args_truncated_reports_reason():
+    """截断的 JSON：返回 None + 人类可读原因，不再抛异常杀死整轮。"""
+    from sjtu_agent.agent.runner import _parse_tool_args
+    args, err = _parse_tool_args('{"query": "Quasar", "limit"')
+    assert args is None
+    assert "line" in err
+
+
+def test_parse_tool_args_empty_is_empty_dict():
+    from sjtu_agent.agent.runner import _parse_tool_args
+    assert _parse_tool_args("") == ({}, "")
+    assert _parse_tool_args(None) == ({}, "")
+
+
+def test_openai_loop_survives_malformed_tool_args(monkeypatch):
+    """arguments 损坏 → 回填错误 tool 结果并继续，用户不再看到 JSONDecodeError。"""
+    seq = [
+        ("", "", {0: {"id": "t1", "name": "web_search",
+                      "arguments": '{"query": "Quasar", "limit"'}}),  # 损坏
+        ("搜索完成。", "", {}),                                        # 重试后作答
+    ]
+    calls = []
+
+    def fake_stream_tags(stream, spinner):
+        calls.append(1)
+        return seq[min(len(calls) - 1, len(seq) - 1)]
+
+    def fake_create(**kwargs):
+        return SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(
+            reasoning_content=None, content=None, tool_calls=None))])
+
+    monkeypatch.setattr(runner, "_stream_with_think_tags", fake_stream_tags)
+    monkeypatch.setattr(runner, "_get_run_tool", lambda: lambda name, args: "{}")
+    monkeypatch.setattr(runner, "print_markdown_message", lambda *a, **k: None)
+
+    msgs = [{"role": "system", "content": "S"}, {"role": "user", "content": "hi"}]
+    runner._run_one_turn_openai(_fake_openai_client(fake_create), "deepseek-chat", msgs)
+
+    tool_msgs = [m for m in msgs if m.get("role") == "tool"]
+    assert tool_msgs and "参数解析失败" in tool_msgs[0]["content"]
+    assert tool_msgs[0]["tool_call_id"] == "t1"
+    # 第二次请求把错误结果带给了模型（模型有机会重试）
+    assert len(calls) == 2
+
+
+def test_repair_dangling_openai_tool_calls():
+    """异常中断留下的无结果 tool_calls → 自愈补齐，会话不再永久 400。"""
+    from sjtu_agent.agent.runner import _repair_dangling_tool_calls
+    msgs = [
+        {"role": "system", "content": "S"},
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": None,
+         "tool_calls": [{"id": "t1", "type": "function",
+                         "function": {"name": "web_search", "arguments": "{}"}}]},
+        {"role": "user", "content": "继续"},
+    ]
+    n = _repair_dangling_tool_calls(msgs)
+    assert n == 1
+    assert msgs[3]["role"] == "tool" and msgs[3]["tool_call_id"] == "t1"
+    assert "异常中断" in msgs[3]["content"]
+    assert _repair_dangling_tool_calls(msgs) == 0  # 幂等
+
+
+def test_repair_dangling_anthropic_tool_calls():
+    from sjtu_agent.agent.runner import _repair_dangling_tool_calls
+    msgs = [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "tu_1", "name": "web_search", "input": {}}
+        ]},
+        {"role": "user", "content": "继续"},
+    ]
+    n = _repair_dangling_tool_calls(msgs)
+    assert n == 1
+    fixed = msgs[2]
+    assert fixed["role"] == "user"
+    assert fixed["content"][0]["type"] == "tool_result"
+    assert fixed["content"][0]["tool_use_id"] == "tu_1"
