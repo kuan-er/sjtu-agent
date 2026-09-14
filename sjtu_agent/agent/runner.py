@@ -178,6 +178,80 @@ def _strip_dsml_blocks(text: str) -> str:
     return _DSML_BLOCK_RE.sub("", text).strip()
 
 
+def _parse_tool_args(raw: object) -> tuple[dict | None, str]:
+    """解析工具调用参数；损坏时尝试修复尾随垃圾，仍失败返回 (None, 原因)。
+
+    DeepSeek 流式偶发把 arguments 截断或混入垃圾字符，json.loads 直接抛
+    JSONDecodeError 会杀死整轮对话并把异常文本漏给用户（飞书端表现为
+    「出错了：Expecting ',' delimiter …」且本轮无回复）。
+    """
+    text = (raw or "{}").strip() if isinstance(raw, str) else "{}"
+    try:
+        args = json.loads(text)
+        return (args if isinstance(args, dict) else {}, "")
+    except json.JSONDecodeError as e:
+        # 修复尾部垃圾：若存在合法 JSON 前缀则采用（如 '{"q":"x"} …杂音'）
+        try:
+            args, _ = json.JSONDecoder().raw_decode(text)
+            if isinstance(args, dict):
+                return args, ""
+        except ValueError:
+            pass
+        return None, f"line {e.lineno} column {e.colno}（{e.msg}）"
+
+
+def _repair_dangling_tool_calls(messages: list) -> int:
+    """补齐因异常中断而悬空的工具调用（否则后续每轮都被 API 400 拒绝）。
+
+    OpenAI 格式：assistant.tool_calls 的每个 id 必须有对应 tool 消息；
+    Anthropic 格式：assistant 的 tool_use 块必须有含对应 tool_result 的
+    user 消息。这里给缺失的补一条"异常中断"错误结果，让会话自愈。
+    """
+    repaired = 0
+    i = 0
+    while i < len(messages):
+        m = messages[i]
+        if m.get("role") == "assistant" and m.get("tool_calls"):
+            have = {
+                later.get("tool_call_id")
+                for later in messages[i + 1:]
+                if later.get("role") == "tool"
+            }
+            missing = [tc["id"] for tc in m["tool_calls"] if tc["id"] not in have]
+            for idx, tc_id in enumerate(missing):
+                messages.insert(i + 1 + idx, {
+                    "role": "tool", "tool_call_id": tc_id,
+                    "content": "（上一轮该工具调用因异常中断，没有得到结果。）",
+                })
+                repaired += 1
+            i += 1 + len(missing)
+        elif m.get("role") == "assistant" and isinstance(m.get("content"), list):
+            tool_use_ids = [
+                b.get("id") for b in m["content"]
+                if isinstance(b, dict) and b.get("type") == "tool_use"
+            ]
+            if tool_use_ids:
+                have = set()
+                for later in messages[i + 1:]:
+                    if later.get("role") == "user" and isinstance(later.get("content"), list):
+                        have |= {
+                            b.get("tool_use_id") for b in later["content"]
+                            if isinstance(b, dict) and b.get("type") == "tool_result"
+                        }
+                missing = [tid for tid in tool_use_ids if tid not in have]
+                if missing:
+                    results = [
+                        {"type": "tool_result", "tool_use_id": tid,
+                         "content": "（上一轮该工具调用因异常中断，没有得到结果。）"}
+                        for tid in missing
+                    ]
+                    messages.insert(i + 1, {"role": "user", "content": results})
+                    repaired += len(missing)
+                    i += 1
+        i += 1
+    return repaired
+
+
 def _stream_with_think_tags(stream, spinner: "Spinner") -> tuple[str, str, dict]:
     """
     消费 OpenAI 兼容的流式响应，处理两种思考格式：
@@ -391,7 +465,18 @@ def _run_one_turn_openai(client: OpenAI, model: str, messages: list) -> None:
 
         for tc in tool_calls_payload:
             fn_name = tc["function"]["name"]
-            fn_args = json.loads(tc["function"]["arguments"] or "{}")
+            fn_args, parse_err = _parse_tool_args(tc["function"]["arguments"])
+            if fn_args is None:
+                # DeepSeek 流式偶发参数截断/损坏（JSONDecodeError）：不再让整轮
+                # 死掉并把异常文本漏给用户——回填错误结果，模型在迭代预算内重试
+                messages.append({
+                    "role": "tool", "tool_call_id": tc["id"],
+                    "content": (
+                        f"（工具 {fn_name} 的参数解析失败：{parse_err}。"
+                        f"请重新调用 {fn_name}，arguments 必须是完整、合法的 JSON 对象。）"
+                    ),
+                })
+                continue
             if fn_name not in ("check_setup",):
                 spinner.start(_TOOL_LABELS.get(fn_name, fn_name) + "…")
             result = _get_run_tool()(fn_name, fn_args)
@@ -571,10 +656,12 @@ def _run_one_turn_anthropic(client: Anthropic, model: str, messages: list) -> No
                             if bidx in tool_inputs and bidx < len(content_blocks):
                                 blk = content_blocks[bidx]
                                 if blk.get("type") == "tool_use":
-                                    try:
-                                        blk["input"] = _json.loads(tool_inputs[bidx] or "{}")
-                                    except Exception:
-                                        blk["input"] = {}
+                                    args, parse_err = _parse_tool_args(tool_inputs[bidx])
+                                    # 解析失败用哨兵标记：执行阶段回填错误
+                                    # tool_result 让模型重试，绝不带空参数执行
+                                    blk["input"] = args if args is not None else {
+                                        "__args_parse_error__": parse_err
+                                    }
 
                         elif ev_type == "message_stop":
                             break
@@ -659,6 +746,19 @@ def _run_one_turn_anthropic(client: Anthropic, model: str, messages: list) -> No
                 continue
             fn_name = b["name"]
             fn_args = b["input"] if isinstance(b["input"], dict) else {}
+            if not isinstance(fn_args, dict) or "__args_parse_error__" in fn_args:
+                parse_err = (
+                    fn_args.get("__args_parse_error__", "参数不是合法 JSON")
+                    if isinstance(fn_args, dict) else "参数不是合法 JSON"
+                )
+                tool_results.append({
+                    "type": "tool_result", "tool_use_id": b["id"],
+                    "content": (
+                        f"（工具 {fn_name} 的参数解析失败：{parse_err}。"
+                        f"请重新调用 {fn_name}，参数必须是完整、合法的 JSON 对象。）"
+                    ),
+                })
+                continue
             if fn_name not in ("check_setup",):
                 spinner.start(_TOOL_LABELS.get(fn_name, fn_name) + "…")
             result = _get_run_tool()(fn_name, fn_args)
@@ -695,6 +795,7 @@ def _run_one_turn(client, model: str, messages: list) -> None:
     # 所有入口（bots / feishu / CLI）都经过这里，单点覆盖。
     from sjtu_agent.agent.context import trim_session
     trim_session(messages)
+    _repair_dangling_tool_calls(messages)
     if _is_anthropic_model(model):
         _run_one_turn_anthropic(client, model, messages)
     else:
