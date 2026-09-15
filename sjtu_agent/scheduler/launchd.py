@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 from sjtu_agent.paths import DATA_DIR, LOG_DIR
+from sjtu_agent.timeutils import campus_schedule_local
 
 _DEFAULT_OUTPUT_DIR = Path.home() / "Library" / "LaunchAgents"
 
@@ -142,11 +143,11 @@ def _build_plist(
         if name == "news-digest":
             hour, minute = news_digest_time
         elif name == "morning-report":
-            hour, minute = (8, 0)
+            hour, minute = campus_schedule_local(8, 0)
         elif name == "noon-report":
-            hour, minute = (12, 0)
+            hour, minute = campus_schedule_local(12, 0)
         else:
-            hour, minute = daily_report_time
+            hour, minute = campus_schedule_local(*daily_report_time)
         payload["StartCalendarInterval"] = {"Hour": hour, "Minute": minute}
     elif spec["schedule_type"] == "interval":
         payload["StartInterval"] = remind_interval

@@ -67,23 +67,24 @@ def test_differs_locally_boundary(tz_config):
     assert tu.differs_locally(now) is False
 
 
-def test_daily_report_header_abroad_leads_local(monkeypatch):
-    """异地日报头行：用户当地日期在前（对齐晨/午/晚标签），北京时间为参考。
+def test_daily_report_header_abroad_beijing_primary(monkeypatch):
+    """异地日报头行：北京日期为主（触发与晨/午/晚标签均已锚定北京时钟），
+    用户当地时刻作参考注记。
 
-    回归用户实测：PDT 机器本地周日晚触发，旧头行读成"09/14 晚报 · 你当地
-    09/13"，日期错乱。正确语义：头行锚用户当地日，课程/DDL 事实仍北京时间。
+    语义演进：触发时刻在调度器安装时换算为本地等价（北京 8/12/22 → 本地
+    对应时刻），标签与内容重新同锚北京时钟，因此头行以北京日期为准。
     """
     from scripts import daily_report as dr
     from zoneinfo import ZoneInfo
 
     monkeypatch.setattr(tu, "_read_config", lambda: {"user_timezone": "America/Los_Angeles"})
-    # 北京 09-14（周一）13:00 = PDT 09-13（周日）22:00 —— 用户周日晚的"晚报"
+    # 北京 09-14（周一）13:00 = PDT 09-13（周日）22:00
     now = _dt.datetime(2026, 9, 14, 13, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
     header, abroad = dr._build_date_header(now)
 
     assert abroad is True
-    assert header.startswith("2026年09月13日（星期日，你当地）")
-    assert "北京时间 09月14日" in header
+    assert header.startswith("2026年09月14日（星期一）")
+    assert "你当地" in header and "9月13日" in header
 
 
 def test_daily_report_header_home_single_timezone(monkeypatch):
@@ -96,6 +97,20 @@ def test_daily_report_header_home_single_timezone(monkeypatch):
     assert abroad is False
     assert header == "2026年09月14日（星期一）"
     assert "你当地" not in header
+
+
+def test_campus_schedule_local_converts_for_abroad(monkeypatch):
+    """日报触发时刻按北京时钟：PDT 机器上北京 08:00 → 本地 17:00（前一天）。"""
+    monkeypatch.setattr(tu, "_read_config", lambda: {"user_timezone": "America/Los_Angeles"})
+    hh, mm = tu.campus_schedule_local(8, 0)
+    assert (hh, mm) == (17, 0)
+    assert tu.campus_schedule_local(22, 30) == (7, 30)
+
+
+def test_campus_schedule_local_identity_in_china(monkeypatch):
+    monkeypatch.setattr(tu, "_read_config", lambda: {"user_timezone": "Asia/Shanghai"})
+    assert tu.campus_schedule_local(8, 0) == (8, 0)
+    assert tu.campus_schedule_local(22, 0) == (22, 0)
 
 
 # ── 日报"翻旧账"治理：记忆新鲜度 + 过期 DDL 过滤 ────────────────────────────
