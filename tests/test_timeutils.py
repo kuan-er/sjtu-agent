@@ -100,11 +100,22 @@ def test_daily_report_header_home_single_timezone(monkeypatch):
 
 
 def test_campus_schedule_local_converts_for_abroad(monkeypatch):
-    """日报触发时刻按北京时钟：PDT 机器上北京 08:00 → 本地 17:00（前一天）。"""
+    """日报触发时刻按北京时钟：换算到机器本地时区（测试注入 PDT）。"""
+    from zoneinfo import ZoneInfo
     monkeypatch.setattr(tu, "_read_config", lambda: {"user_timezone": "America/Los_Angeles"})
-    hh, mm = tu.campus_schedule_local(8, 0)
-    assert (hh, mm) == (17, 0)
+    # 机器系统时区注入为 PDT（CI 机器是 UTC，必须显式控制）
+    monkeypatch.setattr(tu, "local_tz", lambda: ZoneInfo("America/Los_Angeles"))
+    assert tu.campus_schedule_local(8, 0) == (17, 0)
     assert tu.campus_schedule_local(22, 30) == (7, 30)
+    assert tu.campus_schedule_local(12, 0) == (21, 0)
+
+
+def test_campus_schedule_local_uses_system_zone(monkeypatch):
+    """UTC 机器（如 CI）：北京 08:00 → UTC 00:00，跟随系统时区而非写死。"""
+    from zoneinfo import ZoneInfo
+    monkeypatch.setattr(tu, "_read_config", lambda: {"user_timezone": "America/Los_Angeles"})
+    monkeypatch.setattr(tu, "local_tz", lambda: ZoneInfo("UTC"))
+    assert tu.campus_schedule_local(8, 0) == (0, 0)
 
 
 def test_campus_schedule_local_identity_in_china(monkeypatch):
