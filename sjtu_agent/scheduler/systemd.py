@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 from sjtu_agent.paths import DATA_DIR, LOG_DIR
+from sjtu_agent.timeutils import campus_schedule_local
 
 _SYSTEMD_USER_DIR = Path.home() / ".config" / "systemd" / "user"
 
@@ -256,10 +257,12 @@ def install(
 
         timer_path: Path | None = None
         if spec["has_timer"]:
+            # 校园内容推送锚定北京时间：早/午/晚报的固定时刻换算为本地等价
+            base_time = spec.get("schedule_time", daily_report_time)
             timer_path = _write_timer_unit(
                 unit_name=unit_name,
                 timer_type=spec["timer_type"],
-                schedule_time=spec.get("schedule_time", daily_report_time),
+                schedule_time=campus_schedule_local(*base_time),
                 remind_interval=remind_interval,
             )
 

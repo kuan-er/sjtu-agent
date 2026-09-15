@@ -85,3 +85,26 @@ def dual_time_label(now_school: _dt.datetime | None = None) -> str:
         return f"北京时间 {fmt_zh(school)}"
     local = school.astimezone(user_tz())
     return f"北京时间 {fmt_zh(school)} · 你那边 {fmt_zh(local)}"
+
+
+def campus_schedule_local(hh: int, mm: int = 0) -> tuple[int, int]:
+    """把校园（北京）时钟的定时推送时刻换算为机器本地等价时刻。
+
+    日报等内容锚定校园日历（晨 8:00 / 午 12:00 / 晚 22:00 均为北京时间），
+    触发也应按北京时钟——否则海外同学本地早晨收到的"晨报"，报道的其实是
+    北京快结束的一天。机器在东八区时原样返回。
+
+    注意：平台调度器（schtasks/launchd/systemd）只认安装时刻的固定本地
+    时间，夏令时地区（如 PDT↔PST）漂移后需重装后台服务重新换算。
+    """
+    hh = hh % 24
+    mm = mm % 60
+    now_local = _dt.datetime.now().astimezone()
+    beijing = school_now()
+    if not differs_locally(beijing):
+        return hh, mm
+    combined = _dt.datetime.combine(
+        _dt.date.today(), _dt.time(hh, mm), tzinfo=school_tz()
+    )
+    local = combined.astimezone(now_local.tzinfo)
+    return local.hour, local.minute

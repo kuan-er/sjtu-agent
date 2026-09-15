@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 from sjtu_agent.paths import DATA_DIR, LOG_DIR
+from sjtu_agent.timeutils import campus_schedule_local
 
 # Windows 任务计划程序中的任务名前缀
 _TASK_PREFIX = "SJTUAgent"
@@ -176,13 +177,13 @@ def install(
 
         # 根据调度类型构建 schtasks 参数
         if spec["schedule"] == "daily":
-            # 不同报告类型使用不同时间
+            # 不同报告类型使用不同时间（校园内容锚定北京时间，换算为本地等价时刻）
             if name == "morning-report":
-                hh, mm = 8, 0
+                hh, mm = campus_schedule_local(8, 0)
             elif name == "noon-report":
-                hh, mm = 12, 0
+                hh, mm = campus_schedule_local(12, 0)
             else:
-                hh, mm = hour, minute
+                hh, mm = campus_schedule_local(hour, minute)
             schtask_args = [
                 "schtasks", "/Create",
                 "/TN", task_name,
