@@ -16,6 +16,14 @@
 
 如果这个项目对你有帮助，欢迎点一个 ⭐ Star！
 
+<a href="https://star-history.com/#kuan-er/sjtu-agent&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=kuan-er/sjtu-agent&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=kuan-er/sjtu-agent&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=kuan-er/sjtu-agent&type=Date" />
+ </picture>
+</a>
+
 ---
 
 ## 目录
