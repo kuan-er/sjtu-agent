@@ -14,6 +14,14 @@ Docs: [Documentation Site](https://kuan-er.github.io/sjtu-agent/docs/) · [Troub
 
 If this project helps you, please consider giving it a ⭐ Star!
 
+<a href="https://star-history.com/#kuan-er/sjtu-agent&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=kuan-er/sjtu-agent&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=kuan-er/sjtu-agent&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=kuan-er/sjtu-agent&type=Date" />
+ </picture>
+</a>
+
 ## Contents
 
 - [Installation](#installation)
