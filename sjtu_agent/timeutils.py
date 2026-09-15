@@ -87,6 +87,11 @@ def dual_time_label(now_school: _dt.datetime | None = None) -> str:
     return f"北京时间 {fmt_zh(school)} · 你那边 {fmt_zh(local)}"
 
 
+def local_tz() -> _dt.tzinfo:
+    """机器系统时区（独立函数便于测试注入）。"""
+    return _dt.datetime.now().astimezone().tzinfo or _dt.timezone.utc
+
+
 def campus_schedule_local(hh: int, mm: int = 0) -> tuple[int, int]:
     """把校园（北京）时钟的定时推送时刻换算为机器本地等价时刻。
 
@@ -99,12 +104,11 @@ def campus_schedule_local(hh: int, mm: int = 0) -> tuple[int, int]:
     """
     hh = hh % 24
     mm = mm % 60
-    now_local = _dt.datetime.now().astimezone()
     beijing = school_now()
     if not differs_locally(beijing):
         return hh, mm
     combined = _dt.datetime.combine(
         _dt.date.today(), _dt.time(hh, mm), tzinfo=school_tz()
     )
-    local = combined.astimezone(now_local.tzinfo)
+    local = combined.astimezone(local_tz())
     return local.hour, local.minute
