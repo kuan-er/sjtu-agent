@@ -2120,30 +2120,63 @@ def _get_jwxt_cookies(cfg: dict) -> dict | None:
 
     if not HAS_PLAYWRIGHT:
         return None
-    jaccount_cookies = cfg.get("jaccount_cookies", {})
-    if not jaccount_cookies:
-        return None
 
     import time
-    with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=True)
-        ctx = browser.new_context()
-        ctx.add_cookies([
-            {"name": k, "value": v, "domain": "jaccount.sjtu.edu.cn", "path": "/"}
-            for k, v in jaccount_cookies.items()
-        ])
-        page = ctx.new_page()
-        try:
-            page.goto("https://i.sjtu.edu.cn/jaccountlogin",
-                      wait_until="networkidle", timeout=20_000)
-            time.sleep(2)
-        except Exception as e:
-            _logger.error(f"[jwxt] 登录失败: {e}")
+    cookies: dict = {}
+
+    # 路径 1：用已保存的 jAccount 会话 cookie 静默 SSO（无验证码，最快）
+    jaccount_cookies = cfg.get("jaccount_cookies", {})
+    if jaccount_cookies:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True)
+            ctx = browser.new_context()
+            ctx.add_cookies([
+                {"name": k, "value": v, "domain": "jaccount.sjtu.edu.cn", "path": "/"}
+                for k, v in jaccount_cookies.items()
+            ])
+            page = ctx.new_page()
+            try:
+                page.goto("https://i.sjtu.edu.cn/jaccountlogin",
+                          wait_until="networkidle", timeout=20_000)
+                time.sleep(2)
+            except Exception as e:
+                _logger.error(f"[jwxt] cookie SSO 登录失败: {e}")
+            else:
+                cookies = {c["name"]: c["value"] for c in ctx.cookies()
+                           if "i.sjtu.edu.cn" in c.get("domain", "")}
             browser.close()
-            return None
-        cookies = {c["name"]: c["value"] for c in ctx.cookies()
-                   if "i.sjtu.edu.cn" in c.get("domain", "")}
-        browser.close()
+
+    # 路径 2：凭证完整 jAccount 登录（账密 + 验证码三链路，复用 login.py）
+    # 此前只做路径 1——jaccount_cookies 缺失/过期（典型：新版 Chrome 的
+    # cookie 加密导致浏览器导入失败，issue #198）就直接放弃了。
+    if not cookies:
+        username = os.environ.get("JACCOUNT_USERNAME", "").strip()
+        password = os.environ.get("JACCOUNT_PASSWORD", "").strip()
+        if username and password:
+            try:
+                from login import _jaccount_sso
+                with sync_playwright() as pw:
+                    browser = pw.chromium.launch(headless=True)
+                    # device_scale_factor=1 供验证码 API 使用原始尺寸截图
+                    ctx = browser.new_context(device_scale_factor=1)
+                    page = ctx.new_page()
+                    ok = _jaccount_sso(
+                        page,
+                        "https://i.sjtu.edu.cn/jaccountlogin",
+                        "**/i.sjtu.edu.cn/**",
+                        username, password,
+                    )
+                    if ok:
+                        cookies = {c["name"]: c["value"] for c in ctx.cookies()
+                                   if "i.sjtu.edu.cn" in c.get("domain", "")}
+                        # 顺带刷新保存的 jAccount 会话，让路径 1 下次直接命中
+                        ja = {c["name"]: c["value"] for c in ctx.cookies()
+                              if "jaccount.sjtu.edu.cn" in c.get("domain", "")}
+                        if ja:
+                            cfg["jaccount_cookies"] = ja
+                    browser.close()
+            except Exception as e:
+                _logger.warning(f"[jwxt] 凭证登录失败: {e}")
 
     if cookies:
         cfg["jwxt_cookies"] = cookies
@@ -2198,7 +2231,17 @@ def fetch_schedule(cfg: dict, year: str = "", term: str = "", refresh: bool = Fa
     # ── 网络请求 ─────────────────────────────────────────────────────────────
     cookies = _get_jwxt_cookies(cfg)
     if not cookies:
-        return {"error": "无法获取教务系统 session，请检查 jAccount 配置"}
+        return {
+            "error": (
+                "无法获取教务系统 session（jAccount 自动登录未成功，"
+                "可能触发验证码或网络不通）。"
+                "修复方式：请用户在终端运行 `sjtu-agent login`（自动带验证码识别），"
+                "若仍失败再重跑 `sjtu-agent setup` 核对 jAccount 账号。"
+                "注意：绝对不要建议用户「在自己浏览器里登录后由你使用浏览器的"
+                "Cookie」——你的浏览器实例与用户浏览器相互隔离，读不到其会话；"
+                "也不要编造其他接管浏览器会话的方案（issue #198）。"
+            )
+        }
 
     try:
         r = requests.post(
