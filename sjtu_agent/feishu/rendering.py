@@ -14,9 +14,17 @@ FS_MSG_MAX = 4000
 _MD_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 _MD_BOLD_ITALIC_RE = re.compile(r"\*\*\*(.+?)\*\*\*")
 _MD_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
-_MD_ITALIC_RE = re.compile(r"(?<!\*)\*([^*\n]+?)\*(?!\*)|(?<!_)_([^_\n]+?)_(?!_)")
+_MD_BOLD_UNDERSCORE_RE = re.compile(r"__(.+?)__")
+# 斜体：星号分支要求内容首尾非空白（防 "3 * 4" 乘号误判）；下划线分支要求
+# 开头前面不是 _（防 "__bold__" 被匹配成 "_bold_" 斜体——模型两种黑体风格
+# 都会用，此前下划线黑体渲染不稳定就是这个原因）
+_MD_ITALIC_RE = re.compile(
+    r"(?<!\*)\*([^\s*](?:[^*\n]*[^\s*])?)\*(?!\*)"
+    r"|(?<!_)_([^_\n]+?)_(?!_)"
+)
 _MD_CODE_RE = re.compile(r"`([^`\n]+?)`")
-_MD_TABLE_SEP_RE = re.compile(r"^\|?\s*[-:]{3,}\s*\|\s*[-:]{3,}\s*(\|\s*[-:]{3,}\s*)*\|?\s*$")
+# 分隔行接受 1+ 个连字符（GFM 允许 |--|--|，此前 {3,} 会漏掉短分隔线）
+_MD_TABLE_SEP_RE = re.compile(r"^\|?\s*[-:]+\s*\|\s*[-:]+\s*(\|\s*[-:]+\s*)*\|?\s*$")
 
 # Feishu post element types
 _PostElement = dict  # {"tag": "text"|"a", "text": str, ...}
@@ -107,6 +115,7 @@ def parse_inline(text: str) -> _PostParagraph:
     while remaining:
         bold_italic_m = _MD_BOLD_ITALIC_RE.search(remaining)
         bold_m = _MD_BOLD_RE.search(remaining)
+        bold_under_m = _MD_BOLD_UNDERSCORE_RE.search(remaining)
         italic_m = _MD_ITALIC_RE.search(remaining)
         code_m = _MD_CODE_RE.search(remaining)
         link_m = _MD_LINK_RE.search(remaining)
@@ -114,6 +123,7 @@ def parse_inline(text: str) -> _PostParagraph:
         candidates = []
         if bold_italic_m: candidates.append((bold_italic_m.start(), bold_italic_m, "bold_italic"))
         if bold_m: candidates.append((bold_m.start(), bold_m, "bold"))
+        if bold_under_m: candidates.append((bold_under_m.start(), bold_under_m, "bold"))
         if italic_m: candidates.append((italic_m.start(), italic_m, "italic"))
         if code_m: candidates.append((code_m.start(), code_m, "code"))
         if link_m: candidates.append((link_m.start(), link_m, "link"))
