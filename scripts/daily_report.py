@@ -17,6 +17,7 @@ launchd 每天 22:00 自动运行。
 """
 
 import json
+import re
 import sys
 import datetime as dt
 import traceback
@@ -306,6 +307,50 @@ def _active_ddls(all_ddls: list) -> list:
     return [d for d in all_ddls if not d.get("expired")]
 
 
+_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
+
+
+def _llm_generate(client, model: str, prompt: str) -> tuple[str, str]:
+    """调用 LLM 生成日报正文，返回 (text, finish_reason)；空回复重试一次。
+
+    注意：OpenAI 协议路径不设 max_tokens——推理模型（deepseek-flash 等）的
+    思考与回答共享完成预算，设 4096 会被思考烧穿导致 content 为空，
+    曾把"(报告生成失败，请重试)"当作正文推送出去（2026-09-15 晚报实测）。
+    """
+    text, finish_reason = "", ""
+    for attempt in (1, 2):
+        if agent._is_anthropic_model(model):
+            resp = client.messages.create(
+                model=model,
+                max_tokens=8192,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text = "".join(getattr(b, "text", "") or "" for b in resp.content or [])
+            finish_reason = resp.stop_reason or ""
+        else:
+            resp = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            choice = resp.choices[0] if getattr(resp, "choices", None) else None
+            text = (choice.message.content or "") if choice else ""
+            finish_reason = (getattr(choice, "finish_reason", "") or "") if choice else ""
+
+        # 去除 DeepSeek 等模型嵌在 content 里的 <think>...</think> 推理块
+        text = _THINK_RE.sub("", text).strip()
+        # 防御：若仍以 <think> 开头说明截断未闭合，截取 </think> 后的部分
+        if text.startswith("<think>"):
+            idx = text.find("</think>")
+            text = text[idx + len("</think>"):].strip() if idx != -1 else ""
+        if text:
+            return text, finish_reason
+        _logger.warning(
+            f"[daily_report] AI 返回空内容（finish_reason={finish_reason or 'unknown'}），"
+            f"第 {attempt}/2 次尝试"
+        )
+    return "", finish_reason
+
+
 def build_report(report_type: str = "evening") -> str | None:
     """收集数据 → 调用 AI 生成中文汇报 → 返回 HTML 格式字符串。
 
@@ -495,8 +540,6 @@ def build_report(report_type: str = "evening") -> str | None:
     except Exception:
         pass
 
-    _THINK_RE = __import__("re").compile(r"<think>.*?</think>", __import__("re").DOTALL)
-
     # 构建启用的 section 列表：用户偏好的 + 实际有内容的（去掉空模块，不写"暂无"）
     section_order = ["ddl", "schedule", "lab", "jwc", "news", "tips"]
     enabled_list = [
@@ -534,32 +577,13 @@ def build_report(report_type: str = "evening") -> str | None:
         agent_cfg = agent.load_agent_config()
         client = agent._make_client(agent_cfg)
         model = agent_cfg.get("model", "deepseek-chat")
-
-        if agent._is_anthropic_model(model):
-            resp = client.messages.create(
-                model=model,
-                max_tokens=4096,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            text = resp.content[0].text
-        else:
-            resp = client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=4096,
-            )
-            # DeepSeek Reasoner: reasoning_content 单独字段，直接取 content
-            choice = resp.choices[0].message
-            text = choice.content or ""
-
-        # 去除 DeepSeek 等模型嵌在 content 里的 <think>...</think> 推理块
-        text = _THINK_RE.sub("", text).strip()
-        # 防御：若仍以 <think> 开头说明截断未闭合，截取 </think> 后的部分
-        if text.startswith("<think>"):
-            idx = text.find("</think>")
-            text = text[idx + len("</think>"):].strip() if idx != -1 else ""
-        return text or "(报告生成失败，请重试)"
-
+        text, finish_reason = _llm_generate(client, model, prompt)
+        if text:
+            return text
+        _logger.warning(
+            f"[daily_report] AI 返回空内容（finish_reason={finish_reason or 'unknown'}），降级为纯文本日报"
+        )
+        raise RuntimeError("AI 返回空内容")
     except Exception as e:
         _logger.warning(f"[daily_report] AI 生成失败，降级为纯文本模式: {e}")
         fallback_schedule_label = "明日课程" if report_type == "evening" else "今日课程"

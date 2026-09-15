@@ -4,6 +4,7 @@
 """
 
 import datetime as _dt
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -179,3 +180,52 @@ def test_care_note_instructs_no_forced_mentions(monkeypatch):
     note = dr._build_care_note()
     assert "非必用" in note
     assert "不要" in note and ("编造" in note or "没出现在上下文" in note)
+
+
+# ── 日报生成韧性：推理模型烧穿 max_tokens 导致空回复（09-15 晚报实测） ────────
+
+class _FakeOpenAIClient:
+    """content 按预设序列返回，记录每次调用的 kwargs。"""
+
+    def __init__(self, contents):
+        self._contents = list(contents)
+        self.calls = []
+
+        def create(**kwargs):
+            self.calls.append(kwargs)
+            content = self._contents.pop(0) if self._contents else ""
+            return SimpleNamespace(choices=[SimpleNamespace(
+                message=SimpleNamespace(content=content),
+                finish_reason="length",
+            )])
+
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=create))
+
+
+def test_llm_generate_no_max_tokens_and_recovers(monkeypatch):
+    """OpenAI 路径不设 max_tokens（推理模型思考会烧穿预算）；首轮空回复后重试成功。"""
+    from scripts import daily_report as dr
+
+    client = _FakeOpenAIClient(["", "📊 日报内容"])
+    text, reason = dr._llm_generate(client, "deepseek-flash", "prompt")
+    assert text == "📊 日报内容"
+    assert reason == "length"
+    assert len(client.calls) == 2
+    assert all("max_tokens" not in kw for kw in client.calls)  # 关键回归点
+
+
+def test_llm_generate_all_empty_returns_empty_for_fallback():
+    from scripts import daily_report as dr
+
+    client = _FakeOpenAIClient(["", ""])
+    text, reason = dr._llm_generate(client, "deepseek-flash", "prompt")
+    assert text == "" and reason == "length"
+    assert len(client.calls) == 2  # 恰好重试一次，不死循环
+
+
+def test_llm_generate_strips_think_blocks():
+    from scripts import daily_report as dr
+
+    client = _FakeOpenAIClient(["<think>推理过程</think>正文"])
+    text, _ = dr._llm_generate(client, "deepseek-chat", "prompt")
+    assert text == "正文"
