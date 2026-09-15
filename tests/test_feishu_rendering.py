@@ -154,3 +154,43 @@ class TestBuildCardContent:
 class TestFSMsgMax:
     def test_value(self):
         assert FS_MSG_MAX == 4000
+
+
+# ── 渲染稳定性回归（用户实测：黑体/表格时好时坏） ─────────────────────────────
+
+def _texts_with_style(paragraph):
+    return [(el["text"], el.get("style") or []) for el in paragraph if el.get("tag") == "text"]
+
+
+def test_bold_underscore_style_not_swallowed_by_italic():
+    """模型混用 __bold__ 风格时必须渲染为黑体（此前被斜体规则误吞为 _bold_）。"""
+    els = parse_inline("__重点__：明天有课")
+    texts = _texts_with_style(els)
+    assert ("重点", ["bold"]) in texts
+    assert not any(t == "重点" and "italic" in s for t, s in texts)
+
+
+def test_italic_star_and_underscore_still_work():
+    assert ("斜", ["italic"]) in _texts_with_style(parse_inline("*斜*体"))
+    assert ("斜体", ["italic"]) in _texts_with_style(parse_inline("_斜体_"))
+
+
+def test_multiplication_not_italicized():
+    """乘号星号（空格包裹）不误判为斜体。"""
+    els = parse_inline("计算 3 * 4 = 12 与 5 * 6 = 30")
+    assert not any("italic" in s for _, s in _texts_with_style(els))
+
+
+def test_table_two_dash_separator_detected():
+    """|--|--| 短分隔线（GFM 允许）此前漏识别导致表格原样漏出。"""
+    md = "| A | B |\n|--|--|\n| 1 | 2 |"
+    assert has_table(md) is True
+    assert "|" not in render_table_visual(md)
+
+
+def test_table_visual_keeps_content():
+    md = "| 名称 | 状态 |\n|---|---|\n| 作业1 | 未交 |"
+    visual = render_table_visual(md)
+    assert "|" not in visual
+    # 设计如此：首列值作为条目名，其余列渲染为 "表头：值"
+    assert "作业1" in visual and "状态：未交" in visual
