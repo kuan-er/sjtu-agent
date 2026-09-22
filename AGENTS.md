@@ -1,6 +1,6 @@
 # AGENTS.md
 
-本文件供各类 Coding Agent（ZCode、Claude Code、Codex、Cursor 等）在本仓库工作时读取。人类开发者请看 [README](README.md) 与 [CONTRIBUTING](CONTRIBUTING.md)。
+本文件供各类 Coding Agent（DeepSeek Harness / DSH、Claude Code、Codex、Cursor 等）在本仓库工作时读取。人类开发者请看 [README](README.md) 与 [CONTRIBUTING](CONTRIBUTING.md)。
 
 ## 项目引导
 

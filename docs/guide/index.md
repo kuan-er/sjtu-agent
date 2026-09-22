@@ -50,7 +50,7 @@ Bot 绑定步骤多一些（要去平台申请应用），建议先用 Web GUI �
 3. **开始使唤它** —— 从「这周有什么作业」问到「食堂吃什么」，照抄就行：见[日常话术库](./cookbook.md)
 
 ::: tip 懒得照抄命令？让 Coding Agent 替你装 🤖
-克隆仓库后启动一个 Coding Agent（如 ZCode），说「按 docs/guide/install.md 帮我安装配置，报错你排查」即可——顺便练一下指挥 AI Agent 这个大学四年的关键技能。详见[从零安装 · 省力路线](./install.md#省力路线-让-coding-agent-替你装)。
+克隆仓库后启动一个 Coding Agent（如 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)，简称 DSH），说「按 docs/guide/install.md 帮我安装配置，报错你排查」即可——顺便练一下指挥 AI Agent 这个大学四年的关键技能。详见[从零安装 · 省力路线](./install.md#省力路线-让-coding-agent-替你装)。
 :::
 
 中途有任何概念看不懂（API Key？Token？幻觉？），翻一下 [AI 使用基础](./ai-basics.md)那页的小词典；出问题先跑 `sjtu-agent doctor`，再查[排错手册](../TROUBLESHOOTING.md)。

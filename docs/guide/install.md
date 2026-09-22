@@ -98,17 +98,27 @@ sjtu-agent doctor   # 应显示大模型已配置 + 各项路径正常
 
 ## 省力路线：让 Coding Agent 替你装
 
-照抄命令遇到报错不想自己查？可以请一个 **Coding Agent** 代劳——能读写文件、执行命令、自动排错的 AI 助手。推荐 **[ZCode](https://zcode.z.ai/cn)**（智谱官方，GLM 系模型的配套 Agent 工具，Windows / macOS / Linux 桌面端，[安装三步约 2 分钟](https://zcode.z.ai/cn/docs/install)；工具本体免费，模型调用需登录智谱账号订阅，以[官网说明](https://zcode.z.ai/cn/docs/configuration)为准）。同类还有 Claude Code 等。这不只是偷懒：**熟练指挥 AI Agent 干活，本身就是大学四年最值得练的能力之一**。本项目自己也大量靠 Coding Agent 开发（见 [CONTRIBUTING](https://github.com/kuan-er/sjtu-agent/blob/main/CONTRIBUTING.md) 的「Coding Agent 辅助开发」）。
+照抄命令遇到报错不想自己查？可以请一个 **Coding Agent** 代劳——能读写文件、执行命令、自动排错的 AI 助手。推荐 **[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)**（简称 **DSH**，DeepSeek 官方开源的 Agent 框架：MIT 协议、代码公开可审，Windows / macOS / Linux 通用，自带浏览器界面）。同类还有 Claude Code 等。这不只是偷懒：**熟练指挥 AI Agent 干活，本身就是大学四年最值得练的能力之一**。本项目自己也大量靠 Coding Agent 开发（见 [CONTRIBUTING](https://github.com/kuan-er/sjtu-agent/blob/main/CONTRIBUTING.md) 的「Coding Agent 辅助开发」）。
 
-用法很简单——先把仓库克隆下来，再让 ZCode 打开这个文件夹，说人话就行：
+::: warning 为什么把 ZCode 换成了 DSH
+本指南此前推荐智谱 ZCode。2026 年 9 月 18 日，ZCode 被曝「代码库索引 / Repo Wiki」功能**上线初期默认开启**：生成 Repo Wiki 页面时会触发仓库数据（含历史版本）上传到云端，官方称页面生成后数据即销毁。智谱当日向用户致歉、称问题已修复，并宣布开源 ZCode 代码库、引入第三方审查（[报道](https://www.ithome.com/0/100/4310.htm)）。这类工具要读你的代码，还可能碰到 `.env`，数据去向必须能自己查证——所以我们改用开源可审的 DSH。**这条教训对任何 Agent 都成立：装之前先弄清它会把你的代码发到哪儿。**
+:::
+
+用法很简单——先装 [Node.js](https://nodejs.org/)（官网下 LTS 版，一路「下一步」即可；DSH 跑在 Node.js 上），再克隆仓库、启动 DSH，然后说人话：
 
 ```bash
+# 1) 下载项目
 git clone https://github.com/kuan-er/sjtu-agent.git
+
+# 2) 启动 DSH（首次运行会提示下载，回车确认）
+npx @deepseek-ai/dsh web
 ```
 
-1. 按[官网指引](https://zcode.z.ai/cn/docs/install)安装并登录 ZCode；
-2. 在 ZCode 里打开 `sjtu-agent` 文件夹作为工作区；
-3. 对话框里直接说：
+浏览器会自动打开 DSH 界面（默认 <http://127.0.0.1:3080>）。接着：
+
+1. **配模型**：在 **设置 → 模型** 里填一个模型 Key——最省事是到 [DeepSeek 开放平台](https://platform.deepseek.com/) 注册拿一个；已有**致远一号** Key 的同学可以选「添加自定义提供方」把它接进来（API 地址 `https://models.sjtu.edu.cn/api/v1`、协议选 OpenAI 兼容、模型 `deepseek-chat`），细节与网关兼容性见 [DSH《配置模型》](https://deepseek-harness.github.io/deepseek-harness/guide/providers)；
+2. **开工作区**：点「选择工作区」，把 `sjtu-agent` 文件夹添加进来并选中；
+3. **下指令**：新建会话，把下面这段粘进去：
 
 ```text
 我是新手，第一次配置开发环境。请按 docs/guide/install.md 的流程帮我安装并配置这个项目，
@@ -121,7 +131,7 @@ git clone https://github.com/kuan-er/sjtu-agent.git
 jAccount 密码、API Key 这类敏感信息，**在向导提示时自己敲进去**，不要粘贴到和 Agent 的聊天里——聊天内容会留在会话记录中。让 Agent 干活，但凭据不外借（与[安全三原则](./ai-basics.md#安全三原则)一脉相承）。
 :::
 
-装完出问题也可以随时叫它帮忙：把 `sjtu-agent doctor` 的输出贴给它（注意先删掉里面的 Key），让它对照本页排错。
+装完出问题也可以随时叫它帮忙：把 `sjtu-agent doctor` 的输出贴给它（注意先删掉里面的 Key），让它对照本页排错。DSH 目前处于开发者预览阶段、迭代较快，若卡在 DSH 自身（装不上、界面报错），可到它的 [GitHub Discussions](https://github.com/deepseek-ai/deepseek-harness/discussions) 找答案或提问。
 
 ## 第五步：第一次对话
 
