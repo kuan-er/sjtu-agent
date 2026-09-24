@@ -2,6 +2,13 @@
 
 本文件记录各版本的用户可见变化。Agent 通过 `get_recent_updates` 读取（问「最近更新了什么」时），不写入 system prompt。
 
+## v0.26.0 (2026-09-24)
+- 🛰 **接入 DeepSeek 官方搜索**（默认 `auto`）：本机配了 DeepSeek 官方 Key（`DEEPSEEK_API_KEY`，或 `agent_config.json` 的 LLM 指向 `api.deepseek.com`）时，`web_search` 优先调用官方**服务端搜索**（Anthropic 兼容 Messages API 的 `web_search_20250305` 工具——结构化结果，不受反爬与页面改版影响），失败自动回落到免 Key 抓取栈。结果新增 `backend` 字段说明本轮走的哪条路，`SJTU_WEB_SEARCH_BACKEND=auto|scrapers|deepseek` 可控。代价要说清：**一次官方搜索 = 一个完整模型轮次**（延迟 + token 计费），想零额外花费就用 `scrapers`
+- 📐 **上下文预算改为按「后端 + 模型」自适应**（不再写死 256K）：官方 DeepSeek / Anthropic 1M 窗口 → **500K**；**致远一号 `deepseek-chat` / `deepseek-reasoner` 512k → 256K、`qwen` 256k → 128K**（校园网关官方口径就是 512k/256k，**不是**官方的 1M）；其它未公开窗口的网关 → 64K。部署方可用 `SJTU_CONTEXT_WINDOW` / `SJTU_CONTEXT_BUDGET` 直接声明。折叠事件现在记日志（预算、折叠轮数、折叠前后估算），便于用真实数据继续校准
+- 📤 **单轮输出上限自适应**：`min(厂商上限, 窗口 − 已用 prompt − 余量)`，下限 1024 —— DeepSeek V4.1-Flash **393,216（384K，思考与正文共享该配额）**、Claude / GPT-6 128K、Gemini 3.8 Flash 65,536、认不出的模型 8192；替换 Anthropic 路径写死的 4096（v0.24.0 日报空回复的根因），后端拒收时自动降档重试。`SJTU_MAX_OUTPUT_TOKENS` 可覆盖
+- 📚 **新增 2026 下半年 Agent token 量级调研**（本机 3,076 次真实调用实测 + 官方价目交叉核对）：单次调用上下文中位 **28.9 万 tokens**、p90 58.1 万、峰值 71.4 万，而新增输入中位仅 282 tokens；**缓存命中占上下文 99.6%**（8 天负载按官方价 ≈$4.5，无缓存则 ≈$135）；harness 固定开销约 **1.74 万 tokens**（76 个工具 schema 占 1.3 万）。附 18 个模型的窗口/输出/三档价格对照表。文档站新增「调研与参考」分组（只放结论与对照表，原始调研留在仓库）
+- 🧹 文档同步新口径：`README_EN` 的搜索说明（去掉早已失效的 DuckDuckGo）、`AGENT_ARCHITECTURE` 的预算数字、`SERVER_DEPLOYMENT` 的引擎列表与搜索方案、`CLAUDE.md` 环境变量表
+
 ## v0.25.0 (2026-09-24)
 - 🔍 **联网搜索重做**：DuckDuckGo 兜底其实早就死了（lite 端点返回 202 反爬页、解析恒为空，且大陆网络不可达），Bing 的 HTML 结果链接 **100% 是 `bing.com/ck/a` 跳转壳**——模型引用给用户的"来源"根本点不开，按 URL 去重也随之失效。现在改为 **Bing RSS（主，真实 URL + 干净摘要）+ Bing HTML（备，用 `ck/a` 里的 `u=a1<base64url>` 还原真实地址，实测 6/6 可还原）+ 360 搜索（中文兜底，真实地址在 `data-mdurl`、摘要自带日期）** 三通路
 - 🎯 **按质量而非条数升级**：Bing 常常一口气给满 8 条品牌官网/百科，条数够但"封号""风评"一个都没覆盖——现在会判定"没打到问题焦点"，自动换来源（360）与换关键词形态（缩写、求评价类加「知乎」），最后按焦点覆盖度重排，官网不再霸榜；同时丢弃跳转壳、过滤搜索引擎自家工具页、同域最多 2 条
