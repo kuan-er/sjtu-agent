@@ -132,6 +132,17 @@ from sjtu_agent.agent.tools._bot_setup import (
     TOOLS_ENTRIES as _BOT_SETUP_TOOLS,
     tool_get_bot_setup_guide,
 )
+# 网页抓取/正文提取的公共实现（web_search 的「搜索即阅读」也用它）。
+# 这里以原名重新绑定，保持 _core._validate_fetch_url 等既有引用与测试不变。
+from sjtu_agent.agent.tools._web_common import (
+    GENERAL_FETCH_HEADERS as _GENERAL_FETCH_HEADERS,
+    WEIXIN_FETCH_HEADERS as _WEIXIN_FETCH_HEADERS,
+    extract_main_text as _extract_main_text,
+    extract_title as _extract_title,
+    fetch_article_text,
+    fetch_html as _fetch_html,
+    validate_public_url as _validate_fetch_url,
+)
 
 TOOLS = [
     {
@@ -3262,26 +3273,6 @@ def tool_query_grades(year: str = "", semester: str = "") -> dict:
 
 
 
-def _validate_fetch_url(url: str) -> dict | None:
-    """Validate URL for tool_fetch_url — block private IPs and non-HTTP schemes.
-
-    Returns an error dict if invalid, None if OK.
-    """
-    parsed = urllib.parse.urlparse(url)
-    if parsed.scheme not in ("http", "https"):
-        return {"ok": False, "error": f"不支持的协议: {parsed.scheme}，仅允许 http/https"}
-    host = parsed.hostname
-    if not host:
-        return {"ok": False, "error": "无法解析 URL 主机名"}
-    try:
-        addr = ipaddress.ip_address(host)
-        if addr.is_private or addr.is_loopback or addr.is_link_local:
-            return {"ok": False, "error": "不允许访问内网地址"}
-    except ValueError:
-        pass  # hostname, not IP — allow
-    return None
-
-
 def tool_fetch_url(url: str) -> dict:
     """
     抓取网页内容并提取纯文本。
@@ -3345,64 +3336,16 @@ def tool_fetch_url(url: str) -> dict:
             # Playwright 失败，降级到 requests
             pass
 
-    # 普通网页或 Playwright 失败时用 requests
+    # 普通网页或 Playwright 失败时用 requests（正文提取与搜索阅读流水线共用实现）
     try:
-        import requests
-
-        headers = {
-            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.43(0x18002b2d) NetType/WIFI Language/zh_CN",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-            "Accept-Encoding": "gzip, deflate, br",
-            "Referer": "https://mp.weixin.qq.com/",
-        }
-        resp = requests.get(url, headers=headers, timeout=30, allow_redirects=True)
-        resp.raise_for_status()
-        resp.encoding = resp.apparent_encoding or "utf-8"
-
-        soup = BeautifulSoup(resp.text, "html.parser")
-
-        # 移除无关标签
-        for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
-            tag.decompose()
-
-        # 提取标题
-        title = ""
-        if "mp.weixin.qq.com" in url:
-            title_tag = soup.find("h1", class_="rich_media_title") or soup.find("h2", class_="rich_media_title")
-            if title_tag:
-                title = title_tag.get_text(strip=True)
-        if not title:
-            title = soup.title.string.strip() if soup.title else ""
-            if not title and soup.find("h1"):
-                title = soup.find("h1").get_text(strip=True)
-
-        # 提取正文
-        if "mp.weixin.qq.com" in url:
-            content_tag = soup.find("div", id="js_content") or soup.find("div", class_="rich_media_content")
-            if content_tag:
-                text = content_tag.get_text(separator="\n", strip=True)
-            else:
-                text = soup.get_text(separator="\n", strip=True)
-        else:
-            content_tag = soup.find("article") or soup.find("main") or soup.find("body")
-            if content_tag:
-                text = content_tag.get_text(separator="\n", strip=True)
-            else:
-                text = soup.get_text(separator="\n", strip=True)
-
-        # 清理多余空行
-        text = re.sub(r'\n\s*\n+', '\n\n', text)
-        text = text.strip()
-
-        # 截断过长内容
-        if len(text) > 8000:
-            text = text[:8000] + "\n\n[内容过长，已截断...]"
-
+        fetched = fetch_article_text(url, timeout=30, max_chars=8000, validate=False)
+        if not fetched["ok"]:
+            return {"ok": False, "error": f"抓取失败: {fetched['error']}"}
+        text = fetched["text"]
         return {
             "ok": True,
             "url": url,
-            "title": title,
+            "title": fetched.get("title", ""),
             "content": text,
             "length": len(text),
             "method": "requests",

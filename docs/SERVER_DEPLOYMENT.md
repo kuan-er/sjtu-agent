@@ -274,7 +274,7 @@ systemd 用户服务记得把环境变量写进 unit（`Environment=`）或用 `
 export SJTU_WEB_SEARCH_PROXY=http://127.0.0.1:7890
 ```
 
-- 设置了它：只有 `web_search`（Bing/DuckDuckGo）的请求走该代理，**其他请求一个字节都不碰代理**；
+- 设置了它：只有 `web_search`（Bing RSS / Bing HTML / 360 搜索兜底）的请求走该代理，**其他请求一个字节都不碰代理**；
 - 没设置：行为与原来一致（尊重 `HTTPS_PROXY` 或直连）；
 - 下载加速仍按你原来的习惯手动开/关代理，互不冲突。
 
