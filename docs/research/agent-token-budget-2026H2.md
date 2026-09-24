@@ -88,7 +88,7 @@
 | # | 项目 | 现状 | 建议 | 状态 |
 |---|---|---|---|---|
 | 1 | 折叠预算 `SESSION_QUALITY_BUDGET` | 原为 `256_000` 写死（且模块 docstring 写 64K，**不一致**） | 按**后端 + 模型**的窗口取一半：官方 DeepSeek/Anthropic 1M → **500K**；**致远一号 `deepseek-chat` 512k → 256K**、`qwen` 256k → 128K（官方指南数据，**不是** 1M）；其它网关窗口未公开 → 128K 窗口 → **64K**；可用 `SJTU_CONTEXT_WINDOW` / `SJTU_CONTEXT_BUDGET` 显式声明 | ✅ 已落地（`agent/context.py`：`model_context_window(model, base_url)` / `context_budget()` / `is_campus_gateway()`；`runner.py` 从 SDK 客户端读 `base_url` 后传入） |
-| 2 | 输出上限 | Anthropic 路径写死 `max_tokens=4096`（OpenAI 路径已不设上限） | 官方端点 **16384**、致远一号 **8192**（其单轮上限官方未公布，示例只给 1024）；`SJTU_MAX_OUTPUT_TOKENS` 可覆盖 | ✅ 已落地（`agent/runner.py::_max_output_tokens(base_url)`） |
+| 2 | 输出上限 | Anthropic 路径写死 `max_tokens=4096`（OpenAI 路径已不设上限） | **自适应**：`min(厂商上限, 窗口 − 已用 prompt − 余量)`，不低于 1024。DeepSeek-V4.1-Flash 上限 **393,216（384K，思考与正文共享该配额）**；Claude/GPT-6 128K、Gemini 65,536、Qwen/Kimi 131,072；认不出的模型保守 8192。`SJTU_MAX_OUTPUT_TOKENS` 可覆盖 | ✅ 已落地（`agent/runner.py::_max_output_tokens(base_url, model, prompt_tokens=…)` + `_provider_output_cap()`；后端拒绝时自动降档重试 2 次） |
 | 3 | 工具 schema 开销 | 76 个工具 / 37.8K 字符 ≈ 13K tokens（占固定开销 75%） | 按意图分组懒加载（邮件/Canvas/食堂/提醒各自成组）；精简描述 | ⬜ 待办（会话内工具集已是静态列表，这点已满足） |
 | 4 | 缓存纪律 | 动态时间注入在**用户消息首部**，system 前缀稳定 ✓ | 补：MCP 工具列表 60s TTL 可能在会话中途变化 → 整个前缀失效；建议会话内固定工具集 | ⚠️ 部分（`extensions/mcp_client.py::_TOOLS_CACHE` 仍会刷新） |
 | 5 | 工具结果内联上限 | `fetch_url` 8,000 字符截断，无落盘 | 内联 ~10K 字符，超出**落盘 + 回路径与预览** | ⬜ 待办 |
@@ -100,7 +100,7 @@
 | 文件 | 改动 |
 |---|---|
 | `sjtu_agent/agent/context.py` | 新增 `model_context_window(model, base_url)`：先看 `SJTU_CONTEXT_WINDOW`，再按**后端**分流（致远一号按官方指南 512k/256k、官方端点按官方规格、其它网关保守 128K），最后才按模型名猜；新增 `is_campus_gateway()`；`context_budget()` 按该窗口取一半（`SJTU_CONTEXT_BUDGET` 可覆盖、上下夹取）；`trim_session(budget=None)` 改按预算入参；折叠事件记 INFO 日志（预算、折叠轮数、折叠前后估算），供后续用真实数据校准 |
-| `sjtu_agent/agent/runner.py` | `_run_one_turn` 从 SDK 客户端读 `base_url` 后传 `context_budget(model, base_url=...)`；新增 `_max_output_tokens(base_url)`（官方 16384 / 致远一号 8192，`SJTU_MAX_OUTPUT_TOKENS` 覆盖）并替换 Anthropic 路径两处 4096 |
+| `sjtu_agent/agent/runner.py` | `_run_one_turn` 从 SDK 客户端读 `base_url` 后传 `context_budget(model, base_url=...)`；新增 `_provider_output_cap()`（DeepSeek 393,216 / Claude·GPT-6 128K / Gemini 65,536 / Qwen·Kimi 131,072 / 未知 8192）与 `_max_output_tokens(base_url, model, prompt_tokens=…)`——按 `min(厂商上限, 窗口 − prompt − 余量)` 自适应，替换 Anthropic 路径两处写死的 4096；后端以 `max_tokens` 为由拒绝时自动降档重试（最多 2 次）；新增 `_estimate_prompt_tokens()`（图片按固定视觉成本计，不按 base64） |
 | `.env.example` | 新增「上下文与输出预算」段：列出各后端的默认取值与两个窗口/预算环境变量 |
 | `tests/test_context.py`、`tests/test_runner_limits.py` | 新增 12 个用例（后端分流、网关调用名映射、未知网关不猜、环境变量优先、预算夹取、官方/网关输出上限、环境变量覆盖与非法值回落） |
 

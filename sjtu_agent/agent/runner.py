@@ -35,21 +35,82 @@ _MAX_NETWORK_RETRIES = 2   # 网络/超时重试上限
 # 实测思考占输出 40%（外部对 Opus 单答案任务的实测可达 98%）。4096 会把思考
 # 挤爆：v0.24.0 的日报空回复事故（#201）根因即在此。
 # 默认 16K 对校园问答足够，又不会让单轮生成无界变贵；可用环境变量覆盖。
-_MAX_OUTPUT_TOKENS_DEFAULT = 16_384
-# 致远一号（校园网关）单轮输出上限官方未公布，示例里给的是 1024 —— 保守取 8K
-_MAX_OUTPUT_TOKENS_GATEWAY = 8_192
+# ── 单轮输出上限（2026 口径，自适应）────────────────────────────────────────
+# 旧值 4096 是 GPT-3.5 时代的产物：2026 主流模型输出上限 128K~384K，而推理模型的
+# 思考 token 与正文**共用**这一配额——本机实测思考占输出 40%（外部对 Opus 单答案
+# 任务的实测可达 98%）。4096 会把思考挤爆：v0.24.0 日报空回复事故（#201）根因即此。
+#
+# 但也不能固定按厂商上限发：max_tokens 与 prompt **共享同一个窗口**，
+# DeepSeek V4.1-Flash 的上限是 393,216（384K，思考与正文共享），若在一轮大上下文
+# 里照样发满，prompt + max_tokens 超过窗口会被后端以 400 拒绝。所以取
+# min(厂商上限, 窗口 − 已用 prompt − 安全余量)，并保底不低于下限。
+_PROVIDER_OUTPUT_CAPS: tuple[tuple[str, int], ...] = (
+    ("deepseek", 393_216),   # V4.1-Flash：384K = 393,216（可通过 max_tokens 调 1~393216）
+    ("claude", 128_000),     # Opus/Sonnet 5：128K（Batch 300K 走 beta 头）
+    ("gpt-6", 128_000),
+    ("gpt-5", 128_000),
+    ("gemini", 65_536),
+    ("qwen", 131_072),
+    ("kimi", 131_072),
+    ("glm", 128_000),
+)
+_OUTPUT_CAP_UNKNOWN = 8_192    # 认不出的后端：保守（该后端上限未公开）
+_OUTPUT_CAP_FLOOR = 1_024      # 任何情况下都不低于此值
+_OUTPUT_SAFETY_MARGIN = 2_000  # 给 prompt 估算误差留的余量
 _MAX_OUTPUT_TOKENS_ENV = "SJTU_MAX_OUTPUT_TOKENS"
 
 
-def _max_output_tokens(base_url: str = "") -> int:
+def _provider_output_cap(model: str) -> int:
+    """厂商/模型公布的单轮输出上限；认不出的给保守值。"""
+    name = (model or "").lower()
+    for keyword, cap in _PROVIDER_OUTPUT_CAPS:
+        if keyword in name:
+            return cap
+    return _OUTPUT_CAP_UNKNOWN
+
+
+def _estimate_prompt_tokens(messages: list, system: str = "", tools=None) -> int:
+    """粗估本轮 prompt 的 token 量，用于给输出留余量。
+
+    复用 context 的估算（图片按固定视觉成本计，**不**按 base64 长度算，
+    否则一张图就会把输出上限压到下限）。
+    """
+    from sjtu_agent.agent.context import _estimate_tokens, _session_history_cost
+
+    total = _session_history_cost(messages)
+    total += _estimate_tokens(system or "")
+    if tools:
+        total += _estimate_tokens(json.dumps(tools, ensure_ascii=False))
+    return total
+
+
+def _max_output_tokens(
+    base_url: str = "", model: str = "", *, prompt_tokens: int = 0
+) -> int:
+    """自适应单轮输出上限 = min(厂商上限, 窗口 − prompt − 余量)，夹在 [下限, 上限]。
+
+    致远一号这类网关也按所承载模型的上限算（`deepseek-chat` → 393,216），
+    不再因为"网关上限没公开"就只给 8K；窗口本身仍按后端解析（网关 512k）。
+    """
     raw = os.environ.get(_MAX_OUTPUT_TOKENS_ENV, "").strip()
     if raw.isdigit() and int(raw) > 0:
         return int(raw)
-    from sjtu_agent.agent.context import is_campus_gateway
 
-    if is_campus_gateway(base_url):
-        return _MAX_OUTPUT_TOKENS_GATEWAY
-    return _MAX_OUTPUT_TOKENS_DEFAULT
+    from sjtu_agent.agent.context import model_context_window
+
+    cap = _provider_output_cap(model)
+    window = model_context_window(model, base_url)
+    remaining = window - max(0, int(prompt_tokens)) - _OUTPUT_SAFETY_MARGIN
+    return max(_OUTPUT_CAP_FLOOR, min(cap, remaining))
+
+
+def _is_max_tokens_rejection(message: str) -> bool:
+    """错误信息是否指向"max_tokens 不被接受/超出允许范围"。"""
+    text = (message or "").lower()
+    return any(
+        marker in text
+        for marker in ("max_tokens", "max output tokens", "max_completion_tokens")
+    )
 
 
 def _client_base_url(client) -> str:
@@ -563,6 +624,8 @@ def _run_one_turn_anthropic(client: Anthropic, model: str, messages: list) -> No
 
     iteration = 0
     retries = 0
+    max_tokens_downgrades = 0      # 后端拒绝 max_tokens 时的降档次数（最多 2 次）
+    output_cap_ceiling = 0         # 降档后记住的上限（0 = 尚未降档）
 
     while True:
         iteration += 1
@@ -595,6 +658,16 @@ def _run_one_turn_anthropic(client: Anthropic, model: str, messages: list) -> No
                 api_msgs.append(m)
         spinner.start("等待响应…")
 
+        # 自适应输出上限：随本轮 prompt 增长而收缩，避免 prompt + max_tokens 超窗口。
+        # 若后端拒绝过某个值，用 output_cap_ceiling 记住降档结果（否则重试时又被算回去）。
+        adaptive_cap = _max_output_tokens(
+            _client_base_url(client), model,
+            prompt_tokens=_estimate_prompt_tokens(messages, system, tools),
+        )
+        request_max_tokens = (
+            min(adaptive_cap, output_cap_ceiling) if output_cap_ceiling else adaptive_cap
+        )
+
         # ── SSE 流式请求 ────────────────────────────────────────────────────
         content_blocks: list[dict] = []     # 最终 assistant 消息内容
         tool_inputs: dict[int, str] = {}    # block_index -> accumulated JSON str
@@ -608,7 +681,7 @@ def _run_one_turn_anthropic(client: Anthropic, model: str, messages: list) -> No
                 "POST", endpoint,
                 headers=req_headers,
                 json={"model": model, "system": system, "messages": api_msgs,
-                      "tools": tools, "max_tokens": _max_output_tokens(_client_base_url(client)),
+                      "tools": tools, "max_tokens": request_max_tokens,
                       "stream": True},
                 timeout=180,
             ) as resp:
@@ -754,6 +827,16 @@ def _run_one_turn_anthropic(client: Anthropic, model: str, messages: list) -> No
                 retries += 1
                 _time.sleep(5)
                 continue
+            # 后端不认这么大的 max_tokens（网关硬上限 / 上下文余量比估计更紧）→ 降档重试
+            if _is_max_tokens_rejection(msg) and max_tokens_downgrades < 2:
+                max_tokens_downgrades += 1
+                previous = request_max_tokens
+                output_cap_ceiling = max(_OUTPUT_CAP_FLOOR, previous // 4)
+                print(
+                    f"\r[提示] 后端拒绝了 max_tokens={previous:,}，"
+                    f"降到不超过 {output_cap_ceiling:,} 重试…"
+                )
+                continue
             raise RuntimeError(f"Anthropic API 错误: {msg}")
 
         # ── 判断是否有工具调用 ────────────────────────────────────────────
@@ -811,7 +894,10 @@ def _converge_anthropic(client: Anthropic, model: str, messages: list) -> None:
     try:
         resp = client.messages.create(
             model=model, system=system, messages=api_msgs,
-            max_tokens=_max_output_tokens(_client_base_url(client)),
+            max_tokens=_max_output_tokens(
+                _client_base_url(client), model,
+                prompt_tokens=_estimate_prompt_tokens(messages, system),
+            ),
         )
         text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
     except Exception:
