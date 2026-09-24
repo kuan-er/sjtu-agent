@@ -39,7 +39,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from mcp.server.fastmcp import FastMCP
 import ddl_checker as dc
 
-mcp = FastMCP("sjtu-ddl")
+try:  # 在 instructions 里带上产品版本：FastMCP 的 serverInfo.version 是 mcp SDK 自己的版本
+    from sjtu_agent import __version__ as _sjtu_version
+except Exception:  # noqa: BLE001 — 极端情况下（未安装包）退回占位
+    _sjtu_version = "unknown"
+
+mcp = FastMCP(
+    "sjtu-ddl",
+    instructions=(
+        "上海交通大学校园助手 sjtu-agent 的 DDL / 实验查询服务"
+        f"（sjtu-agent v{_sjtu_version}）：汇总 Canvas、中国大学 MOOC 等平台的未完成作业，"
+        "以及下一次物理实验安排。"
+    ),
+)
 
 
 def _serialize_ddl(item: dict) -> dict:
