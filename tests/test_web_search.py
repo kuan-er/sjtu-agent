@@ -410,6 +410,65 @@ def test_block_page_marks_engine_blocked_and_is_skipped(monkeypatch):
     assert not any("so.com/s?" in url for url in calls[seen:])
 
 
+# ── 官方后端（auto：优先官方，失败回落抓取） ─────────────────────────────────
+
+
+def _official_items(count: int = 4) -> list[dict]:
+    return [
+        {
+            "title": f"官方结果{index}",
+            "url": f"https://official{index}.example.com/a",
+            "snippet": "官方搜索给出的引用摘要。",
+            "source": f"official{index}.example.com",
+        }
+        for index in range(count)
+    ]
+
+
+def test_official_backend_used_when_available(monkeypatch):
+    calls: list[str] = []
+    monkeypatch.setattr(ws.official, "enabled", lambda: True)
+    monkeypatch.setattr(ws.official, "search", lambda query, max_results: _official_items())
+    monkeypatch.setattr(ws.requests, "get", _router({}, calls=calls))
+
+    result = ws.tool_web_search("某查询")
+    assert result["ok"] is True
+    assert result["backend"] == "deepseek-official"
+    assert len(result["results"]) == 4
+    assert calls == []  # 官方够用时不再打抓取栈（省时间、少暴露）
+
+
+def test_official_failure_falls_back_to_scrapers(monkeypatch):
+    def boom(query, max_results):
+        raise ws.official.OfficialSearchError("未配置 Key")
+
+    monkeypatch.setattr(ws.official, "enabled", lambda: True)
+    monkeypatch.setattr(ws.official, "search", boom)
+    rss = _rss(("Anthropic 封号潮", "https://news.qq.com/a/1", "封号 争议 摘要" * 40))
+    monkeypatch.setattr(ws.requests, "get", _router({"format=rss": rss}))
+
+    result = ws.tool_web_search("Anthropic 封号 争议")
+    assert result["ok"] is True
+    assert result["backend"].startswith("bing-rss")
+    assert any("deepseek-official" in note for note in result.get("degraded", []))
+
+
+def test_scrapers_mode_never_calls_official(monkeypatch):
+    monkeypatch.setenv(ws.official.BACKEND_ENV, "scrapers")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+
+    def should_not_run(*args, **kwargs):
+        raise AssertionError("scrapers 模式下不应调用官方搜索")
+
+    monkeypatch.setattr(ws.official, "search", should_not_run)
+    rss = _rss(("封号 标题", "https://news.qq.com/a/1", "封号 摘要" * 40))
+    monkeypatch.setattr(ws.requests, "get", _router({"format=rss": rss}))
+
+    result = ws.tool_web_search("封号")
+    assert result["ok"] is True
+    assert result["backend"] == "bing-rss"
+
+
 # ── 失败语义 ─────────────────────────────────────────────────────────────────
 
 

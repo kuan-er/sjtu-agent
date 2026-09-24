@@ -1,7 +1,12 @@
 """
 sjtu_agent/agent/tools/_web_search.py — 公开网页搜索工具（免 API Key，多引擎）。
 
-三条独立通路，按「结果质量 + 稳定性」排序：
+在抓取栈之前还有一层 **DeepSeek 官方服务端搜索**（`_web_search_official.py`）：
+配了 DeepSeek 官方 Key（`DEEPSEEK_API_KEY`）时优先走官方（结构化结果、无反爬与改版问题，
+但一次搜索消耗一个模型轮次），失败或未配置则自动回落到下面的抓取栈；
+`SJTU_WEB_SEARCH_BACKEND=auto|scrapers|deepseek` 可控。
+
+三条独立抓取通路，按「结果质量 + 稳定性」排序：
 
 1. **Bing RSS**（主）`https://www.bing.com/search?q=…&format=rss` —— 结构化 XML，
    天然给出**真实 URL** 与干净摘要，不受搜索结果页改版影响。
@@ -38,6 +43,7 @@ from concurrent.futures import TimeoutError as FuturesTimeout
 
 import requests
 
+from sjtu_agent.agent.tools import _web_search_official as official
 from sjtu_agent.agent.tools._web_common import fetch_article_text
 
 TOOLS_ENTRIES = [
@@ -513,6 +519,7 @@ _ERROR_HINTS = {
     "timeout": "请求超时：网络不通或搜索引擎被限流，稍后重试或改用 search_campus / fetch_url",
     "http": "搜索引擎拒绝了请求（限流/反爬），稍后重试或改用其他来源",
     "blocked": "国内搜索引擎临时反爬拦截（已跳过它）：换关键词再搜，或改用 search_campus 看水源社区讨论",
+    "official": "官方搜索需要 DeepSeek 官方 API Key（DEEPSEEK_API_KEY）；本轮已回落到免 Key 抓取，也可设 SJTU_WEB_SEARCH_BACKEND=scrapers 明确只用抓取",
     "other": "网络请求失败：检查本机网络；也可改用 search_campus / fetch_url",
 }
 
@@ -638,8 +645,10 @@ def tool_web_search(
     grams = _focus_grams(query)
     pool: list[dict] = []
     errors: list[str] = []
+    used: list[str] = []
     hint_key = ""
-    deadline = time.monotonic() + _TOTAL_BUDGET
+    started = time.monotonic()
+    deadline = started + _TOTAL_BUDGET
 
     def attempt(engine: str, searcher, variant: str) -> None:
         nonlocal pool, hint_key
@@ -656,28 +665,51 @@ def tool_web_search(
             return
         if batch:
             pool = _merge_results([pool, batch], _POOL_LIMIT)
+            used.append(engine)
 
-    # 第一层：主引擎（Bing RSS，链接与摘要都是真实内容）
-    attempt("bing-rss", _search_bing_rss, variants[0])
-    # 第二层：同一家引擎的 HTML 端点（RSS 被限流/返回空时）
-    if len(pool) < 2:
-        attempt("bing-html", _search_bing_html, variants[0])
+    # 第零层：DeepSeek 官方服务端搜索（配了官方 Key 时优先；失败自动回落抓取栈）
+    official_count = 0
+    if official.enabled():
+        try:
+            official_batch = official.search(query, max_results)
+        except Exception as exc:  # noqa: BLE001 — 官方不可用/失败都回落到抓取
+            errors.append(f"deepseek-official: {exc}")
+            hint_key = hint_key or "official"
+        else:
+            if official_batch:
+                pool = _merge_results([pool, official_batch], _POOL_LIMIT)
+                used.append("deepseek-official")
+                official_count = len(official_batch)
 
-    # 第三层：结果没打到问题焦点（整页品牌官网/百科）或条数太少 → 中文引擎兜底
-    if _is_thin(_rank(pool, grams), grams):
-        attempt("so360", _search_360, variants[0])
+    # 官方结果够用时不再打抓取栈（省时间，也少暴露）；不够才升级
+    deadline = time.monotonic() + max(8.0, _TOTAL_BUDGET - (time.monotonic() - started))
+    if official_count < 3:
+        # 第一层：主引擎（Bing RSS，链接与摘要都是真实内容）
+        attempt("bing-rss", _search_bing_rss, variants[0])
+        # 第二层：同一家引擎的 HTML 端点（RSS 被限流/返回空时）
+        if len(pool) < 2:
+            attempt("bing-html", _search_bing_html, variants[0])
 
-    # 第四层：仍偏浅 → 换关键词形态（缩写 / 意图限定词）再来一轮
-    for variant in variants[1:]:
-        if time.monotonic() > deadline or not _is_thin(_rank(pool, grams), grams):
-            break
-        attempt("bing-rss", _search_bing_rss, variant)
+        # 第三层：结果没打到问题焦点（整页品牌官网/百科）或条数太少 → 中文引擎兜底
         if _is_thin(_rank(pool, grams), grams):
-            attempt("so360", _search_360, variant)
+            attempt("so360", _search_360, variants[0])
+
+        # 第四层：仍偏浅 → 换关键词形态（缩写 / 意图限定词）再来一轮
+        for variant in variants[1:]:
+            if time.monotonic() > deadline or not _is_thin(_rank(pool, grams), grams):
+                break
+            attempt("bing-rss", _search_bing_rss, variant)
+            if _is_thin(_rank(pool, grams), grams):
+                attempt("so360", _search_360, variant)
 
     ranked = _rank(pool, grams)[:max_results]
     if ranked:
-        payload: dict = {"ok": True, "query": query, "results": ranked}
+        payload: dict = {
+            "ok": True,
+            "query": query,
+            "results": ranked,
+            "backend": "+".join(used) or "none",
+        }
         if errors:
             # 有来源被限流/失败时如实标注：结果可能偏官方，模型可据此换策略
             payload["degraded"] = errors[-2:]

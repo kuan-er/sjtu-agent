@@ -278,6 +278,23 @@ export SJTU_WEB_SEARCH_PROXY=http://127.0.0.1:7890
 - 没设置：行为与原来一致（尊重 `HTTPS_PROXY` 或直连）；
 - 下载加速仍按你原来的习惯手动开/关代理，互不冲突。
 
+### 方案三：DeepSeek 官方搜索（可选，有官方 Key 时自动启用）
+
+`web_search` 默认用免 Key 的多引擎抓取；如果本机配了 **DeepSeek 官方 API Key**（`DEEPSEEK_API_KEY`，或 `agent_config.json` 里把 LLM 配成 DeepSeek 官方端点），会自动优先调用 **DeepSeek 官方服务端搜索**，失败再回落到抓取栈。
+
+```bash
+export SJTU_WEB_SEARCH_BACKEND=auto      # auto（默认）| scrapers | deepseek
+# 仅当你有非官方网关也想走官方搜索时才需要下面这些：
+# export SJTU_SEARCH_BASE_URL=https://api.deepseek.com/anthropic/v1
+# export SJTU_SEARCH_MODEL=deepseek-flash
+# export SJTU_SEARCH_MAX_USES=3
+```
+
+- 官方搜索**不是**独立检索端点，而是 Anthropic 兼容 Messages API 的服务端工具（`web_search_20250305`）：**一次搜索消耗一个完整模型轮次**（延迟 + 生成 token），因此比抓取慢、也计费；
+- 结果是结构化的（官方返回 `web_search_tool_result` 块，含 URL / 标题 / 日期与引用摘要），不存在反爬与改版问题——中文内容的覆盖通常明显好于免 Key 抓取；
+- 想完全避免这类开销：`export SJTU_WEB_SEARCH_BACKEND=scrapers`（回到纯免 Key 抓取）；
+- 致远一号等第三方网关不提供这条路径，这类部署保持默认 `auto` 即等价于只用抓取。
+
 ### 常见疑惑
 
 - **"长期挂代理会不会封号？"** 这里的"封号"通常指**云厂商停用服务器实例/账号**。触发点一般是：①实例**对外提供代理中转**（有人经你的服务器转发流量）；②无鉴权代理端口被公网扫描到；③持续大流量转发 / 异常境外流量。安全做法：
@@ -285,7 +302,7 @@ export SJTU_WEB_SEARCH_PROXY=http://127.0.0.1:7890
   - 监听地址只绑 `127.0.0.1`（绝不绑 `0.0.0.0`），需要认证；
   - 不需要时就关掉。`SJTU_WEB_SEARCH_PROXY` 模式下搜索每次只产生几 KB 出站流量，与普通浏览无异，远低于风险阈值。
 - **代理地址端口填什么？** 看你服务器上代理软件的监听地址。常见：Clash/V2Ray 类 `http://127.0.0.1:7890`、`socks5://127.0.0.1:1080`（HTTP(S)_PROXY 建议用 http:// 形式）。验证：`curl -x http://127.0.0.1:7890 -I https://www.bing.com`。
-- **搜索还是差？** 挂上代理后仍差，多半是引擎对机房 IP 的降级；可让模型优先用 `search_campus` 查校内源（不需要代理）。
+- **搜索还是差？** 挂上代理后仍差，多半是引擎对机房 IP 的降级；可让模型优先用 `search_campus` 查校内源（不需要代理），或按上面的方案三配上 DeepSeek 官方 Key 走官方搜索。
 
 ## 10. 已知限制与建议
 
