@@ -13,6 +13,8 @@
 
 一句话：**sjtu-agent 从"自己造 harness 的校园助手"变成"带聊天入口的校园能力包"，DSH 当引擎。**
 
+> **补充（2026-09-24 追加调研后）**：官方还提供两条让这件事更彻底的路——**组合包 + profile** 的发行机制（bundle/profile/patch 三层，见 §四·五）与**官方 Python SDK**（`deepseek-harness-sdk` + `deepseek-harness-runtime-bin`，**wheel 内自带 `dsh` 可执行程序**，且**启动时必须显式指定 harness home、绝不静默读 `~/.dsh`**）。因此目标形态升级为 **路线 D：以 DSH 为底座、由 sjtu-agent 发行的 Python 包**——学生 `pip install` 就同时得到 harness 与校园能力，不需要装 Node；开发/验证用我们自己的 harness home，**不碰你本机的 DSH 环境**。
+
 ## 二、DSH 提供了哪些接缝（本机一手证据）
 
 | 接缝 | 官方包 | 对本项目的意义 |
@@ -40,7 +42,7 @@
 | MCP server（现有 `scripts/mcp_server.py`，仅 DDL 3 个工具） | `dsh-mcp-client` | **扩成校园能力面**（Phase 0 的全部工作） |
 | 凭据/登录（jAccount SSO、Playwright） | 沙箱 + bash 工具 | 留 Python，由 MCP 工具内部完成 |
 
-## 四、三条路线
+## 四、三条路线（早期备选；见 §四·五的路线 D）
 
 | | **A. MCP + skills 先行**（推荐先做） | **B. 深度嵌入**（中期） | **C. 全量插件化**（不建议） |
 |---|---|---|---|
@@ -53,6 +55,52 @@
 **MCP 路线的已知代价**（必须提前说）：工具定义**每次请求都进上下文**。本仓库实测 76 个工具 schema ≈ 37.8K 字符 ≈ **1.3 万 tokens**；本机 DSH 会话实测单次调用上下文中位 28.9 万 tokens、缓存命中占 99.6%。所以：
 - 走 MCP 时**只暴露校园域工具**（估计 15-25 个），把 fs/bash/web/搜索留给 DSH 原生工具——否则白付一份 schema 税；
 - 若确实要暴露大工具面，按需分组（skills 承载"什么时候用哪组"，与本次调研 §5 的第 3 条建议一致）。
+
+## 四·五、路线 D（**新推荐形态**）：以 DSH（MIT）为底座做自己的发行版
+
+> 你问的是"能不能基于 DSH 建立我们自己的 sjtu-agent，把各项内容分类成插件/skill，自由修改"。答案：**能，而且官方机制就是为这件事设计的**——组合包（bundle）+ profile + patch 层。
+
+**官方机制**（[打包与安装插件](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/develop/basic/publish.zh.md)）
+
+- **组合包（bundle）**＝一个 npm 包，声明 `dsh.bundle.patch` 指向自己的 patch 文件 → 回答"这个包贡献什么"；
+- **profile**＝`$DSH_HOME/profiles/<name>/`，声明 `dsh.profile.bundles` 的有序列表 + 自己的 `cordis.patch.yml` → 回答"这套配置由哪些组合包按什么顺序组成"；
+- **层顺序**：各 bundle 的 patch（按列表序）→ profile 自己的 patch → `$DSH_HOME/cordis.patch.yml` → `--patch`；后层按行覆盖，**patch 替换整行 config 而非深合并**；
+- **安装**：`dsh plugin --profile <name> add <npm 包 | ./目录 | github:owner/repo | .tgz>`（底层 pnpm；首次自动以 `@deepseek-ai/dsh-base` 初始化 profile）；
+- **发行方式**：npm 预构建（推荐）｜`pnpm pack` 出 tarball｜git 直装（**需用户授权安装期执行构建脚本**，官方明说是安全面——建议锁定 commit，或干脆不用）；
+- **表层 bundle 可以有自己命令行**：挂一个 startup provider 插件（`inject = ['cmdlineArgs']` + `parseCmdline`）→ 例如 `dsh --profile sjtu ...` 拥有我们自己的 flag。
+
+**Python 侧的关键事实**（[官方 Python SDK](https://github.com/deepseek-ai/deepseek-harness/tree/master/python) + PyPI 元数据实测）
+
+- `deepseek-harness-sdk`（`deepseek_harness`）：用 stdio 上按行分隔的 JSON-RPC，以**子进程**方式驱动 harness 的高层轮次 API；
+- `deepseek-harness-runtime-bin`（`deepseek_harness_runtime`）：官方原文——"packages the normal `dsh` CLI and its closed Node dependency tree into a native executable, so **SDK use requires no system Node.js**" → **消费者不需要 Node**；
+- 同一 wheel 还带着 `sdk-minimal` 与**完整 `web` profile（含前端产物）** → 学生从 Python 侧就能用上 DSH 的 Web UI；
+- **隔离有保证**：官方原文"requires a non-empty `DSH_HOME`; **it never falls back to `~/.dsh`**" → 我们用自己的 harness home（如 `~/.sjtu-agent/harness`），**不会碰你本机的 DSH 环境**；
+- 许可证 MIT，包所有者是官方账号（DeepSeek-Harness / tianyicui）→ 可放心作为依赖。
+
+**必须一起交代的限制**（否则会踩坑）：
+
+1. **平台覆盖不全**：只发布 Linux x64 / Linux arm64 / **macOS arm64** / Windows x64 —— **没有 macOS Intel、没有 Windows arm64**，这些平台的学生仍得走原来的纯 Python 路线；
+2. **体积**：wheel 每个约 **69–78 MB**（自带 Node 闭包与 ripgrep 等伴随文件）→ `pip install` 会明显变重；
+3. **`dsh plugin --profile ...` 需要 `pnpm`**，但"ordinary SDK/profile execution does not" → 我们的发行版应当**自己物化 profile（直接写 package.json / cordis.patch.yml / 拷 bundle 文件）**，而不是让学生跑 `dsh plugin add`；
+4. **还是预发布**：SDK `0.1.5rc1`、runtime-bin `0.1.2a3` → 必须**锁死精确版本**，并保留现有纯 Python 实现作为回退（不能把学生唯一入口押在 alpha 上）。
+
+**内容分类（你问的"各项内容分类成插件、skill 等，自选"）**
+
+| sjtu-agent 内容 | 落到 DSH 的形态 | 说明 |
+|---|---|---|
+| 校园工具（DDL/课表/成绩/食堂/邮箱/Canvas/水源/新闻/提醒，约 15-25 个） | **MCP server**（保持 Python） | 由我们 bundle 的 patch 挂 `dsh-mcp-client` 配置行；**不需要写 TS**，已实测 stdio 握手通过 |
+| 通用工具（fs/bash/web/搜索/子代理） | **不提供** | 用 DSH 原生，避免重复与 schema 税 |
+| 高频玩法（查作业、查课表、去哪吃、报修、讲座…） | **skills**（markdown） | `dsh-skill-filesystem` 按需加载；改文案不用发版 |
+| 人格与身份（"交大校园助手"的语气与边界） | **preset / persona 配置行** | `dsh-agent-presets`、`dsh-persona`、`dsh-system-prompt` |
+| IM 机器人（飞书/微信/QQ/Telegram） | **独立 Python 进程（先用 SDK 驱动）**；长期可做成 TS 插件包 | DSH 生态没有 IM 通道，这块只能我们补——也正是差异化 |
+| 定时（日报/提醒） | `dsh-schedule`（何时跑）+ 我们的 Notifier（推到哪） | 调度与推送渠道解耦 |
+| 安装/配置向导/doctor/凭据 | **我们 bundle 的 startup provider**（`--profile sjtu` 自有命令）；过渡期先由 Python CLI 包装 | 学生入口保持 `sjtu-agent setup` 不变 |
+| 自研 harness（`runner.py` 循环、`context.py` 折叠、缓存纪律） | **丢掉** | 换 DSH 的 agent loop + compaction + 缓存纪律（这正是收益） |
+| Web GUI / TUI | **用 DSH 自带** | 省一大块维护成本；我们只保留配置页或直接不做 |
+
+**发行形态（推荐）**：`pip install sjtu-agent` → 依赖官方 SDK/runtime wheel → 首次运行把我们的 profile/bundle 物化到**自己的** harness home → 学生拿到「DSH 级 harness + 校园能力 + 我们的 IM 入口」，且不需要装 Node。
+
+**"自由修改"的边界**：MIT 允许 fork 与修改；但**优先用组合（bundle + patch + 插件）而不是 fork**——fork 会把上游更新变成我们的负担。只有当某个行为必须改内核（例如想要 DSH 没有的通道抽象）时，才 fork 单个包，并在我们的 bundle 里用 patch 覆盖那一行。
 
 ## 五、建议的分阶段计划
 
@@ -82,6 +130,8 @@
 
 ## 七、待确认
 
-1. Phase 0 是否现在做？（我可以在本机脚手架 + 注入一个最小 MCP 插件做端到端验证，再决定是否正式提交）
-2. MCP 暴露面清单要不要我先按"学生最常用的 15 个"给一版？
-3. bot 是否确定长期保留？（决定了 Phase 1 是"换引擎"还是"双引擎并存"）
+1. **走路线 D 吗？**（以 DSH 为底座、我们自己的 profile + bundle + Python 发行包）如果确定，我就按 §五 的 Phase 0 起步。
+2. **Phase 0 是否现在做？** 我可以在**独立的 harness home**（`~/.sjtu-agent/harness` 之类）里做端到端验证——扩 MCP 能力面 → 物化 profile → 在隔离 home 里跑通"这周有什么作业"，**全程不碰你本机的 DSH**。验证通过再决定是否正式提交。
+3. **MCP 暴露面**要不要我先按"学生最常用的 15 个"给一版清单？
+4. **bot 长期保留吗？** 决定 Phase 1 是"换引擎"还是"双引擎并存"。
+5. **发行渠道**：先只支持 `pip install` + 本地物化 profile，还是一并做 npm 包（让已经装了 DSH 的同学能 `dsh plugin add`）？
