@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import os
 import re
 import sys
 import threading
@@ -27,6 +28,37 @@ from sjtu_agent.agent.prompts import _TOOL_LABELS
 # 防止模型无限调工具 / 网络持续失败导致死循环。
 _MAX_TOOL_ITERATIONS = 8   # 单轮最多工具调用迭代次数，超出后收敛
 _MAX_NETWORK_RETRIES = 2   # 网络/超时重试上限
+
+# ── 单轮输出上限（2026 口径）─────────────────────────────────────────────────
+# 旧值 4096 是 GPT-3.5 时代的产物：2026 主流模型输出上限 128K~384K（DeepSeek
+# V4.1-Flash 为 384K），而推理模型的思考 token 与正文**共用**这一预算——本机
+# 实测思考占输出 40%（外部对 Opus 单答案任务的实测可达 98%）。4096 会把思考
+# 挤爆：v0.24.0 的日报空回复事故（#201）根因即在此。
+# 默认 16K 对校园问答足够，又不会让单轮生成无界变贵；可用环境变量覆盖。
+_MAX_OUTPUT_TOKENS_DEFAULT = 16_384
+# 致远一号（校园网关）单轮输出上限官方未公布，示例里给的是 1024 —— 保守取 8K
+_MAX_OUTPUT_TOKENS_GATEWAY = 8_192
+_MAX_OUTPUT_TOKENS_ENV = "SJTU_MAX_OUTPUT_TOKENS"
+
+
+def _max_output_tokens(base_url: str = "") -> int:
+    raw = os.environ.get(_MAX_OUTPUT_TOKENS_ENV, "").strip()
+    if raw.isdigit() and int(raw) > 0:
+        return int(raw)
+    from sjtu_agent.agent.context import is_campus_gateway
+
+    if is_campus_gateway(base_url):
+        return _MAX_OUTPUT_TOKENS_GATEWAY
+    return _MAX_OUTPUT_TOKENS_DEFAULT
+
+
+def _client_base_url(client) -> str:
+    """取客户端实际使用的 base_url（OpenAI / Anthropic SDK 都暴露 .base_url）。
+
+    预算与输出上限都要按**后端**而不是模型名来定：同一个调用名在官方端点与
+    校园网关上的窗口不同（官方 DeepSeek 1M vs 致远一号 512k）。
+    """
+    return str(getattr(client, "base_url", "") or "")
 
 
 def _get_tools():
@@ -576,7 +608,8 @@ def _run_one_turn_anthropic(client: Anthropic, model: str, messages: list) -> No
                 "POST", endpoint,
                 headers=req_headers,
                 json={"model": model, "system": system, "messages": api_msgs,
-                      "tools": tools, "max_tokens": 4096, "stream": True},
+                      "tools": tools, "max_tokens": _max_output_tokens(_client_base_url(client)),
+                      "stream": True},
                 timeout=180,
             ) as resp:
                 spinner.stop()
@@ -777,7 +810,8 @@ def _converge_anthropic(client: Anthropic, model: str, messages: list) -> None:
     api_msgs = [m for m in messages if m["role"] != "system" and m.get("content")]
     try:
         resp = client.messages.create(
-            model=model, system=system, messages=api_msgs, max_tokens=4096,
+            model=model, system=system, messages=api_msgs,
+            max_tokens=_max_output_tokens(_client_base_url(client)),
         )
         text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
     except Exception:
@@ -793,8 +827,10 @@ def _converge_anthropic(client: Anthropic, model: str, messages: list) -> None:
 def _run_one_turn(client, model: str, messages: list) -> None:
     # 上下文质量管理（Phase 2）：清理旧 tool 结果 + 超质量预算折叠最旧轮次。
     # 所有入口（bots / feishu / CLI）都经过这里，单点覆盖。
-    from sjtu_agent.agent.context import trim_session
-    trim_session(messages)
+    # 预算按当前**后端 + 模型**计算（2026 口径：官方 DeepSeek 1M → 500K；
+    # 致远一号 deepseek-chat 512k → 256K），见 context.context_budget。
+    from sjtu_agent.agent.context import context_budget, trim_session
+    trim_session(messages, budget=context_budget(model, base_url=_client_base_url(client)))
     _repair_dangling_tool_calls(messages)
     if _is_anthropic_model(model):
         _run_one_turn_anthropic(client, model, messages)

@@ -85,15 +85,26 @@
 
 ## 5. 对 sjtu-agent 的取值建议
 
-| # | 项目 | 现状 | 建议 | 依据 |
+| # | 项目 | 现状 | 建议 | 状态 |
 |---|---|---|---|---|
-| 1 | 折叠预算 `SESSION_QUALITY_BUDGET` | `256_000`（但 `context.py` 模块 docstring 仍写 64K，**不一致**） | 先修 docstring；预算提到 **窗口的 ~50%（1M 窗口 → 500K）**并埋点观察，再决定是否上探 0.7~0.8×；**不要停在 25%** | 外部实现 80%~95% [外部]；本机 p50 已达 289K [实测]，256K 会频繁触发；"70% 利用率崩塌"被点名无方法学 [外部]，不能当依据 |
-| 2 | 输出上限 `max_tokens=4096`（runner/vision/news 多处） | 4096 | 提到 **32K~64K**（或按模型能力配置）；推理模型必须给思考留足预算 | 官方：Flash 最大输出 **384K** [官方]；本机思考占输出 40%、外部 Opus 可达 98% [实测/外部]；本仓库日报曾因 4096 截断推理内容（#201） |
-| 3 | 工具 schema 开销 | 76 个工具 / 37.8K 字符 ≈ 13K tokens（占固定开销 75%） | (a) **会话中工具集保持稳定**；(b) 按意图分组懒加载（邮件/Canvas/食堂/提醒各自成组）；(c) 精简描述与参数说明 | Cursor 官方：静态工具描述 −60%、MCP 动态化 −46.9% 会话 token、总成本 −7% [官方]；反例：小 skill 上按需加载反而 +48.4% [外部] → 要按组分，别按单个工具 |
-| 4 | 缓存纪律 | 折叠/清理是确定性操作（已做对） | 补齐：**不在会话中增删工具、不切模型**；时间戳/随机 ID 等易变内容一律后置到稳定前缀之后 | Claude Code 硬规矩 + dsh 同款设计 [外部/源码]；§3 的 30× 差价 [实测] |
-| 5 | 工具结果内联上限 | `fetch_url` 8,000 字符截断 | 内联上限 **~10K 字符**，超出**落盘 + 回路径与预览**；优先"剪枝旧结果→重新计量→不够再折叠"的顺序 | 本机工具结果 p99 22.6K 字符、max 51.5K [实测]；Codex 按 10KB 字节截断、Claude Code >10K 字符落盘、OpenCode checkpoint 压到 2,000 字符 [外部]；dsh 顺序为 prune→recount→compact [源码] |
-| 6 | 成本核算 | 依赖运行时/框架的 cost 字段 | **按官方价目自算**，并把"缓存命中率"当作一等指标（太低要告警） | 账本按 V4-Pro 计价，偏差 6.67× [实测]；Claude Code 把缓存命中率设成告警指标 [外部] |
-| 7 | 模型选择 | 默认致远一号 `deepseek-chat` | 关注官方动态：`deepseek-v4-pro` 已路由到 V4.1-Flash 并按 Flash 计费；峰谷价差 2× | 官方新闻页 [官方]；峰谷调度可省一半 |
+| 1 | 折叠预算 `SESSION_QUALITY_BUDGET` | 原为 `256_000` 写死（且模块 docstring 写 64K，**不一致**） | 按**后端 + 模型**的窗口取一半：官方 DeepSeek/Anthropic 1M → **500K**；**致远一号 `deepseek-chat` 512k → 256K**、`qwen` 256k → 128K（官方指南数据，**不是** 1M）；其它网关窗口未公开 → 128K 窗口 → **64K**；可用 `SJTU_CONTEXT_WINDOW` / `SJTU_CONTEXT_BUDGET` 显式声明 | ✅ 已落地（`agent/context.py`：`model_context_window(model, base_url)` / `context_budget()` / `is_campus_gateway()`；`runner.py` 从 SDK 客户端读 `base_url` 后传入） |
+| 2 | 输出上限 | Anthropic 路径写死 `max_tokens=4096`（OpenAI 路径已不设上限） | 官方端点 **16384**、致远一号 **8192**（其单轮上限官方未公布，示例只给 1024）；`SJTU_MAX_OUTPUT_TOKENS` 可覆盖 | ✅ 已落地（`agent/runner.py::_max_output_tokens(base_url)`） |
+| 3 | 工具 schema 开销 | 76 个工具 / 37.8K 字符 ≈ 13K tokens（占固定开销 75%） | 按意图分组懒加载（邮件/Canvas/食堂/提醒各自成组）；精简描述 | ⬜ 待办（会话内工具集已是静态列表，这点已满足） |
+| 4 | 缓存纪律 | 动态时间注入在**用户消息首部**，system 前缀稳定 ✓ | 补：MCP 工具列表 60s TTL 可能在会话中途变化 → 整个前缀失效；建议会话内固定工具集 | ⚠️ 部分（`extensions/mcp_client.py::_TOOLS_CACHE` 仍会刷新） |
+| 5 | 工具结果内联上限 | `fetch_url` 8,000 字符截断，无落盘 | 内联 ~10K 字符，超出**落盘 + 回路径与预览** | ⬜ 待办 |
+| 6 | 成本核算 | 依赖运行时/框架的 cost 字段 | 按官方价目自算；把"折叠次数 / 每轮估算上下文"记日志（已加） | ⚠️ 部分（折叠事件已记 INFO 日志，缓存命中率未采集） |
+| 7 | 模型选择 | 默认致远一号 `deepseek-chat` | `deepseek-v4-pro` 已路由到 V4.1-Flash 并按 Flash 计费；峰谷价差 2× | ℹ️ 信息性 |
+
+### 5.1 本次落地的改动（2026-09-24）
+
+| 文件 | 改动 |
+|---|---|
+| `sjtu_agent/agent/context.py` | 新增 `model_context_window(model, base_url)`：先看 `SJTU_CONTEXT_WINDOW`，再按**后端**分流（致远一号按官方指南 512k/256k、官方端点按官方规格、其它网关保守 128K），最后才按模型名猜；新增 `is_campus_gateway()`；`context_budget()` 按该窗口取一半（`SJTU_CONTEXT_BUDGET` 可覆盖、上下夹取）；`trim_session(budget=None)` 改按预算入参；折叠事件记 INFO 日志（预算、折叠轮数、折叠前后估算），供后续用真实数据校准 |
+| `sjtu_agent/agent/runner.py` | `_run_one_turn` 从 SDK 客户端读 `base_url` 后传 `context_budget(model, base_url=...)`；新增 `_max_output_tokens(base_url)`（官方 16384 / 致远一号 8192，`SJTU_MAX_OUTPUT_TOKENS` 覆盖）并替换 Anthropic 路径两处 4096 |
+| `.env.example` | 新增「上下文与输出预算」段：列出各后端的默认取值与两个窗口/预算环境变量 |
+| `tests/test_context.py`、`tests/test_runner_limits.py` | 新增 12 个用例（后端分流、网关调用名映射、未知网关不猜、环境变量优先、预算夹取、官方/网关输出上限、环境变量覆盖与非法值回落） |
+
+> 为什么按后端而不是按模型名：致远一号的 `deepseek-chat` 是**网关调用名**，官方指南写的是 **512k**，而官方 DeepSeek 同名口径是 1M——按模型名一刀切会把折叠预算算到窗口外面去（500K 预算 + 13K 工具 + 17K 系统 + 输出 > 512K）。反过来，接官方 DeepSeek 时按网关的 512k 保守取值又是白白束手束脚。
 
 ## 6. 缺口与待验证
 
