@@ -129,7 +129,7 @@ Loop Engineering  → 设计"自动操作 Agent 的系统"
 
 **已完成（上下文工程 + Prompt 审计单元）**：
 - ✅ **Phase 1 稳定前缀**：动态时间/记忆移出 system prompt → 用户消息；system 稳定喂缓存（5 个入口全改）
-- ✅ **Phase 2 Clearing + 质量预算**：tool 结果清理（无损）+ 64K 质量预算折叠带摘要（缓存感知）
+- ✅ **Phase 2 Clearing + 质量预算**：tool 结果清理（无损）+ 超预算时按轮次折叠带摘要（缓存感知）。**2026-09 校准**：预算不再写死，按「后端 + 模型」的窗口取一半自适应（官方 DeepSeek 1M → 500K；致远一号 `deepseek-chat` 512k → 256K；认不出的网关 128K → 64K），依据见[调研：Agent token 量级与预算建议](./research/agent-token-budget-2026H2.md)
 - ✅ **skills 死代码修复**：`build_system_prompt()` 接入全部入口（CLI / 4 bot / web），prompt-only skills 生效
 - ✅ **web 聊天补齐**：稳定前缀 + skills + trim 钩子（原绕过点）
 - ✅ **Phase 3 Prompt 审计**：

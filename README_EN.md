@@ -210,7 +210,7 @@ A browser-based chat interface with persistent, synchronized conversations:
 
 - New conversations answer the first question directly instead of running `check_setup` first.
 - Startup behavior follows the academic calendar: during winter / summer breaks the agent does not push on-campus tasks and reports days until the next semester.
-- `web_search` merges Bing + DuckDuckGo results and retries acronym / full-name query variants for jargon and unknown terms.
+- `web_search` runs a keyless multi-engine stack — Bing RSS first (real URLs and clean snippets), Bing HTML as fallback with its `ck/a` click-tracking links decoded back to the real URL, and 360 search for Chinese coverage — and prefers **DeepSeek's official server-side search** whenever a DeepSeek key is configured. It escalates on result *quality* rather than count (a page of brand homepages counts as a miss and triggers another source or query shape), ranks by how much of the question is actually covered, and can pull the text of the top hits in the same call via `read_top`.
 - `github_repo_search` searches GitHub repositories via the REST API; the agent knows its own repository is `github.com/kuan-er/sjtu-agent` by `kuan-er`.
 
 ## MCP & Skills
@@ -644,7 +644,7 @@ The Feishu Bot self-checks credentials, ChromaDB, and Agent API connectivity on 
 
 ## Version
 
-Current version: **v0.25.0**. Release history: [Releases](https://github.com/kuan-er/sjtu-agent/releases).
+Current version: **v0.26.0**. Release history: [Releases](https://github.com/kuan-er/sjtu-agent/releases).
 
 ## Release Notes
 

@@ -58,6 +58,9 @@ Tests live in `tests/`, discovered via `pytest.ini`. Configuration is minimal �
 | `ANTHROPIC_API_KEY` | Optional, used for captcha recognition via Claude Haiku |
 | `SJTU_AGENT_HOME` | Override the runtime data directory (default: platform-specific user data dir) |
 | `SJTU_HOMEWORK_DIR` | Override the homework/assignments directory |
+| `SJTU_WEB_SEARCH_BACKEND` | Search backend: `auto` (default — DeepSeek official search first when a DeepSeek key exists, else the keyless stack) / `scrapers` / `deepseek` |
+| `SJTU_CONTEXT_WINDOW` · `SJTU_CONTEXT_BUDGET` | Declare the model context window / the history folding threshold. Defaults are derived per deployment: official DeepSeek 1M → 500K budget, Zhiyuan-1 `deepseek-chat` 512k → 256K, unknown gateways 128K → 64K (see `agent/context.py::context_budget`) |
+| `SJTU_MAX_OUTPUT_TOKENS` | Per-turn output cap. Default is adaptive: `min(provider cap, window − prompt − margin)` — DeepSeek V4.1-Flash 393,216 (thinking shares this quota), Claude/GPT-6 128K, unknown 8,192 |
 
 ## Architecture
 

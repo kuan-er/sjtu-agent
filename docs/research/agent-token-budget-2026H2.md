@@ -2,7 +2,7 @@
 
 > **观测日 2026-09-24**｜本机实测 + 官方价目表交叉核对｜面向本仓库（sjtu-agent）的取值建议
 > 证据分级：**[实测]** 本机数据/本次测量；**[官方]** 厂商官方页面；**[外部]** 第三方实测或社区报告；**[建议]** 我的取值主张
-> 配套三份子调研：`ai-agent-token-magnitudes-h2-2026.md`（模型规格与价格）、`harness-context-practice-2026H2.md`（各家上下文管理实作）、`agent-token-survey-2026H2.md`（外部实测的 token 消耗）
+> 配套材料：[各模型窗口与价格对照](./ai-agent-token-magnitudes-h2-2026.md)（本站）｜[各家上下文管理实作](https://github.com/kuan-er/sjtu-agent/blob/main/docs/research/harness-context-practice-2026H2.md)、[外部实测消耗](https://github.com/kuan-er/sjtu-agent/blob/main/docs/research/agent-token-survey-2026H2.md)（原始调研记录，留在仓库内、未上文档站）
 
 ## 0. 先给结论
 

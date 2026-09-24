@@ -252,7 +252,7 @@ sjtu-agent web-proxy --type caddy --domain sjtu-agent.example.com
 
 ## 9. 网络代理与搜索访问
 
-**背景**：大陆机房（如腾讯云）直连 `bing.com` / `duckduckgo.com` 往往被限制或降级，`web_search` 结果差或超时。这里只解决"搜索需要代理"，**不需要也不会让整个服务长期挂代理**。
+**背景**：大陆机房（如腾讯云）直连 `bing.com` / `so.com`（360 搜索兜底）往往被限制或降级，`web_search` 结果差或超时。这里只解决"搜索需要代理"，**不需要也不会让整个服务长期挂代理**。
 
 ### 方案一：全局环境变量（最省事，配合 NO_PROXY 保校园直连）
 
