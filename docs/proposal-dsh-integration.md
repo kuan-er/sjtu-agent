@@ -1,5 +1,11 @@
 # 提案：把 sjtu-agent 接到 DeepSeek Harness（DSH）上
 
+> **⚠️ 2026-09-25 状态更新（先读这条）**：校方今日发布官方桌面产品 **jAide v1.0.0**（`geek.sjtu.edu.cn/products/jaide`）。对本机安装内容的结构分析显示：它是 Electron + Drizzle/SQLite 应用，内嵌 **pi / pi-ai** agent 运行时（**不是** DSH——包内无 Cordis、无 `dsh-*` 痕迹），已具备 Canvas(`oc.sjtu`)、GPA、课表、DDL + 提醒、新闻聚合与推送开关、邮箱（feature flag 关闭）、7 张 dashboard 插件卡片、workflows/workflow_runs，以及 **MCP 客户端支持**（`mcpServers` / `stdio` / `sse` / `streamable`）。
+>
+> 因此 **§四·五 路线 D（以 DSH 为底座做自己的发行版/客户端）的定位已被现实推翻**：客户端赛道由官方产品占据，且它不在 DSH 生态内——我们不应与之竞争。**§四 的路线 A（MCP + skills）价值反而上升**：DSH 与 jAide **都支持 MCP**，把校园能力做成能力层可以同时服务两边。
+>
+> sjtu-agent 的剩余差异化：**IM 多通道入口（飞书/微信/QQ/Telegram）、无头/服务端运行、开源可扩展**。
+
 > 评估日期 2026-09-24｜证据来源：**本机 DSH 运行时的 167 个官方包与随包文档**（一手材料）+ 官方仓库开发指南
 > 证据分级：**[源码]** 本机官方包 README/源码；**[官方]** 官方文档页；**[实测]** 本仓库测量；**[建议]** 我的取值主张
 
