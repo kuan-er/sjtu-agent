@@ -2,6 +2,12 @@
 
 本文件记录各版本的用户可见变化。Agent 通过 `get_recent_updates` 读取（问「最近更新了什么」时），不写入 system prompt。
 
+## v0.27.0 (2026-09-26)
+- 🧵 **水源长帖改为「按需读」，不再只读开头**：几千楼的帖子，有用信息在楼中间、最新进展在楼尾，而 `read_shuiyuan_topic` 此前只会从头顺读前 N 楼——读完等于没读。现在按 `mode` 取用：**`search`（楼内搜索 `/search.json?q=<关键词> topic:<id>`，只抓命中的楼层，开销与帖子长度脱钩——长帖首选）**、`summary`（主楼 + 采纳答案 + 最新若干楼 + 官方摘要，快速了解）、`tail`（最新 N 楼，追更/提醒场景）、`range`（指定楼层区间），另可传 `query` / `from_post` / `to_post`。返回里给出 `mode` / `matched` / `returned` / `truncated`，抽样视图会明确标注——**不要让模型以为自己读完了全文**
+- 🐛 两个**只有真实数据才会暴露**的正确性问题（实测 9,831 楼的水源帖时发现）：① `posts_count` 不等于楼层号——删帖会留空洞，帖子报 9,831 楼而最新楼层是 **#9921**，按 `posts_count` 取"最后一页"会停在帖子中间，现改为按主题的 `stream`（有序 id 表）切片 + `post_ids[]` 批量抓取；② `range` 不能用位置索引同一个理由，改为先二分查找首个 `post_number >= from_post` 的楼层再向前走
+- ✅ 实测复核（真实水源 + User API Key）：`search "Anthropic"` → 命中 **#1720、#5821**；`summary` → 1–3 楼 + 9917–9921 楼；`tail` → 最新五楼；`range 4960-4962` → 精确命中。新增 13 个用例（四种模式、删帖空洞、二分定位、预算截断、403、接口漂移），全量 **724 passed**
+- 📝 新增 `docs/feature-request-shuiyuan.md`：给校内平台方（jAide）的功能建议稿——水源**只读搜索 + 订阅提醒**如何落在其既有 `news_items` / `news_source_settings` / `calendar_automations` / `dashboard_cards` 上，附 Discourse 端点清单、User API Key 授权流程、**长帖读取策略**（含上面这份实测证据）与工程陷阱；本站不发布，随仓库提供（`srcExclude`）
+
 ## v0.26.0 (2026-09-24)
 - 🛰 **接入 DeepSeek 官方搜索**（默认 `auto`）：本机配了 DeepSeek 官方 Key（`DEEPSEEK_API_KEY`，或 `agent_config.json` 的 LLM 指向 `api.deepseek.com`）时，`web_search` 优先调用官方**服务端搜索**（Anthropic 兼容 Messages API 的 `web_search_20250305` 工具——结构化结果，不受反爬与页面改版影响），失败自动回落到免 Key 抓取栈。结果新增 `backend` 字段说明本轮走的哪条路，`SJTU_WEB_SEARCH_BACKEND=auto|scrapers|deepseek` 可控。代价要说清：**一次官方搜索 = 一个完整模型轮次**（延迟 + token 计费），想零额外花费就用 `scrapers`
 - 📐 **上下文预算改为按「后端 + 模型」自适应**（不再写死 256K）：官方 DeepSeek / Anthropic 1M 窗口 → **500K**；**致远一号 `deepseek-chat` / `deepseek-reasoner` 512k → 256K、`qwen` 256k → 128K**（校园网关官方口径就是 512k/256k，**不是**官方的 1M）；其它未公开窗口的网关 → 64K。部署方可用 `SJTU_CONTEXT_WINDOW` / `SJTU_CONTEXT_BUDGET` 直接声明。折叠事件现在记日志（预算、折叠轮数、折叠前后估算），便于用真实数据继续校准
