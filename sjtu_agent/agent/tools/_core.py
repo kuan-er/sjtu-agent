@@ -761,9 +761,11 @@ TOOLS = [
         "function": {
             "name": "read_shuiyuan_topic",
             "description": (
-                "读取水源社区某个具体帖子的完整内容（含原帖正文和所有回复）。"
-                "当用户在 search_campus 搜索到水源帖子后想看具体内容，"
-                "或用户直接给出水源帖子 URL / topic id 说「看看这个帖子都讨论了什么」时调用。"
+                "读取水源社区某个具体帖子的内容。**长帖请用检索而不是顺序读**——"
+                "有的帖子几千楼，顺序读前 N 楼会漏掉中间和最新内容。"
+                "用户在 search_campus 搜到水源帖子后想看细节，或直接给出帖子 URL / id "
+                "说「看看这个帖子都讨论了什么」时调用。"
+                "返回的是**抽样视图**（带 note 说明），不要声称读过全文。"
                 "**禁止编造帖子内容**：想了解某帖子讨论就必须用此工具读取，不得凭标题/摘要臆测。"
             ),
             "parameters": {
@@ -773,9 +775,32 @@ TOOLS = [
                         "type": "string",
                         "description": "水源帖子 URL（如 https://shuiyuan.sjtu.edu.cn/t/topic/471260）或 topic id（如 471260）",
                     },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["search", "summary", "tail", "range", "auto"],
+                        "description": (
+                            "读法，默认 auto（给了 query 就检索，否则抽样）："
+                            "search=在帖内按关键词检索命中的楼层（长帖首选）；"
+                            "summary=主楼+最佳答案/wiki 楼+最新几楼；"
+                            "tail=最新的若干楼（追更）；"
+                            "range=指定楼层区间"
+                        ),
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "mode=search 时的检索关键词（例如用户问「有没有人提过 Anthropic」就传 Anthropic）",
+                    },
                     "max_posts": {
                         "type": "integer",
-                        "description": "最多返回前多少楼（含主楼），默认 30",
+                        "description": "tail/range 模式下最多返回多少楼，默认 30",
+                    },
+                    "from_post": {
+                        "type": "integer",
+                        "description": "mode=range 的起始楼层号",
+                    },
+                    "to_post": {
+                        "type": "integer",
+                        "description": "mode=range 的结束楼层号",
                     },
                 },
                 "required": ["topic"],
@@ -2837,21 +2862,211 @@ def _shuiyuan_request(url: str, params: dict, headers: dict, cookies, max_retry:
     return None
 
 
-def tool_read_shuiyuan_topic(topic: str, max_posts: int = 30) -> dict:
-    """读取水源社区某个帖子的主楼 + 若干楼回复。
+SHUIYUAN_BASE = "https://shuiyuan.sjtu.edu.cn"
+
+# 长帖读取预算：3000 楼的帖子不可能全读（≈60 万 tokens），
+# 所以按「检索命中 / 结构化抽样」取少量楼层，并限制单楼与整轮长度。
+_READ_POST_CHARS = 1_200     # 单楼正文上限（字符）
+_READ_TOTAL_CHARS = 8_000    # 整轮预算（字符）
+_READ_SEARCH_HITS = 8        # 检索最多取几楼
+_READ_MAX_WINDOWS = 12       # range/tail 最多抓几个分块
+
+
+def _shuiyuan_auth(cfg: dict) -> tuple[dict, object]:
+    """构造请求头与 Cookie（API Key 优先，其次会话 Cookie）。"""
+    api_key = (cfg.get("shuiyuan_user_api_key") or "").strip()
+    client_id = (cfg.get("shuiyuan_user_api_client_id") or "").strip()
+    headers = {"Accept": "application/json", "User-Agent": "Mozilla/5.0"}
+    cookies = None
+    if api_key:
+        headers["User-Api-Key"] = api_key
+        headers["User-Api-Client-Id"] = client_id
+    else:
+        cookies = cfg.get("shuiyuan_cookies") or {}
+    return headers, cookies
+
+
+def _shuiyuan_html_to_text(h: str) -> str:
+    """帖子正文（HTML）→ 纯文本。"""
+    import html as _html
+    import re as _re
+
+    if not h:
+        return ""
+    txt = _re.sub(r"(?is)<script[^>]*>.*?</script>", "", h)
+    txt = _re.sub(r"(?is)<style[^>]*>.*?</style>", "", txt)
+    txt = _re.sub(r"(?is)<br\s*/?>", "\n", txt)
+    txt = _re.sub(r"(?is)</p\s*>", "\n", txt)
+    txt = _re.sub(r"(?is)<[^>]+>", "", txt)
+    txt = _html.unescape(txt)
+    return _re.sub(r"\n{3,}", "\n\n", txt).strip()
+
+
+def _shuiyuan_serialize(p: dict, content: str) -> dict:
+    """统一楼层输出结构（含少量"价值信号"，便于模型判断哪楼重要）。"""
+    likes = None
+    if p.get("actions_summary"):
+        likes = p["actions_summary"][0].get("count")
+    return {
+        "post_number": p.get("post_number"),
+        "username":    p.get("username"),
+        "created_at":  p.get("created_at"),
+        "like_count":  likes,
+        "reply_count": p.get("reply_count"),
+        "reads":       p.get("reads"),
+        "wiki":        bool(p.get("wiki")),
+        "accepted_answer": bool(p.get("accepted_answer")),
+        "content":     content,
+    }
+
+
+def _shuiyuan_search_in_topic(
+    tid: str, query: str, headers: dict, cookies, limit: int = _READ_SEARCH_HITS
+) -> list[dict]:
+    """帖内检索：`/search.json?q=<关键词> topic:<id>`。
+
+    这是读长帖的主力手段——3000 楼也只命中相关的几楼，成本与楼数解耦。
+    """
+    params = {"q": f"{query} topic:{tid}"}
+    rr = _shuiyuan_request(f"{SHUIYUAN_BASE}/search.json", params, headers, cookies)
+    if rr is None:
+        return []
+    if rr.status_code in (401, 403):
+        raise PermissionError("水源社区未授权（会话可能已过期），请对 Agent 说「配置水源」重新授权")
+    if rr.status_code != 200:
+        return []
+    try:
+        posts = (rr.json().get("posts") or [])
+    except Exception:
+        return []
+    hits: list[dict] = []
+    for p in posts:
+        if str(p.get("topic_id")) != str(tid):
+            continue
+        hits.append(p)
+        if len(hits) >= limit:
+            break
+    return hits
+
+
+def _shuiyuan_fetch_by_ids(tid: str, ids: list, headers: dict, cookies) -> dict:
+    """按 post id 批量取楼层，返回 {id: post}。Discourse 接受重复的 post_ids[] 参数。"""
+    by_id: dict = {}
+    batch = 20
+    for i in range(0, len(ids), batch):
+        chunk = [x for x in ids[i:i + batch] if x is not None]
+        if not chunk:
+            continue
+        params = [("post_ids[]", str(x)) for x in chunk]
+        try:
+            rr = _shuiyuan_request(f"{SHUIYUAN_BASE}/t/{tid}/posts.json", params, headers, cookies)
+        except Exception:
+            break
+        if rr is None or rr.status_code != 200:
+            break
+        try:
+            for p in ((rr.json().get("post_stream") or {}).get("posts") or []):
+                if p.get("id") is not None:
+                    by_id[p["id"]] = p
+        except Exception:
+            break
+    return by_id
+
+
+def _shuiyuan_fetch_ids(tid: str, ids: list, headers: dict, cookies) -> list[dict]:
+    """按 id 列表取楼层，保持传入顺序。
+
+    **不要用 `posts.json?post_number=N` 取"第 N 楼附近"**：实测该分块语义与
+    `posts_count` 并不对应——帖子有删楼时 `post_number` 会超过 `posts_count`，
+    按总数去取末尾会取到中段。正确做法是用主题 JSON 里的 `post_stream.stream`
+    （全量楼层 id 的顺序表）切片，再用 `post_ids[]` 批量取。
+    """
+    wanted = [x for x in ids if x is not None]
+    if not wanted:
+        return []
+    by_id = _shuiyuan_fetch_by_ids(tid, wanted, headers, cookies)
+    return [by_id[x] for x in wanted if x in by_id]
+
+
+def _shuiyuan_locate_index(
+    tid: str, stream_ids: list, target_post: int, headers: dict, cookies
+) -> int | None:
+    """二分查找 `stream` 中第一个 `post_number >= target_post` 的下标。
+
+    为什么不能按下标直接算：**删楼会让楼层号与下标错位**——实测某主题
+    `posts_count=33` 而末楼 `post_number=81`，`stream[i]` 是"第 i 个可见楼"，
+    它的 post_number 可能远大于 i+1。楼层号在 stream 上单调递增，故可二分。
+    """
+    lo, hi, best = 0, len(stream_ids) - 1, None
+    for _ in range(16):                      # log2(数百万) 也远小于 16，纯保险
+        if lo > hi:
+            break
+        mid = (lo + hi) // 2
+        got = _shuiyuan_fetch_ids(tid, [stream_ids[mid]], headers, cookies)
+        if not got:
+            break
+        num = got[0].get("post_number") or 0
+        if num >= target_post:
+            best, hi = mid, mid - 1
+        else:
+            lo = mid + 1
+    return best
+
+
+def _shuiyuan_compose(
+    raw_posts: list,
+    per_post: int = _READ_POST_CHARS,
+    total_budget: int = _READ_TOTAL_CHARS,
+) -> tuple[list[dict], bool]:
+    """按楼层去重排序后序列化，并施加单楼/整轮预算。返回 (posts, truncated)。"""
+    seen: set = set()
+    ordered: list[dict] = []
+    for p in raw_posts:
+        num = p.get("post_number")
+        if num is None or num in seen:
+            continue
+        seen.add(num)
+        ordered.append(p)
+    ordered.sort(key=lambda p: p.get("post_number") or 0)
+
+    out: list[dict] = []
+    used = 0
+    truncated = False
+    for p in ordered:
+        text = _shuiyuan_html_to_text(p.get("cooked") or "")
+        if len(text) > per_post:
+            text = text[:per_post].rstrip() + "…（本楼已截断）"
+            truncated = True
+        if used + len(text) > total_budget:
+            truncated = True
+            break
+        used += len(text)
+        out.append(_shuiyuan_serialize(p, text))
+    return out, truncated
+
+
+def tool_read_shuiyuan_topic(
+    topic: str,
+    max_posts: int = 30,
+    mode: str = "auto",
+    query: str = "",
+    from_post: int = 0,
+    to_post: int = 0,
+) -> dict:
+    """读取水源社区帖子内容（长帖按需抽样，不再只能顺序读前 N 楼）。
 
     topic 可以是 URL、URL 片段、topic id 字符串或整数。
-    max_posts > 20 时会通过 /t/{id}/posts.json 分页补抓（避免只拿到 post_stream 前 20 楼）。
-    返回：{title, url, category_id, posts_count, posts:[{post_number, username, created_at, content}]}
+    mode（默认 auto = 有 query 就检索、没有就抽样）：
+      - search ：**帖内检索**命中的楼层（长帖首选；3000 楼也只看相关的几楼）
+      - summary：主楼 + 最佳答案 / wiki 楼 + 最新若干楼（+ 官方摘要若已生成）
+      - tail   ：最新的 max_posts 楼（追更、提醒场景）
+      - range  ：from_post..to_post 区间
+    返回带 sampled / truncated / note：这是抽样视图，不要当成读过全文。
     """
     import re as _re
-    import html as _html
 
     cfg = dc.load_config()
-    api_key   = (cfg.get("shuiyuan_user_api_key") or "").strip()
-    client_id = (cfg.get("shuiyuan_user_api_client_id") or "").strip()
-    session   = cfg.get("shuiyuan_cookies") or {}
-    if not api_key and not session:
+    if not (cfg.get("shuiyuan_user_api_key") or cfg.get("shuiyuan_cookies")):
         return {"error": "水源社区未配置，请对 Agent 说「配置水源」完成登录"}
 
     s = str(topic).strip()
@@ -2863,18 +3078,16 @@ def tool_read_shuiyuan_topic(topic: str, max_posts: int = 30) -> dict:
     else:
         return {"error": f"无法从 '{topic}' 提取 topic id；请传入帖子 URL 或数字 id"}
 
-    headers = {"Accept": "application/json", "User-Agent": "Mozilla/5.0"}
-    cookies = None
-    if api_key:
-        headers["User-Api-Key"] = api_key
-        headers["User-Api-Client-Id"] = client_id
-    else:
-        cookies = session
+    headers, cookies = _shuiyuan_auth(cfg)
 
-    base = "https://shuiyuan.sjtu.edu.cn"
+    # ── 主题元信息（标题 / 楼数 / 首屏楼层 / 是否有官方摘要）────────────────
     try:
-        r = _shuiyuan_request(f"{base}/t/{tid}.json", {"include_raw": "false"}, headers, cookies)
-        if r.status_code in (401, 403) or "login" in r.url:
+        r = _shuiyuan_request(
+            f"{SHUIYUAN_BASE}/t/{tid}.json", {"include_raw": "false"}, headers, cookies
+        )
+        if r is None:
+            return {"error": "读取水源帖子失败：无响应"}
+        if r.status_code in (401, 403) or "login" in (r.url or ""):
             return {"error": "水源社区凭证已过期，请对 Agent 说「配置水源」重新授权"}
         if r.status_code == 404:
             return {"error": f"水源帖子 {tid} 不存在或无权限查看"}
@@ -2883,76 +3096,108 @@ def tool_read_shuiyuan_topic(topic: str, max_posts: int = 30) -> dict:
         r.raise_for_status()
         data = r.json()
     except Exception as e:
-        # 尽量结构化错误（借鉴 openclaw HttpRequestError 思路）
         msg = str(e)
         if "ConnectionError" in msg or "Timeout" in msg:
             return {"error": f"水源社区网络异常：{msg}"}
         return {"error": f"读取水源帖子失败：{msg}"}
 
     title = data.get("fancy_title") or data.get("title") or ""
-    slug  = data.get("slug") or "topic"
-    url   = f"{base}/t/{slug}/{tid}"
-    posts_count = data.get("posts_count") or 0
-    post_stream_info = data.get("post_stream") or {}
-    initial_posts = post_stream_info.get("posts") or []
-    stream_ids = post_stream_info.get("stream") or []
+    slug = data.get("slug") or "topic"
+    url = f"{SHUIYUAN_BASE}/t/{slug}/{tid}"
+    posts_count = int(data.get("posts_count") or 0)
+    initial_posts = (data.get("post_stream") or {}).get("posts") or []
+    stream_ids = (data.get("post_stream") or {}).get("stream") or []
 
-    def _html_to_text(h: str) -> str:
-        if not h:
-            return ""
-        txt = _re.sub(r"(?is)<script[^>]*>.*?</script>", "", h)
-        txt = _re.sub(r"(?is)<style[^>]*>.*?</style>", "", txt)
-        txt = _re.sub(r"(?is)<br\s*/?>", "\n", txt)
-        txt = _re.sub(r"(?is)</p\s*>", "\n", txt)
-        txt = _re.sub(r"(?is)<[^>]+>", "", txt)
-        txt = _html.unescape(txt)
-        txt = _re.sub(r"\n{3,}", "\n\n", txt).strip()
-        return txt
+    mode = (mode or "auto").strip().lower()
+    if mode == "auto":
+        mode = "search" if (query or "").strip() else "summary"
+    if mode not in ("search", "summary", "tail", "range"):
+        return {"error": f"不支持的 mode: {mode}（可选 search / summary / tail / range）"}
 
-    def _serialize(p: dict) -> dict:
-        return {
-            "post_number": p.get("post_number"),
-            "username":    p.get("username"),
-            "created_at":  p.get("created_at"),
-            "like_count":  p.get("actions_summary", [{}])[0].get("count") if p.get("actions_summary") else None,
-            "content":     _html_to_text(p.get("cooked") or ""),
-        }
+    raw: list = []
+    matched_total = 0
 
-    target = max(1, max_posts)
-    by_id: dict = {p.get("id"): p for p in initial_posts if p.get("id") is not None}
+    if mode == "search":
+        q = (query or "").strip()
+        if not q:
+            return {"error": "mode=search 需要提供 query（要在这个帖子里找什么）"}
+        try:
+            hits = _shuiyuan_search_in_topic(tid, q, headers, cookies)
+        except PermissionError as e:
+            return {"error": str(e)}
+        matched_total = len(hits)
+        if not hits:
+            return {
+                "topic_id": int(tid), "title": title, "url": url, "mode": mode,
+                "posts_count": posts_count, "views": data.get("views"),
+                "matched": 0, "returned": 0, "sampled": True, "posts": [],
+                "note": f"帖内检索「{q}」没有命中楼层；可换关键词，或用 mode=summary 看主楼与最新回复。",
+            }
+        by_id = _shuiyuan_fetch_by_ids(tid, [h.get("id") for h in hits], headers, cookies)
+        raw = [by_id[h["id"]] for h in hits if h.get("id") in by_id]
+        if not raw:  # 批量接口失败时退回检索自带的摘要片段
+            raw = [
+                {
+                    "post_number": h.get("post_number"),
+                    "username": h.get("username"),
+                    "created_at": h.get("created_at"),
+                    "cooked": h.get("blurb") or "",
+                }
+                for h in hits
+            ]
 
-    # 若需要的楼层数超过初始返回（通常 20 楼），按 stream id 分批补抓
-    if target > len(initial_posts) and stream_ids:
-        need_ids = [pid for pid in stream_ids if pid not in by_id]
-        need_ids = need_ids[: max(0, target - len(initial_posts))]
-        BATCH = 20
-        for i in range(0, len(need_ids), BATCH):
-            chunk = need_ids[i:i + BATCH]
+    elif mode == "summary":
+        raw.extend(initial_posts[:3])                     # 主楼 + 开头几楼（wiki/目录常见于此）
+        for p in initial_posts[:20]:
+            # 只认 per-post 的 accepted_answer；topic_accepted_answer 是主题级标志，
+            # 实测它会出现在同屏每一楼上，用它会把整个首屏都当成"最佳答案"。
+            if p.get("accepted_answer"):
+                raw.append(p)
+        raw.extend(_shuiyuan_fetch_ids(tid, stream_ids[-5:], headers, cookies))   # 最新几楼
+        if data.get("has_summary"):
             try:
-                # Discourse 接受重复 query 参数 post_ids[]
-                params = [("post_ids[]", str(x)) for x in chunk]
-                rr = _shuiyuan_request(f"{base}/t/{tid}/posts.json", params, headers, cookies)
-                if rr.status_code != 200:
-                    break
-                more = (rr.json().get("post_stream") or {}).get("posts") or []
-                for p in more:
-                    if p.get("id") is not None:
-                        by_id[p["id"]] = p
+                rs = _shuiyuan_request(
+                    f"{SHUIYUAN_BASE}/t/{tid}/summary.json", {}, headers, cookies
+                )
+                if rs is not None and rs.status_code == 200:
+                    summ = rs.json()
+                    text = (summ.get("text") or "").strip()
+                    if text:
+                        raw.append({
+                            "post_number": -1, "username": "官方摘要",
+                            "created_at": summ.get("summarized_on"),
+                            "cooked": text,
+                        })
             except Exception:
+                pass
+
+    elif mode == "tail":
+        keep = max(1, int(max_posts or 30))
+        raw = _shuiyuan_fetch_ids(tid, stream_ids[-keep:], headers, cookies)
+        if not raw:
+            raw = initial_posts[-keep:]
+
+    else:  # range
+        start = max(1, int(from_post or 1))
+        end = int(to_post or 0) or (start + max(1, int(max_posts or 30)) - 1)
+        if end < start:
+            start, end = end, start
+        idx = _shuiyuan_locate_index(tid, stream_ids, start, headers, cookies)
+        if idx is None:
+            idx = max(0, start - 1)          # 二分失败（接口异常）时退回按下标近似
+        for _ in range(_READ_MAX_WINDOWS):
+            chunk = stream_ids[idx:idx + 20]
+            if not chunk:
+                break
+            got = _shuiyuan_fetch_ids(tid, chunk, headers, cookies)
+            if not got:
+                break
+            raw.extend([p for p in got if start <= (p.get("post_number") or 0) <= end])
+            idx += len(chunk)
+            if max((p.get("post_number") or 0) for p in got) >= end:
                 break
 
-    # 按 stream 顺序输出（保证楼层顺序正确）
-    ordered = []
-    for pid in stream_ids:
-        p = by_id.get(pid)
-        if p:
-            ordered.append(p)
-        if len(ordered) >= target:
-            break
-    if not ordered:
-        ordered = initial_posts[:target]
-
-    posts = [_serialize(p) for p in ordered]
+    posts, truncated = _shuiyuan_compose(raw)
 
     return {
         "topic_id":    int(tid),
@@ -2961,7 +3206,15 @@ def tool_read_shuiyuan_topic(topic: str, max_posts: int = 30) -> dict:
         "category_id": data.get("category_id"),
         "posts_count": posts_count,
         "views":       data.get("views"),
+        "mode":        mode,
+        "matched":     matched_total if mode == "search" else None,
         "returned":    len(posts),
+        "sampled":     True,
+        "truncated":   truncated,
+        "note": (
+            f"抽样视图（{mode} 模式）：本帖共 {posts_count} 楼，这里只有 {len(posts)} 楼。"
+            "不要声称读过全文；需要更多内容可换关键词用 mode=search，或指定 mode=range。"
+        ),
         "posts":       posts,
     }
 
