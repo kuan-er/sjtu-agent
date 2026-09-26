@@ -13,6 +13,8 @@ export default defineConfig({
     // 留在仓库里（从下面那篇的正文链到 GitHub），不上文档站，避免站点越堆越乱。
     'research/harness-context-practice-2026H2.md',
     'research/agent-token-survey-2026H2.md',
+    // 面向校内平台的功能建议（对外沟通/维护者参考），不属于用户文档
+    'feature-request-shuiyuan.md',
   ],
   head: [
     ['link', { rel: 'icon', href: '/sjtu-agent/docs/favicon.svg' }],
