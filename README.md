@@ -55,6 +55,19 @@
 
 **本地优先**：凭证、Cookie、聊天记录都保存在你自己的设备上，不上传任何远程服务器。
 
+### 与官方产品的关系
+
+校内已有官方产品线（[geek.sjtu.edu.cn](https://geek.sjtu.edu.cn/)），例如 2026-09 发布的桌面端 **[jAide](https://geek.sjtu.edu.cn/products/jaide)**。本项目**不与官方产品竞争**，定位互补：
+
+| | 官方桌面端（如 jAide） | 本项目 |
+| --- | --- | --- |
+| 形态 | 桌面 App，开箱即用 | 开源 Python：CLI / Web GUI / TUI / 后台守护进程 |
+| 入口 | 应用内 | **飞书 / Telegram / 微信 / QQ**，以及无头运行（服务器、定时任务） |
+| 扩展 | 官方插件体系 | MIT 开源：76 个工具 + MCP server + skills，可自行修改 |
+| 校园数据 | 官方通道 | 自行聚合（Canvas / AI 好课 / MOOC / 教务 / 水源 / 新闻） |
+
+需要桌面体验就用官方产品；**想在聊天软件里随口问、想让它跑在服务器上、想自己改代码**，用这个项目。校园能力以 **MCP server**（`scripts/mcp_server.py`）形式对外提供——DSH、jAide 等支持 MCP 的 Agent 都能直接挂载，两份实现可以是互补关系。
+
 ---
 
 ## 快速开始
