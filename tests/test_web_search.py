@@ -540,3 +540,97 @@ def test_web_search_no_proxy_by_default(monkeypatch):
     monkeypatch.setattr(ws.requests, "get", fake_get)
     ws.tool_web_search("no proxy")
     assert seen["proxies"] is None
+
+
+# ── 结果质量与读取诊断（issue #204） ─────────────────────────────────────────
+
+
+def test_focus_grams_keeps_years():
+    """年份是区分「今年的安排」与「2019 年旧通知」的关键，必须进焦点词。"""
+    grams = ws._focus_grams("上海交通大学 图书馆 开放时间 2026")
+    assert "2026" in grams
+    assert "书馆" in grams  # 中文只取二元组，不取整词
+
+
+def test_focus_grams_ignores_long_numbers():
+    grams = ws._focus_grams("订单 1234567890")
+    assert "1234567890" not in grams
+
+
+def test_low_relevance_results_are_dropped():
+    """只沾背景词（上海/首页）的结果不能和真正对题的条目一起返回。"""
+    grams = ws._focus_grams("上海交通大学 图书馆 开放时间")
+    items = [
+        {"title": "图书馆开放时间调整为 8:00-22:00", "snippet": "", "url": "https://a"},
+        {"title": "上海市人民政府", "snippet": "首页", "url": "https://b"},
+        {"title": "360 地图", "snippet": "", "url": "https://c"},
+    ]
+    kept, dropped = ws._prune_weak(items, grams)
+    assert [item["url"] for item in kept] == ["https://a"]
+    assert dropped == 2
+
+
+def test_prune_weak_keeps_results_when_coverage_is_untellable():
+    """引擎换了同义词时（一条都不沾焦点词）不要清空结果，只标注。"""
+    grams = ws._focus_grams("任意查询")
+    items = [
+        {"title": "360图片", "snippet": "图片搜索", "url": "https://ranks.hao.360.com/"},
+        {"title": "正常结果", "snippet": "有效内容", "url": "https://news.qq.com/a/1"},
+    ]
+    kept, dropped = ws._prune_weak(items, grams)
+    assert len(kept) == 2 and dropped == 0
+
+
+def test_weak_evidence_is_flagged_not_silently_passed(monkeypatch):
+    """结果一条都不沾查询词时，如实标注 low_relevance，别让模型当成有证据。"""
+    rss = _rss(
+        ("上海市人民政府", "https://www.shanghai.gov.cn/", "首页"),
+        ("上海旅游", "https://travel.example.com/", "攻略"),
+        ("某地图入口", "https://map.example.com/", "地图"),
+    )
+    monkeypatch.setattr(ws.requests, "get", _router({"format=rss": rss}))
+    result = ws.tool_web_search("Anthropic 封号 争议")
+    assert result["ok"] is True
+    assert result["low_relevance"] is True
+    assert "跑偏" in result["note"]
+
+
+def test_read_failure_reason_is_per_page(monkeypatch):
+    rss = _rss(
+        ("Anthropic 封号潮", "https://news.qq.com/a/1", "短摘要"),
+        ("Anthropic 封号申诉", "https://www.huxiu.com/a/2", "短摘要"),
+    )
+    monkeypatch.setattr(
+        ws.requests,
+        "get",
+        _router({"format=rss": rss, "news.qq.com/a/1": _article("正文段落内容。")}),
+    )
+    result = ws.tool_web_search("Anthropic 封号 争议", read_top=2)
+    read = result["read"]
+    assert read["pages"] >= 1
+    assert read["failed"] >= 1
+    reasons = read["reasons"]
+    assert any("huxiu" in item["url"] for item in reasons)
+    assert all(item["error"] for item in reasons)
+
+
+def test_read_pages_marks_title_only_shell(monkeypatch):
+    """只有标题的动态外壳不能算「读到了正文」。"""
+
+    def fake_fetch(url, *, timeout=15, max_chars=1500, validate=True):
+        return {
+            "ok": True,
+            "url": url,
+            "title": "上海交通大学图书馆",
+            "text": "上海交通大学图书馆",
+            "truncated": False,
+            "quality": "title_only",
+            "shell": True,
+        }
+
+    monkeypatch.setattr(ws, "fetch_article_text", fake_fetch)
+    targets = [{"title": "图书馆", "url": "https://www.lib.sjtu.edu.cn/"}]
+    ok, failures = ws._read_pages(targets, deadline=ws.time.monotonic() + 20)
+    assert ok == 0
+    assert failures and "动态" in failures[0]["error"]
+    assert targets[0]["read_quality"] == "title_only"

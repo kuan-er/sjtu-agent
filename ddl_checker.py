@@ -1681,8 +1681,42 @@ _JWC_RSS_FEEDS = [
 ]
 
 
-def _search_jwc(query: str, max_results: int = 8) -> list[dict]:
-    """从教务处 RSS 按关键词搜索通知公告。"""
+def _jwc_terms(query: str) -> tuple[list[str], list[str]]:
+    """拆教务处检索词：返回（必含词, 可选数字/年份词）。
+
+    数字与年份（「2026」「2026-2027」）不作硬性条件，只参与排序与标注——否则
+    「校历 2026 2027」会把所有通知都判成不命中；真正决定相关性的是「校历」「游泳」
+    这类实词。
+    """
+    required: list[str] = []
+    optional: list[str] = []
+    for token in re.split(r"[\s,，;；、/|]+", (query or "").strip()):
+        token = token.strip().lower()
+        if not token:
+            continue
+        if re.fullmatch(r"(?:19|20)\d{2}|\d{2,4}", token):
+            if token not in optional:
+                optional.append(token)
+        elif token not in required:
+            required.append(token)
+    return required, optional
+
+
+def _jwc_score(item: dict, required: list[str], optional: list[str]) -> int | None:
+    """必含词全中才算命中；返回命中的可选词个数（用于排序）。"""
+    haystack = f"{item.get('title', '')} {item.get('summary', '')}".lower()
+    if any(term not in haystack for term in required):
+        return None
+    return sum(1 for term in optional if term in haystack)
+
+
+def _search_jwc(query: str, max_results: int = 8) -> tuple[list[dict], str]:
+    """从教务处 RSS 按关键词搜索通知公告。
+
+    返回（条目, 说明）。说明里写清检索范围与是否命中——RSS 只是近期通知源，
+    **未命中时不再静默返回最新几条冒充命中**（issue #204 复现一），改为显式
+    标注 `matched: false` 并给出说明。
+    """
     import xml.etree.ElementTree as ET
 
     items: list[dict] = []
@@ -1702,15 +1736,34 @@ def _search_jwc(query: str, max_results: int = 8) -> list[dict]:
             _logger.warning(f"[jwc] RSS 获取失败：{e}")
 
     if not items:
-        return [{"error": "无法获取教务处 RSS，网络不通或地址变更"}]
+        return [{"error": "无法获取教务处 RSS，网络不通或地址变更"}], ""
 
-    q = query.lower()
-    matched = [i for i in items
-               if q in i["title"].lower() or q in i["summary"].lower()]
-    # 没有关键词匹配时返回最新几条
-    if not matched:
-        return items[:max_results]
-    return matched[:max_results]
+    scope = f"教务处 RSS 的近期通知（{len(items)} 条）"
+    required, optional = _jwc_terms(query)
+    if not required and not optional:
+        latest = [dict(i, matched=False) for i in items[:max_results]]
+        return latest, f"未指定关键词：按最新顺序列出通知（检索范围仅限{scope}）"
+
+    scored: list[tuple[int, dict]] = []
+    for item in items:
+        score = _jwc_score(item, required, optional)
+        if score is not None:
+            scored.append((score, item))
+
+    if scored:
+        scored.sort(key=lambda pair: -pair[0])  # 稳定排序：同分保持 RSS 原有顺序
+        return [dict(item, matched=True) for _, item in scored[:max_results]], (
+            f"检索范围仅限{scope}，不是全站历史检索"
+        )
+
+    latest = [dict(i, matched=False) for i in items[:max_results]]
+    terms = "、".join(required + optional)
+    return latest, (
+        f"未命中：{scope}里没有包含「{terms}」的通知。"
+        f"下列 {len(latest)} 条是最新通知（matched=false），仅供参考，不是搜索结果；"
+        "检索范围仅限教务处 RSS 近期通知，不是全站历史检索，"
+        "不要当作「教务处的确没有这份资料」的证据。"
+    )
 
 
 def _search_shuiyuan(cfg: dict, query: str, max_results: int = 5) -> list[dict]:
@@ -2023,7 +2076,12 @@ def search_campus(
     out: dict = {}
     if "jwc" in sites:
         _logger.info(f"[搜索] 教务处通知：{query}…")
-        out["jwc"] = _search_jwc(query, max_results)
+        jwc_items, jwc_note = _search_jwc(query, max_results)
+        out["jwc"] = jwc_items
+        if jwc_note:
+            # 命中的条目 matched=true；未命中时 jwc 里是最新通知（matched=false），
+            # 靠这条 note 让模型分清「搜到了」与「只是最近的通知」
+            out["jwc_note"] = jwc_note
     if "shuiyuan" in sites:
         _logger.info(f"[搜索] 水源社区：{query}…")
         out["shuiyuan"] = _search_shuiyuan(cfg, query, max_results)

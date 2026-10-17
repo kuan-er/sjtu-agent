@@ -196,7 +196,7 @@ def _collect_data(report_type: str = "evening") -> dict:
         "ddls":     lambda: agent.tool_get_ddls(classify=True),
         "schedule": lambda: agent.tool_get_schedule(query_type="day", date=date_arg),
         "lab":      lambda: agent.tool_get_next_lab(),
-        "jwc":      lambda: agent.tool_search_campus("通知 公告", sites=["jwc"], max_results=4),
+        "jwc":      lambda: agent.tool_search_campus("", sites=["jwc"], max_results=4),
         "news":     lambda: _get_news(),
     }
 

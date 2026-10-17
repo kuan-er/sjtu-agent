@@ -176,3 +176,83 @@ def test_fetch_url_reports_http_error(monkeypatch):
     result = _core.tool_fetch_url("https://example.com/missing")
     assert result["ok"] is False
     assert "抓取失败" in result["error"]
+
+
+# ── 编码与正文质量（issue #204 复现三、四） ──────────────────────────────────
+
+
+class _EncodedResp:
+    """模仿 requests：content 是字节，text 按 self.encoding 解码。"""
+
+    def __init__(self, content: bytes, headers: dict | None = None):
+        self.content = content
+        self.status_code = 200
+        self.headers = headers or {}
+        # 与 requests 一致：头里有 charset 就用它，否则 text/html 默认 ISO-8859-1
+        content_type = str(self.headers.get("content-type") or "").lower()
+        if "charset=" in content_type:
+            self.encoding = content_type.split("charset=")[-1].split(";")[0].strip()
+        else:
+            self.encoding = "ISO-8859-1"
+        self.apparent_encoding = "utf-8"
+
+    @property
+    def text(self):
+        return self.content.decode(self.encoding, "replace")
+
+    def raise_for_status(self):
+        return None
+
+
+def test_decode_response_uses_html_charset_when_header_lacks_it():
+    """HTTP 头没写 charset、HTML 里声明 UTF-8 时不能按 ISO-8859-1 解出乱码。"""
+    from sjtu_agent.agent.tools._web_common import decode_response
+
+    body = (
+        '<html><head><meta charset="utf-8"><title>上海交通大学图书馆</title>'
+        "</head><body><p>开放时间</p></body></html>"
+    ).encode("utf-8")
+    resp = _EncodedResp(body, headers={"content-type": "text/html"})
+    assert "上海交通大学图书馆" in decode_response(resp)
+
+
+def test_decode_response_respects_header_charset():
+    from sjtu_agent.agent.tools._web_common import decode_response
+
+    body = "<html><body>测试</body></html>".encode("gbk")
+    resp = _EncodedResp(body, headers={"content-type": "text/html; charset=gbk"})
+    assert "测试" in decode_response(resp)
+
+
+def test_fetch_url_flags_title_only_shell(monkeypatch):
+    """图书馆首页那种只有标题的动态外壳：ok 但必须带 quality 与 warning。"""
+    monkeypatch.setattr(
+        requests,
+        "get",
+        lambda url, **kwargs: _Resp(
+            text='<html><head><title>上海交通大学图书馆</title></head>'
+            '<body><div id="htContainer"></div><script src="/assets/js/v2.js"></script>'
+            "</body></html>"
+        ),
+    )
+    result = _core.tool_fetch_url("https://www.lib.sjtu.edu.cn/")
+    assert result["ok"] is True
+    assert result["quality"] == "title_only"
+    assert result["short"] is True
+    assert "动态渲染" in result["warning"]
+
+
+def test_fetch_url_full_article_has_ok_quality(monkeypatch):
+    monkeypatch.setattr(
+        requests,
+        "get",
+        lambda url, **kwargs: _Resp(
+            text="<html><head><title>讲座通知</title></head><body><article>"
+            + "<p>本次讲座于周五下午在闵行校区图书馆报告厅举行，欢迎参加。</p>" * 6
+            + "</article></body></html>"
+        ),
+    )
+    result = _core.tool_fetch_url("https://news.sjtu.edu.cn/post/2")
+    assert result["ok"] is True
+    assert result["quality"] == "ok"
+    assert "warning" not in result

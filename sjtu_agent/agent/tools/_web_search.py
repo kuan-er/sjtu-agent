@@ -318,13 +318,20 @@ _STOP_GRAMS = {
 
 
 def _focus_grams(query: str) -> list[str]:
-    """把查询拆成焦点 gram：中文 2-gram + 长度 ≥3 的拉丁词（含缩写）。"""
+    """把查询拆成焦点 gram：中文 2-gram + ≥3 的拉丁词 + 四位年份。
+
+    年份也要进焦点词：「2026 校历」这类查询里，"2026" 是区分「今年的安排」与
+    「2019 年的旧通知」的关键，早先只取中文二元组，年份被当成噪声丢掉了。
+    """
     grams: list[str] = []
     for run in re.findall(r"[\u4e00-\u9fff]+", query):
         for index in range(len(run) - 1):
             gram = run[index : index + 2]
             if gram not in _STOP_GRAMS and gram not in grams:
                 grams.append(gram)
+    for year in re.findall(r"(?<!\d)(?:19|20)\d{2}(?!\d)", query):
+        if year not in grams:
+            grams.append(year)
     for token in re.findall(r"[A-Za-z][A-Za-z0-9._+-]*", query):
         lowered = token.lower()
         if len(lowered) >= 3 and lowered not in grams:
@@ -342,6 +349,36 @@ def _rank(items: list[dict], grams: list[str]) -> list[dict]:
     if not grams:
         return list(items)
     return sorted(items, key=lambda item: -_hit_count(item, grams))
+
+
+def _best_hits(items: list[dict], grams: list[str]) -> int:
+    """本批结果里，单条最多覆盖几个焦点词。"""
+    if not grams or not items:
+        return 0
+    return max(_hit_count(item, grams) for item in items)
+
+
+def _prune_weak(items: list[dict], grams: list[str]) -> tuple[list[dict], int]:
+    """剔掉「只沾了背景词」的结果，返回（保留, 丢弃条数）。
+
+    「上海交通大学 闵行 图书馆 开放时间」这类查询里，搜索引擎常回一批只含
+    「上海」的政府首页/地图入口——它们只覆盖一两个背景词，排进结果只会让模型
+    以为有证据。判定用「相对最佳覆盖度的一半」，而不是绝对条数：
+
+    - 最佳覆盖 < 2 个焦点词时不判（引擎可能换了同义词，判了反而误杀）；
+    - 全部低于门槛时也不清空（宁可保留并标注，也不要假装没搜到）。
+    """
+    if not grams or not items:
+        return list(items), 0
+    hits = [_hit_count(item, grams) for item in items]
+    best = max(hits)
+    if best < 2:
+        return list(items), 0
+    floor = max(1, best // 2)
+    kept = [item for item, count in zip(items, hits) if count >= floor]
+    if not kept:
+        return list(items), 0
+    return kept, len(items) - len(kept)
 
 
 def _is_thin(items: list[dict], grams: list[str]) -> bool:
@@ -566,26 +603,33 @@ def _read_count(items: list[dict], requested, grams: list[str] | None = None) ->
     ][:2]
 
 
-def _read_pages(targets: list[dict], deadline: float) -> tuple[int, int]:
-    """并发抓取 targets 的正文，写回 item["content"]。返回（成功数, 失败数）。
+def _read_pages(targets: list[dict], deadline: float) -> tuple[int, list[dict]]:
+    """并发抓取 targets 的正文，写回 item["content"]。返回（成功数, 失败明细）。
 
-    单页失败不影响整轮搜索：失败的条目保持「标题 + 摘要」，模型仍可自行 fetch_url。
+    单页失败不影响整轮搜索：失败的条目保持「标题 + 摘要」，模型仍可自行 fetch_url，
+    但**要知道为什么没读到**（超时 / 反爬 / 只有外壳 / 正文为空），否则只会看到
+    一个「失败 3 条」的汇总数字。
     """
     targets = [item for item in targets if item.get("url")]
     if not targets:
-        return 0, 0
+        return 0, []
 
+    # 每次请求用「剩余预算」，而不是固定的 _READ_TIMEOUT —— 否则超时上限与整轮预算脱节
     budget = max(3.0, min(_READ_TIMEOUT, deadline - time.monotonic()))
     remaining = _READ_TOTAL_CHARS
     done = 0
-    failures = 0
+    failures: list[dict] = []
+
+    def _fail(item: dict, reason: str) -> None:
+        item["read_error"] = reason
+        failures.append({"url": item.get("url", ""), "error": reason})
 
     with ThreadPoolExecutor(max_workers=min(_READ_WORKERS, len(targets))) as pool:
         futures = {
             pool.submit(
                 fetch_article_text,
                 item["url"],
-                timeout=_READ_TIMEOUT,
+                timeout=budget,
                 max_chars=_READ_PAGE_CHARS,
             ): item
             for item in targets
@@ -597,23 +641,41 @@ def _read_pages(targets: list[dict], deadline: float) -> tuple[int, int]:
                 item = futures[future]
                 try:
                     data = future.result()
-                except Exception:  # noqa: BLE001 — 单页异常只算这一页失败
-                    failures += 1
+                except Exception as exc:  # noqa: BLE001 — 单页异常只算这一页失败
+                    _fail(item, f"{type(exc).__name__}: {exc}"[:120])
                     continue
                 text = (data or {}).get("text") or ""
-                if not (data or {}).get("ok") or not text or remaining <= 0:
-                    failures += 1
+                if not (data or {}).get("ok"):
+                    _fail(item, str((data or {}).get("error") or "读取失败")[:120])
                     continue
+                if not text:
+                    _fail(item, "正文为空")
+                    continue
+                if remaining <= 0:
+                    _fail(item, "整轮正文预算已用完")
+                    continue
+                quality = (data or {}).get("quality") or "ok"
                 if len(text) > remaining:
                     text = text[:remaining].rstrip() + "\n\n[内容过长，已截断]"
                 remaining -= len(text)
                 item["content"] = text
+                if quality != "ok":
+                    # 只有标题 / 动态外壳：内容留着，但如实标注不可靠
+                    item["read_quality"] = quality
+                    item["read_error"] = (
+                        "只取到标题或极少正文（页面可能是 JS 动态渲染）"
+                        if (data or {}).get("shell")
+                        else "正文过短"
+                    )
+                    failures.append({"url": item.get("url", ""), "error": item["read_error"]})
+                    continue
                 if data.get("title") and len(item.get("title") or "") < 8:
                     item["title"] = data["title"]
                 done += 1
         except FuturesTimeout:
             pass  # 超时的页面按失败计
-    failures += len(pending)
+    for future in pending:
+        _fail(futures[future], f"超过 {budget:.0f}s 预算未返回")
     return done, failures
 
 
@@ -702,7 +764,9 @@ def tool_web_search(
             if _is_thin(_rank(pool, grams), grams):
                 attempt("so360", _search_360, variant)
 
-    ranked = _rank(pool, grams)[:max_results]
+    ranked_all = _rank(pool, grams)
+    ranked_kept, dropped = _prune_weak(ranked_all, grams)
+    ranked = ranked_kept[:max_results]
     if ranked:
         payload: dict = {
             "ok": True,
@@ -713,12 +777,28 @@ def tool_web_search(
         if errors:
             # 有来源被限流/失败时如实标注：结果可能偏官方，模型可据此换策略
             payload["degraded"] = errors[-2:]
+        if dropped:
+            payload["dropped"] = dropped
+            payload["note"] = (
+                f"已丢弃 {dropped} 条只沾背景词、没覆盖查询关键信息的结果；"
+                "剩下的仍可能不足，信息不够就如实说没查到。"
+            )
+        elif _best_hits(ranked, grams) == 0:
+            # 一条都没覆盖查询焦点词：引擎多半换词了，如实标注「证据很弱」
+            payload["low_relevance"] = True
+            payload["note"] = (
+                "这些结果没有一条包含查询里的关键信息，可能跑偏（引擎改写/泛首页）；"
+                "不要把它们当成有证据的回答，换更具体的词或改用 search_campus。"
+            )
         # 搜索即阅读：只抓「排在最前、且判定值得读」的那几条
         targets = _read_count(ranked, read_top, grams)
         if targets and time.monotonic() < deadline - 3:
             read_ok, read_failed = _read_pages(targets, deadline)
             if read_ok or read_failed:
-                payload["read"] = {"pages": read_ok, "failed": read_failed}
+                payload["read"] = {"pages": read_ok, "failed": len(read_failed)}
+                if read_failed:
+                    # 逐条给出失败原因，模型才知道是超时/反爬/外壳，而不是「网站没这条信息」
+                    payload["read"]["reasons"] = read_failed[:3]
         return payload
 
     return {

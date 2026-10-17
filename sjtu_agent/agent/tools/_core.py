@@ -727,6 +727,11 @@ TOOLS = [
                 "重要：若用户明确指定了某个网站（如'水源'、'教务处'、'传承'），"
                 "必须在 sites 中只填该网站，不得多填其他网站。"
                 "只有用户未指定网站时才搜全部。"
+                "**注意返回里的置信标记**：jwc 的结果带 matched 字段，true 才是关键词命中；"
+                "false 表示「教务处 RSS 近期通知里没命中，这些只是最新通知」，"
+                "此时要如实告诉用户没搜到，并在 jwc_note 说明检索范围（仅 RSS 近期通知），"
+                "**不要**把最新通知当成搜索结果，也不要据此断言「教务处没有这份资料」。"
+                "query 传空字符串表示「只看最新通知」。"
             ),
             "parameters": {
                 "type": "object",
@@ -3595,14 +3600,30 @@ def tool_fetch_url(url: str) -> dict:
         if not fetched["ok"]:
             return {"ok": False, "error": f"抓取失败: {fetched['error']}"}
         text = fetched["text"]
-        return {
+        quality = fetched.get("quality") or "ok"
+        payload = {
             "ok": True,
             "url": url,
             "title": fetched.get("title", ""),
             "content": text,
             "length": len(text),
             "method": "requests",
+            "quality": quality,
         }
+        # 「只有标题 / 动态外壳」不能当成读到了正文：如实标注，让模型去换来源或说明拿不到
+        if quality != "ok":
+            payload["short"] = True
+            hint = (
+                "正文可能是 JS 动态渲染（静态 HTML 里只有壳）"
+                if fetched.get("shell")
+                else "页面静态内容很少"
+            )
+            payload["warning"] = (
+                f"只提取到 {len(text)} 个字符的正文（{hint}），"
+                "不要据此回答页面里应有但未出现的信息（如开放时间、价格、位置）；"
+                "必要时换一个来源或在回答里说明未获取到。"
+            )
+        return payload
     except Exception as e:
         return {"ok": False, "error": f"抓取失败: {e}"}
 

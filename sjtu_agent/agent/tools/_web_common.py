@@ -41,6 +41,68 @@ WEIXIN_FETCH_HEADERS = {
 
 TRUNCATE_MARKER = "\n\n[内容过长，已截断]"
 
+# 正文可用性阈值：抽出来的字比标题还短、或几乎没有内容时，不能算「读到了」。
+_TITLE_ONLY_SLACK = 20     # 正文比标题多出的字符上限（超过仍算只有标题）
+_SHORT_TEXT_CHARS = 80     # 低于这个长度基本是导航/占位文字
+
+# 典型「动态渲染外壳」标记：静态 HTML 里只有壳，正文靠 JS 拉取
+_SHELL_MARKERS = (
+    'id="app"',
+    "id='app'",
+    "__NEXT_DATA__",
+    "window.__INITIAL_STATE__",
+    "htContainer",
+    "id=\"root\"",
+    "id='root'",
+)
+
+
+def decode_response(resp) -> str:
+    """把响应解码成文本，处理「HTTP 头没写 charset、HTML 里声明 UTF-8」的冲突。
+
+    requests 对 `text/html` 无 charset 的响应按 RFC 2616 默认 ISO-8859-1 解码，
+    于是 UTF-8 中文变成 `ã...` 乱码——而且抽出来的正文还算「成功」。这里按
+    HTTP 头 → HTML `<meta charset>` → 内容探测 的顺序定编码。
+    """
+    content_type = str(getattr(resp, "headers", {}).get("content-type") or "").lower()
+    if "charset=" in content_type:
+        return resp.text
+
+    raw = getattr(resp, "content", None) or b""
+    declared = ""
+    if raw:
+        match = re.search(
+            rb"<meta[^>]+charset\s*=\s*[\"']?([A-Za-z0-9_\-]+)", raw[:4096], re.I
+        )
+        if match:
+            declared = match.group(1).decode("ascii", "ignore")
+    candidate = declared or getattr(resp, "apparent_encoding", "") or ""
+    if candidate:
+        try:
+            resp.encoding = candidate
+        except Exception:  # noqa: BLE001 — 编码只是个提示，失败就用默认
+            pass
+    return resp.text
+
+
+def assess_text_quality(text: str, title: str = "", html: str = "") -> dict:
+    """给抽出来的正文定级：ok / title_only / short。
+
+    「非空文本就算成功」会把「只有标题」和「动态外壳」也报成成功，模型于是拿
+    9 个字符去回答开放时间。这里额外标出低质量，由调用方决定要不要写进结果。
+    """
+    stripped = (text or "").strip()
+    if not stripped:
+        return {"quality": "empty", "chars": 0, "shell": False}
+
+    shell = any(marker in (html or "") for marker in _SHELL_MARKERS)
+    title = (title or "").strip()
+    if title and len(stripped) <= len(title) + _TITLE_ONLY_SLACK:
+        return {"quality": "title_only", "chars": len(stripped), "shell": shell}
+    if len(stripped) < _SHORT_TEXT_CHARS:
+        return {"quality": "short", "chars": len(stripped), "shell": shell}
+    return {"quality": "ok", "chars": len(stripped), "shell": shell}
+
 
 # 明确的内网/保留网段。
 #
@@ -230,7 +292,7 @@ def fetch_article_text(
 ) -> dict:
     """抓取单页正文。
 
-    返回 {"ok": True, "url", "title", "text", "truncated"} 或
+    返回 {"ok": True, "url", "title", "text", "truncated", "quality"} 或
     {"ok": False, "url", "error"}——失败是结构化的，调用方自行决定降级。
     """
     if validate:
@@ -244,7 +306,8 @@ def fetch_article_text(
     try:
         resp = fetch_html(url, headers, timeout=timeout)
         resp.raise_for_status()
-        text = extract_article_text(resp.text, url)
+        html = decode_response(resp)
+        text = extract_article_text(html, url)
     except Exception as exc:  # noqa: BLE001 — 结构化返回，调用方决定是否降级
         return {"ok": False, "url": url, "error": f"{type(exc).__name__}: {exc}"[:160]}
 
@@ -256,13 +319,19 @@ def fetch_article_text(
         text = text[:max_chars].rstrip() + TRUNCATE_MARKER
     soup_title = ""
     try:
-        soup_title = extract_title(BeautifulSoup(resp.text, "html.parser"), url)
+        soup_title = extract_title(BeautifulSoup(html, "html.parser"), url)
     except Exception:  # noqa: BLE001 — 标题失败不影响正文
         soup_title = ""
+    # 质量判定用「截断前」的正文：截断是预算行为，不代表页面只有这么点内容
+    quality = assess_text_quality(
+        text.split(TRUNCATE_MARKER)[0], soup_title, html
+    )
     return {
         "ok": True,
         "url": url,
         "title": soup_title,
         "text": text,
         "truncated": truncated,
+        "quality": quality["quality"],
+        "shell": quality["shell"],
     }
