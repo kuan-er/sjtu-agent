@@ -39,6 +39,7 @@ from sjtu_agent.bots._core import (
     build_date_ctx as _build_date_ctx,
     build_profile_ctx as _build_profile_ctx,
     make_session,
+    model_can_take_images as _model_can_take_images,
     model_supports_vision as _model_supports_vision,
     run_one_turn,
     run_one_turn_multimodal,
@@ -1000,7 +1001,7 @@ def handle_photo(msg):
             local_path = _download_tg_file(photo.file_id, f"photo_{photo.file_id[:8]}.jpg")
             model = sess["model_box"][0]
 
-            if _model_supports_vision(model):
+            if _model_can_take_images(model, sess["client_box"][0]):
                 # 读取图片并 base64 编码，构造多模态消息
                 img_bytes = local_path.read_bytes()
                 b64 = base64.b64encode(img_bytes).decode()

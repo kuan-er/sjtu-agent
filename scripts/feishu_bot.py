@@ -37,6 +37,7 @@ from sjtu_agent.paths import CONFIG_PATH
 from sjtu_agent.config import cfg as _cfg
 from sjtu_agent.bots._core import (
     build_date_ctx,
+    model_can_take_images as _model_can_take_images,
     model_supports_vision as _model_supports_vision,
     log_turn,
 )
@@ -1184,7 +1185,7 @@ def _process_media_in_thread(sender_open_id: str, message_id: str, msg_type: str
         model = conv["model_box"][0]
 
         if msg_type == "image":
-            if _model_supports_vision(model):
+            if _model_can_take_images(model, conv["client_box"][0]):
                 img_bytes = local_path.read_bytes()
                 content: list = _build_vision_content(
                     model,
@@ -1298,7 +1299,7 @@ def _process_rich_media_in_thread(sender_open_id: str, message_id: str, text: st
         model = conv["model_box"][0]
         user_text = (text or "").strip() or "[用户发送了一条富文本消息]"
 
-        if image_keys and _model_supports_vision(model):
+        if image_keys and _model_can_take_images(model, conv["client_box"][0]):
             img_list: list[bytes] = []
             for key in image_keys:
                 try:

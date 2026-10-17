@@ -45,6 +45,7 @@ from sjtu_agent.bots._core import (
     build_date_ctx as _build_date_ctx,
     log_turn as _log_turn,
     make_session,
+    model_can_take_images as _model_can_take_images,
     model_supports_vision as _model_supports_vision,
     run_one_turn,
     run_one_turn_multimodal,
@@ -384,7 +385,9 @@ class QQAgentClient(botpy.Client):
                     media.get("type", "file"),
                     media.get("filename", ""),
                 )
-                if media.get("type") == "image" and _model_supports_vision(model):
+                if media.get("type") == "image" and _model_can_take_images(
+                    model, sess["client_box"][0]
+                ):
                     img_bytes = local_path.read_bytes()
                     b64 = base64.b64encode(img_bytes).decode()
                     content: list = []

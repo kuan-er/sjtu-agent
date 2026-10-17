@@ -144,14 +144,25 @@ def build_profile_ctx() -> str:
 
 
 def model_supports_vision(model: str) -> bool:
-    """关键词判断模型是否支持图片输入。对 None 安全（统一各 bot 的防御写法）。"""
-    m = (model or "").lower()
-    return any(kw in m for kw in [
-        "vision", "gpt-4o", "gpt-4-turbo", "claude-3", "claude-4",
-        "gemini", "qwen-vl", "qwen3vl", "glm-4v", "internvl",
-        "sonnet-4", "opus-4", "haiku-4",
-        "deepseek-flash",  # V4.1 Flash（官方 API）原生多模态
-    ])
+    """关键词判断模型是否支持图片输入。对 None 安全（统一各 bot 的防御写法）。
+
+    注意：这只是**已知清单**快路径。清单里没有的新模型（如 gpt-6.1-sol）会返回
+    False，直接判成「不支持识图」——那正是 issue #203。需要「能不能识图」的最终
+    结论请用 `model_can_take_images(model, client)`：它会在未知时探测一次并缓存。
+    """
+    from sjtu_agent.vision_capability import known_vision_model
+
+    return known_vision_model(model or "")
+
+
+def model_can_take_images(model: str, client=None) -> bool:
+    """模型能否直接识图：显式配置 → 已知清单 → 未知则探测一次（结果缓存）。
+
+    探测用 1×1 像素图 + max_tokens=1，只花一次极小调用；同一个模型只探测一次。
+    """
+    from sjtu_agent.vision_capability import resolve_vision_capability
+
+    return resolve_vision_capability(model or "", client)
 
 
 def make_session(agent_cfg: dict | None = None) -> dict:
