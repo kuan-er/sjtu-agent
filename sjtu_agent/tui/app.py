@@ -442,8 +442,13 @@ if TEXTUAL_AVAILABLE:
             attachment_items: list[dict[str, Any]],
             turn_session: str,
         ) -> None:
+            # 图片交给共享引擎决定「原生识图 / OCR」；这里只预解析其它文件，
+            # 避免同一张图被 OCR 一遍又原生发一遍。
+            from sjtu_agent.web.chat_images import split_attachments
+
+            images, others = split_attachments(attachment_items)
             try:
-                note = build_attachment_note(attachment_items)
+                note = build_attachment_note(others) if others else ""
                 error = None
             except Exception as exc:
                 note = ""
@@ -454,6 +459,7 @@ if TEXTUAL_AVAILABLE:
                 note,
                 error,
                 turn_session,
+                images,
             )
 
         def attachment_prepare_done(
@@ -462,6 +468,7 @@ if TEXTUAL_AVAILABLE:
             note: str,
             error: str | None,
             turn_session: str,
+            images: list[dict[str, Any]] | None = None,
         ) -> None:
             if turn_session != self.session_id:
                 return
@@ -472,7 +479,7 @@ if TEXTUAL_AVAILABLE:
                 )
                 return
             self.schedule_worker(
-                self.send_after_attachment(base_message + note, turn_session),
+                self.send_after_attachment(base_message + note, turn_session, images),
                 group="attachment-send",
             )
 
@@ -486,7 +493,12 @@ if TEXTUAL_AVAILABLE:
             self.messages.scroll_end(animate=False)
             self.busy = False
 
-        async def send_after_attachment(self, message: str, turn_session: str) -> None:
+        async def send_after_attachment(
+            self,
+            message: str,
+            turn_session: str,
+            attachment_items: list[dict[str, Any]] | None = None,
+        ) -> None:
             if turn_session != self.session_id:
                 return
             try:
@@ -495,7 +507,9 @@ if TEXTUAL_AVAILABLE:
             except Exception:
                 pass
             self.busy = False
-            await self.start_turn(message, command_mode=False)
+            await self.start_turn(
+                message, command_mode=False, attachment_items=attachment_items or []
+            )
 
         def schedule_worker(self, work, group: str, *, exclusive: bool = False) -> None:
             """启动 UI worker；任何刷新错误都不允许让 App 闪退。"""
@@ -537,7 +551,12 @@ if TEXTUAL_AVAILABLE:
             except Exception:
                 return
 
-        async def start_turn(self, text: str, command_mode: bool | None = None) -> None:
+        async def start_turn(
+            self,
+            text: str,
+            command_mode: bool | None = None,
+            attachment_items: list[dict[str, Any]] | None = None,
+        ) -> None:
             if self.session_id is None:
                 session = self.model.create_session("新会话")
                 await self.refresh_sessions(select_id=session.get("id"))
@@ -563,17 +582,27 @@ if TEXTUAL_AVAILABLE:
             self.turn_session = session_id
             threading.Thread(
                 target=self._run_stream,
-                args=(text, command_mode, session_id),
+                args=(text, command_mode, session_id, attachment_items or []),
                 daemon=True,
             ).start()
 
-        def _run_stream(self, text: str, command_mode: bool, turn_session: str) -> None:
+        def _run_stream(
+            self,
+            text: str,
+            command_mode: bool,
+            turn_session: str,
+            attachment_items: list[dict[str, Any]] | None = None,
+        ) -> None:
             try:
-                stream = (
-                    iter_command_events(turn_session, text)
-                    if command_mode
-                    else iter_chat_events(turn_session, text)
-                )
+                if command_mode:
+                    stream = iter_command_events(turn_session, text)
+                elif attachment_items:
+                    # 有附件才多传一个参数，保持与旧调用点/测试替身的兼容
+                    stream = iter_chat_events(
+                        turn_session, text, attachment_items=attachment_items
+                    )
+                else:
+                    stream = iter_chat_events(turn_session, text)
                 for event in stream:
                     if event.get("kind") == "done":
                         break

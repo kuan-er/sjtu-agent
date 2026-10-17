@@ -291,7 +291,8 @@ def test_attach_command_uses_whitelisted_store_and_preparses(tmp_path, monkeypat
     _run(scenario())
 
 
-def test_attachment_parsing_runs_off_the_ui_thread(tmp_path, monkeypatch):
+def test_image_attachment_is_sent_to_engine_not_ocr(tmp_path, monkeypatch):
+    """图片不再在 TUI 里预解析成文字，而是交给共享引擎决定原生识图/OCR。"""
     from sjtu_agent.tui.attachments import TuiAttachments
     from sjtu_agent.web.attachment_store import AttachmentStore
 
@@ -299,7 +300,60 @@ def test_attachment_parsing_runs_off_the_ui_thread(tmp_path, monkeypatch):
     model = TuiSessionModel(store)
     model.create_session("新会话")
     source = tmp_path / "image.png"
-    source.write_bytes(b"fake-image")
+    source.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 32)
+
+    parsed: list[str] = []
+    seen: list[dict] = []
+
+    def fake_parse(path, **kwargs):
+        parsed.append(str(path))
+        return {"ok": True, "content": "不该被调用"}
+
+    def fake_stream(session_id, user_message, attachment_items=None):
+        seen.append({"message": user_message, "items": attachment_items or []})
+        yield {"kind": "done"}
+
+    monkeypatch.setattr("sjtu_agent.parsing.parse_file", fake_parse)
+    monkeypatch.setattr("sjtu_agent.tui.app.iter_chat_events", fake_stream)
+
+    async def scenario():
+        app = build_app()
+        app.model = model
+        app.attachments = TuiAttachments(AttachmentStore(tmp_path / "web_attachments"))
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            prompt = app.query_one("#prompt", Input)
+
+            prompt.focus()
+            prompt.value = f"/attach {source}"
+            await pilot.press("enter")
+            await pilot.pause()
+
+            prompt.focus()
+            prompt.value = "看图"
+            await pilot.press("enter")
+            for _ in range(100):
+                if seen:
+                    break
+                await pilot.pause(0.05)
+
+            assert seen, "图片附件应当直接进入聊天流"
+            assert seen[0]["items"], "图片应以附件形式随请求发送"
+            assert seen[0]["items"][0]["mime_type"] == "image/png"
+            assert not parsed, "图片不应再走 TUI 侧的预解析/OCR"
+
+    _run(scenario())
+
+
+def test_attachment_parsing_runs_off_the_ui_thread(tmp_path, monkeypatch):
+    from sjtu_agent.tui.attachments import TuiAttachments
+    from sjtu_agent.web.attachment_store import AttachmentStore
+
+    store = SessionStore(tmp_path / "web_sessions.sqlite3")
+    model = TuiSessionModel(store)
+    model.create_session("新会话")
+    source = tmp_path / "notes.txt"
+    source.write_text("附件正文", encoding="utf-8")
 
     started = threading.Event()
     release = threading.Event()
@@ -331,7 +385,7 @@ def test_attachment_parsing_runs_off_the_ui_thread(tmp_path, monkeypatch):
             await pilot.pause()
 
             prompt.focus()
-            prompt.value = "看图"
+            prompt.value = "看看附件"
             await pilot.press("enter")
             for _ in range(50):
                 if started.is_set():

@@ -24,9 +24,12 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from sjtu_agent.paths import ENV_PATH, CONFIG_PATH, AGENT_CONFIG_PATH, _get_or_create_web_token
+from sjtu_agent.logging import get_logger
 from sjtu_agent.web.attachment_context import _attachment_content, _attachment_note_for_chat
 from sjtu_agent.web.attachment_store import AttachmentStore
 from sjtu_agent.web.session_store import SessionStore
+
+_logger = get_logger("web")
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 _WEB_TOKEN = ""
@@ -506,7 +509,11 @@ def _date_context() -> str:
     return text
 
 
-def _stream_chat(user_message: str, session_id: str | None = None):
+def _stream_chat(
+    user_message: str,
+    session_id: str | None = None,
+    attachment_items: list[dict] | None = None,
+):
     """生成器：将 user_message 发给 LLM，支持完整 tool_use 循环，以 SSE 格式 yield 数据行。
     事件类型：
       {token: "..."} — 正文增量
@@ -514,48 +521,124 @@ def _stream_chat(user_message: str, session_id: str | None = None):
       {tool_end: {name, result}} — 工具返回
       {error: "..."} — 错误
       [DONE] — 结束
+
+    附件：图片在主模型能识图时**原生发送**（不再先 OCR 成文字）；不能识图、或实际
+    调用被端点拒绝时，退回视觉模型/OCR 的文本路径。其它文件一直是文本预解析。
     """
     # 延迟导入 agent 模块（避免循环依赖 + 启动时间）
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
     import agent as _agent
 
+    from sjtu_agent.web.chat_images import split_attachments, text_fallback_note
+
     _date_ctx = _date_context()
 
     history = _build_history(_agent, session_id)
-    user_entry = {"role": "user", "content": _date_ctx + "\n\n" + user_message}
-    history.append(user_entry)
+    images, others = split_attachments(attachment_items or [])
+    other_note = _attachment_note_for_chat(others) if others else ""
+    prompt_text = _date_ctx + "\n\n" + user_message
     turn_start = len(history)
     cancel_key = session_id or "__legacy__"
     _clear_cancel_flag(cancel_key)
-    if session_id:
-        _session_store.append_message(session_id, "user", user_entry["content"])
 
     try:
         client, model, proto = _get_chat_client()
     except Exception as exc:
-        if not session_id:
-            history.pop()
         yield f"data: {json.dumps({'error': f'创建客户端失败：{exc}'}, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"
         return
+
+    # 图片：主模型能识图就直接看图（原生多模态），否则退回文本识图/OCR
+    image_blocks: list[dict] = []
+    if images:
+        try:
+            from sjtu_agent.vision_capability import resolve_vision_capability
+            from sjtu_agent.web.chat_images import build_image_blocks
+
+            if resolve_vision_capability(model, client):
+                image_blocks = build_image_blocks(images, proto)
+        except Exception as exc:  # noqa: BLE001 — 判定或读图失败都退回文本路径
+            _logger.warning(f"[web] 图片原生发送准备失败，改用文本路径：{exc}")
+
+    def _fallback_text() -> str:
+        """不能原生识图时的完整用户文本（含视觉模型/OCR 结果）。"""
+        return (
+            prompt_text
+            + other_note
+            + text_fallback_note(images)
+            + (_attachment_note_for_chat(images) if images else "")
+        )
+
+    if image_blocks:
+        from sjtu_agent.web.chat_images import native_image_note
+
+        user_text = prompt_text + other_note + native_image_note(images)
+        user_entry: dict = {
+            "role": "user",
+            "content": [{"type": "text", "text": user_text}] + image_blocks,
+        }
+    else:
+        user_text = _fallback_text()
+        user_entry = {"role": "user", "content": user_text}
+
+    history.append(user_entry)
+    if session_id:
+        _session_store.append_message(session_id, "user", user_text)
 
     MAX_TOOL_ROUNDS = 20
 
     def _sse(obj):
         return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
 
-    cancelled = False
-    try:
+    def _stream_once():
         if proto == "anthropic":
-            inner = _stream_chat_anthropic(client, model, _agent, MAX_TOOL_ROUNDS, _sse, history, cancel_key)
-        else:
-            inner = _stream_chat_openai(client, model, _agent, MAX_TOOL_ROUNDS, _sse, history, cancel_key)
+            return _stream_chat_anthropic(
+                client, model, _agent, MAX_TOOL_ROUNDS, _sse, history, cancel_key
+            )
+        return _stream_chat_openai(
+            client, model, _agent, MAX_TOOL_ROUNDS, _sse, history, cancel_key
+        )
 
-        for chunk in inner:
+    def _is_rejection_chunk(chunk: str) -> bool:
+        """这一块是不是「模型不吃图片」的错误（只在还没输出正文时才算）。"""
+        if not image_blocks or '"error"' not in chunk:
+            return False
+        try:
+            payload = json.loads(chunk[len("data: "):].strip())
+        except Exception:  # noqa: BLE001 — 不是标准 JSON 就当普通错误
+            return False
+        error = payload.get("error")
+        if not error:
+            return False
+        from sjtu_agent.vision_capability import is_image_rejection
+
+        return is_image_rejection(RuntimeError(str(error)))
+
+    cancelled = False
+    emitted = False
+    try:
+        for chunk in _stream_once():
             if _is_cancelled(cancel_key):
                 cancelled = True
                 yield _sse({"cancelled": True})
                 break
+            if not emitted and _is_rejection_chunk(chunk):
+                # 探测/配置说能识图、端点实际拒收：记下来，改走文本路径重试一次
+                from sjtu_agent.vision_capability import record_vision_unsupported
+
+                record_vision_unsupported(model)
+                _logger.info("[web] 模型拒绝图片输入，改用识图/OCR 文本路径重试")
+                if history and history[-1].get("role") == "user":
+                    history.pop()
+                history.append({"role": "user", "content": _fallback_text()})
+                for retry_chunk in _stream_once():
+                    if _is_cancelled(cancel_key):
+                        cancelled = True
+                        yield _sse({"cancelled": True})
+                        break
+                    yield retry_chunk
+                break
+            emitted = True
             yield chunk
     except Exception as exc:
         yield _sse({"error": str(exc)})
@@ -1249,15 +1332,15 @@ class _Handler(BaseHTTPRequestHandler):
                 item = _attachment_store.get(str(attachment_id))
                 if item and item.get("session_id") == session_id:
                     attachment_items.append(item)
-            attachment_note = _attachment_note_for_chat(attachment_items)
-            if attachment_note:
-                user_msg += attachment_note
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
             self.send_header("Cache-Control", "no-cache")
             self.send_header("X-Accel-Buffering", "no")
             self.end_headers()
-            for chunk in _stream_chat(user_msg, session_id=session_id):
+            # 附件的解析/原生识图由 _stream_chat 决定：图片能原生识图就直接发图
+            for chunk in _stream_chat(
+                user_msg, session_id=session_id, attachment_items=attachment_items
+            ):
                 try:
                     self.wfile.write(chunk.encode("utf-8"))
                     self.wfile.flush()

@@ -201,6 +201,17 @@ def probe_vision_capability(client, model: str, *, save: bool = True) -> str | N
     return "yes"
 
 
+def record_vision_unsupported(model: str) -> None:
+    """记下「这个模型不吃图片」。
+
+    探测返回拒绝时自动调用；实际调用被拒（端点声称能识图、真发图却报错）时也
+    由调用方补一次，避免每次都拿同一张图去撞墙。
+    """
+    if not model:
+        return
+    _write_cache(model, False)
+
+
 def resolve_vision_capability(model: str, client=None) -> bool:
     """给 bot 用的最终判定：能确定就用确定的，不确定就探测一次。"""
     capability = vision_capability(model)

@@ -59,9 +59,21 @@ def parse_sse_chunk(chunk: str) -> list[dict[str, Any]]:
     return events
 
 
-def iter_chat_events(session_id: str, user_message: str) -> Iterator[dict[str, Any]]:
-    """发送普通聊天消息，yield 归一化事件（token / tool_start / ...）。"""
-    for chunk in _stream_chat(user_message, session_id=session_id):
+def iter_chat_events(
+    session_id: str,
+    user_message: str,
+    attachment_items: list[dict[str, Any]] | None = None,
+) -> Iterator[dict[str, Any]]:
+    """发送普通聊天消息，yield 归一化事件（token / tool_start / ...）。
+
+    附件（尤其图片）随请求一起交给共享引擎：图片能原生识图时由主模型直接看，
+    否则引擎内部退回视觉模型/OCR。
+    """
+    kwargs: dict[str, Any] = {"session_id": session_id}
+    if attachment_items:
+        # 只在有附件时传，保持 _stream_chat 的调用兼容（测试/旧调用点无需改签名）
+        kwargs["attachment_items"] = attachment_items
+    for chunk in _stream_chat(user_message, **kwargs):
         yield from parse_sse_chunk(chunk)
 
 
