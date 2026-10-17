@@ -634,3 +634,122 @@ def test_read_pages_marks_title_only_shell(monkeypatch):
     assert ok == 0
     assert failures and "动态" in failures[0]["error"]
     assert targets[0]["read_quality"] == "title_only"
+
+
+# ── 日期适用性（issue #204 复现二：2019 年的通知不能当现在的安排） ────────────
+
+
+def test_extract_date_variants():
+    assert ws._extract_date("2026年7月3日 开放", 2026)["day"] == 3
+    assert ws._extract_date("2026.07.03 起执行", 2026)["month"] == 7
+    assert ws._extract_date("2026-07-03", 2026)["year"] == 2026
+    assert ws._extract_date("关于2026年放假安排", 2026)["kind"] == "year"
+    assert ws._extract_date("没有日期", 2026) is None
+
+
+def test_url_date_wins_over_snippet():
+    """URL 里的 /20190103/ 是发布时间，比摘要里的年份更可信。"""
+    found = ws._extract_url_date("https://www.sjtu.edu.cn/tg/20190103/94135.html", 2026)
+    assert found["year"] == 2019 and found["day"] == 3
+
+
+def test_stale_flag_uses_query_year():
+    items = [
+        {
+            "title": "图书馆开放时间",
+            "url": "https://www.sjtu.edu.cn/tg/20190103/94135.html",
+            "snippet": "2019年1月17日至2月20日 寒假开放",
+        },
+        {
+            "title": "图书馆开放时间 2026",
+            "url": "https://www.lib.sjtu.edu.cn/news/20260703.html",
+            "snippet": "2026年7月3日 暑期开放 8:00-22:00",
+        },
+    ]
+    info = ws._annotate_staleness(items, query="图书馆 开放时间 2026")
+    assert info["stale"] == 1
+    assert info["oldest_year"] == 2019
+    assert items[0]["stale"] is True
+    assert "stale" not in items[1]
+
+
+def test_stale_by_age_without_query_year():
+    items = [{"title": "旧通知", "url": "https://a.example.com/20200101/x.html", "snippet": ""}]
+    info = ws._annotate_staleness(items, query="图书馆开放时间", now_year=2026)
+    assert info["stale"] == 1
+    assert "年前的资料" in items[0]["stale_reason"]
+
+
+def test_late_previous_year_notice_is_not_stale():
+    """12 月发的「元旦开放安排」讲的是次年 1 月，不能因为年份早了一年就判过期。"""
+    items = [
+        {
+            "title": "上海各大图书馆2026元旦期间开放时间安排一览",
+            "url": "http://sh.bendibao.com/tour/20251224/303011.shtm",
+            "snippet": "",
+        }
+    ]
+    info = ws._annotate_staleness(items, query="图书馆 开放时间 2026")
+    assert info["stale"] == 0
+    assert items[0]["year"] == 2025
+    # 早于 10 月的往年内容仍判过期
+    old = [{"title": "旧安排", "url": "https://a/20250901/x.html", "snippet": ""}]
+    assert ws._annotate_staleness(old, query="开放时间 2026")["stale"] == 1
+
+
+def test_map_entry_from_engine_is_filtered():
+    """360 地图入口（map.360.cn）是搜索壳，不是内容页。"""
+    assert ws._make_item("360地图", "http://map.360.cn/?t=map&k=x", "地图") is None
+
+
+def test_content_applicability_flags():
+    flags = ws._content_date_flags(
+        "本安排自 2019年1月17日 起执行，至2月20日结束。", asked_year=2026, now_year=2026
+    )
+    assert flags["content_stale"] is True
+    assert 2019 in flags["content_years"]
+
+
+def test_content_applicability_passes_current_year():
+    flags = ws._content_date_flags("2026年9月20日起执行。", asked_year=2026, now_year=2026)
+    assert "content_stale" not in flags
+
+
+def test_old_notice_is_flagged_and_demoted(monkeypatch):
+    rss = _rss(
+        (
+            "图书馆开放时间（2019年寒假）",
+            "https://www.sjtu.edu.cn/tg/20190103/94135.html",
+            "2019年1月17日至2月20日 寒假开放时间",
+        ),
+        (
+            "图书馆开放时间 2026",
+            "https://www.lib.sjtu.edu.cn/news/20260703.html",
+            "2026年7月3日 暑期开放时间 8:00-22:00",
+        ),
+        (
+            "上海交通大学图书馆开放时间调整",
+            "https://www.lib.sjtu.edu.cn/news/20260815.html",
+            "2026年8月15日 秋季学期开放时间",
+        ),
+    )
+    monkeypatch.setattr(ws.requests, "get", _router({"format=rss": rss}))
+    result = ws.tool_web_search("上海交通大学 图书馆 开放时间 2026", read_top=0)
+    assert result["ok"] is True
+    assert result["stale"] == 1
+    assert result["oldest_year"] == 2019
+    assert "往年资料" in result["note"]
+    # 过期条目排最后，但仍保留（历史沿革有参考价值）
+    assert result["results"][-1].get("stale") is True
+
+
+def test_all_stale_results_say_no_current_evidence(monkeypatch):
+    rss = _rss(
+        ("图书馆开放时间 2018", "https://a.sjtu.edu.cn/20180101/x.html", "2018年1月1日 寒假"),
+        ("图书馆开放时间 2019", "https://a.sjtu.edu.cn/20190101/x.html", "2019年1月1日 寒假"),
+    )
+    monkeypatch.setattr(ws.requests, "get", _router({"format=rss": rss}))
+    result = ws.tool_web_search("图书馆 开放时间 2026", read_top=0)
+    assert result["ok"] is True
+    assert result["stale"] == len(result["results"])
+    assert "没有任何一条能证明现在的情况" in result["note"]

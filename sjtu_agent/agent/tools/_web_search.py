@@ -40,6 +40,7 @@ import time
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from concurrent.futures import TimeoutError as FuturesTimeout
+from datetime import datetime
 
 import requests
 
@@ -245,6 +246,7 @@ def _domain(url: str) -> str:
 _ENGINE_HOST_SUFFIXES = (
     "so.com",
     "360.com",
+    "360.cn",       # map.360.cn 这类「地图搜索入口」混进结果时也要拦住
     "bing.com",
     "baidu.com",
     "sogou.com",
@@ -379,6 +381,174 @@ def _prune_weak(items: list[dict], grams: list[str]) -> tuple[list[dict], int]:
     if not kept:
         return list(items), 0
     return kept, len(items) - len(kept)
+
+
+# ── 日期适用性：发布时间 ≠ 正文适用时间 ≠ 现在仍然有效 ────────────────────────
+
+# 「2026年7月3日」「2026.07.03」「2026-07-03」「2026/7/3」
+_DATE_RE = re.compile(r"(?<!\d)(20\d{2})\s*[年./\-]\s*(\d{1,2})\s*[月./\-]\s*(\d{1,2})")
+# 只出现年份（「关于2026年放假安排」）
+_YEAR_RE = re.compile(r"(?<!\d)(20\d{2})(?!\d)")
+# 站点常见的发布日期在 URL 里：/20190103/、/20251126/、/2026-09/ 等
+_URL_DMY_RE = re.compile(r"/(20\d{2})(\d{2})(\d{2})(?:/|$)")
+_URL_YM_RE = re.compile(r"/(20\d{2})[-_]?(\d{2})(?:/|$)")
+
+# 超过这么多年、且查询没点名今年，就当历史资料标注（不是删除）
+_STALE_AGE_YEARS = 3
+
+
+def _plausible_date(year: int, month: int, day: int, now_year: int) -> bool:
+    return 2000 <= year <= now_year + 1 and 1 <= month <= 12 and 1 <= day <= 31
+
+
+def _extract_date(text: str, now_year: int) -> dict | None:
+    """从文本里抽第一个像日期的串，返回 {"year","month","day","raw","kind"}。"""
+    if not text:
+        return None
+    match = _DATE_RE.search(text)
+    if match:
+        year, month, day = (int(match.group(i)) for i in (1, 2, 3))
+        if _plausible_date(year, month, day, now_year):
+            return {
+                "year": year,
+                "month": month,
+                "day": day,
+                "raw": match.group(0),
+                "kind": "full",
+            }
+    year_match = _YEAR_RE.search(text)
+    if year_match:
+        year = int(year_match.group(1))
+        if 2000 <= year <= now_year + 1:
+            return {
+                "year": year,
+                "month": 0,
+                "day": 0,
+                "raw": year_match.group(0),
+                "kind": "year",
+            }
+    return None
+
+
+def _extract_url_date(url: str, now_year: int) -> dict | None:
+    """URL 里的日期路径（/20190103/）通常就是发布时间，比摘要更可靠。"""
+    dmy = _URL_DMY_RE.search(url or "")
+    if dmy:
+        year, month, day = (int(dmy.group(i)) for i in (1, 2, 3))
+        if _plausible_date(year, month, day, now_year):
+            return {"year": year, "month": month, "day": day, "raw": dmy.group(0), "kind": "url"}
+    ym = _URL_YM_RE.search(url or "")
+    if ym:
+        year, month = int(ym.group(1)), int(ym.group(2))
+        if 2000 <= year <= now_year + 1 and 1 <= month <= 12:
+            return {"year": year, "month": month, "day": 0, "raw": ym.group(0), "kind": "url"}
+    return None
+
+
+def _item_date(item: dict, now_year: int) -> dict | None:
+    """按「URL → 摘要 → 标题」的顺序取日期：URL 最可信，标题最可能是主题年份。"""
+    for finder in (
+        lambda: _extract_url_date(item.get("url", ""), now_year),
+        lambda: _extract_date(item.get("snippet", ""), now_year),
+        lambda: _extract_date(item.get("title", ""), now_year),
+    ):
+        found = finder()
+        if found:
+            return found
+    return None
+
+
+def _query_year(query: str) -> int | None:
+    """查询里点名的年份（用户问「2026 校历」时，2026 就是有效性基准）。"""
+    match = re.search(r"(?<!\d)(20\d{2})(?!\d)", query or "")
+    return int(match.group(1)) if match else None
+
+
+def _annotate_staleness(
+    items: list[dict], *, query: str = "", now_year: int | None = None
+) -> dict:
+    """给结果标上「哪年的资料」「是否过期」，返回汇总。
+
+    相关性判的是「说的是不是这件事」，这里判的是「说的是不是这个时候」——
+    2019 年寒假开放通知对「图书馆开放时间」完全对题，但对"现在几点开门"
+    没有证据力。过期结果**保留**（历史沿革仍有参考价值）但标 `stale`，
+    让模型写明适用年份，而不是拿它回答当前情况。
+
+    一个例外：去年 10 月以后发布的内容，往往就是为今年写的（12 月的"元旦
+    开放安排"讲的正是次年 1 月），这类只标年份、不算过期。
+    """
+    current = now_year or datetime.now().year
+    asked = _query_year(query)
+    stale = 0
+    years: list[int] = []
+    for item in items:
+        found = _item_date(item, current)
+        if not found:
+            continue
+        year = found["year"]
+        item["year"] = year
+        if found["kind"] == "full":
+            item["dated"] = f"{year:04d}-{found['month']:02d}-{found['day']:02d}"
+        years.append(year)
+        age = current - year
+        next_year_prep = (
+            asked is not None and year == asked - 1 and found.get("month", 0) >= 10
+        )
+        is_stale = (
+            (asked is not None and year < asked and not next_year_prep)
+            or age >= _STALE_AGE_YEARS
+        )
+        if is_stale:
+            stale += 1
+            item["stale"] = True
+            item["stale_reason"] = (
+                f"查询针对 {asked} 年" if asked is not None and year < asked
+                else f"{age} 年前的资料"
+            )
+    return {
+        "stale": stale,
+        "years": sorted(set(years)),
+        "oldest_year": min(years) if years else None,
+        "asked_year": asked,
+    }
+
+
+def _content_date_flags(content: str, *, asked_year: int | None, now_year: int) -> dict:
+    """从正文里找「适用年份」：正文只写到往年安排时，不能回答当前情况。"""
+    if not content:
+        return {}
+    years = sorted({int(y) for y in _YEAR_RE.findall(content)})
+    if not years:
+        return {}
+    newest = years[-1]
+    baseline = asked_year or now_year
+    if newest < baseline:
+        return {
+            "content_years": years[-5:],
+            "content_stale": True,
+            "content_note": (
+                f"正文只涉及 {newest} 年及更早的安排，"
+                f"不能作为 {baseline} 年当前情况的依据"
+            ),
+        }
+    return {"content_years": years[-5:]}
+
+
+def _stale_note(info: dict, total: int) -> str:
+    """给模型的一句提示：过期资料只能当历史参考。"""
+    if not info.get("stale"):
+        return ""
+    oldest = info.get("oldest_year") or "更早"
+    if info["stale"] >= total:
+        return (
+            f"这批结果都是往年的资料（最早 {oldest} 年），只能作为历史参考，"
+            "没有任何一条能证明现在的情况；回答时要么换更新的来源，要么明确说"
+            "「只查到往年信息，当前安排需另行确认」。"
+        )
+    return (
+        f"其中 {info['stale']} 条是往年资料（最早 {oldest} 年），"
+        "引用时必须写明适用年份，不要用它们回答「现在/最新」的问题。"
+    )
 
 
 def _is_thin(items: list[dict], grams: list[str]) -> bool:
@@ -766,6 +936,9 @@ def tool_web_search(
 
     ranked_all = _rank(pool, grams)
     ranked_kept, dropped = _prune_weak(ranked_all, grams)
+    # 时间维度：近年资料排前面；往年资料保留但标 stale（相关性判不了「还适用吗」）
+    date_info = _annotate_staleness(ranked_kept, query=query)
+    ranked_kept = sorted(ranked_kept, key=lambda item: 1 if item.get("stale") else 0)
     ranked = ranked_kept[:max_results]
     if ranked:
         payload: dict = {
@@ -777,19 +950,30 @@ def tool_web_search(
         if errors:
             # 有来源被限流/失败时如实标注：结果可能偏官方，模型可据此换策略
             payload["degraded"] = errors[-2:]
+        notes: list[str] = []
         if dropped:
             payload["dropped"] = dropped
-            payload["note"] = (
+            notes.append(
                 f"已丢弃 {dropped} 条只沾背景词、没覆盖查询关键信息的结果；"
                 "剩下的仍可能不足，信息不够就如实说没查到。"
             )
         elif _best_hits(ranked, grams) == 0:
             # 一条都没覆盖查询焦点词：引擎多半换词了，如实标注「证据很弱」
             payload["low_relevance"] = True
-            payload["note"] = (
+            notes.append(
                 "这些结果没有一条包含查询里的关键信息，可能跑偏（引擎改写/泛首页）；"
                 "不要把它们当成有证据的回答，换更具体的词或改用 search_campus。"
             )
+        if date_info.get("stale"):
+            payload["stale"] = date_info["stale"]
+            payload["oldest_year"] = date_info["oldest_year"]
+            if date_info.get("asked_year"):
+                payload["asked_year"] = date_info["asked_year"]
+            stale_note = _stale_note(date_info, len(ranked))
+            if stale_note:
+                notes.append(stale_note)
+        if notes:
+            payload["note"] = " ".join(notes)
         # 搜索即阅读：只抓「排在最前、且判定值得读」的那几条
         targets = _read_count(ranked, read_top, grams)
         if targets and time.monotonic() < deadline - 3:
@@ -799,6 +983,15 @@ def tool_web_search(
                 if read_failed:
                     # 逐条给出失败原因，模型才知道是超时/反爬/外壳，而不是「网站没这条信息」
                     payload["read"]["reasons"] = read_failed[:3]
+            # 正文的适用年份：正文只写到往年安排时，及时标注（别拿旧安排答现在）
+            for item in targets:
+                flags = _content_date_flags(
+                    item.get("content", ""),
+                    asked_year=date_info.get("asked_year"),
+                    now_year=datetime.now().year,
+                )
+                if flags:
+                    item.update(flags)
         return payload
 
     return {

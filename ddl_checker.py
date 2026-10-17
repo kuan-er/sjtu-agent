@@ -1710,6 +1710,40 @@ def _jwc_score(item: dict, required: list[str], optional: list[str]) -> int | No
     return sum(1 for term in optional if term in haystack)
 
 
+def _jwc_year(item: dict) -> int | None:
+    """RSS pubDate → 年份（判断「过期通知」用）。"""
+    from email.utils import parsedate_to_datetime
+
+    try:
+        return parsedate_to_datetime(item.get("date") or "").year
+    except Exception:  # noqa: BLE001 — pubDate 缺失/格式怪就不标年份
+        return None
+
+
+def _jwc_annotate_years(items: list[dict], asked: int | None) -> int:
+    """给通知标年份；比查询年份更早的标 stale。返回过期条数。
+
+    教务处 RSS 里同时会挂着「2026年放假安排」和「2019年寒假通知」——日期都对，
+    但后者不能回答"今年怎么放"。相关性判不出这个，靠年份标出来。
+    """
+    stale = 0
+    for item in items:
+        year = _jwc_year(item)
+        if not year:
+            continue
+        item["year"] = year
+        if asked is not None and year < asked:
+            item["stale"] = True
+            item["stale_reason"] = f"查询针对 {asked} 年"
+            stale += 1
+    return stale
+
+
+def _jwc_asked_year(optional: list[str]) -> int | None:
+    years = [int(term) for term in optional if re.fullmatch(r"(?:19|20)\d{2}", term)]
+    return max(years) if years else None
+
+
 def _search_jwc(query: str, max_results: int = 8) -> tuple[list[dict], str]:
     """从教务处 RSS 按关键词搜索通知公告。
 
@@ -1740,9 +1774,12 @@ def _search_jwc(query: str, max_results: int = 8) -> tuple[list[dict], str]:
 
     scope = f"教务处 RSS 的近期通知（{len(items)} 条）"
     required, optional = _jwc_terms(query)
+    asked = _jwc_asked_year(optional)
     if not required and not optional:
         latest = [dict(i, matched=False) for i in items[:max_results]]
-        return latest, f"未指定关键词：按最新顺序列出通知（检索范围仅限{scope}）"
+        stale = _jwc_annotate_years(latest, asked)
+        stale_note = f"；其中 {stale} 条是更早年份的通知（stale=true）" if stale else ""
+        return latest, f"未指定关键词：按最新顺序列出通知（检索范围仅限{scope}{stale_note}）"
 
     scored: list[tuple[int, dict]] = []
     for item in items:
@@ -1752,11 +1789,18 @@ def _search_jwc(query: str, max_results: int = 8) -> tuple[list[dict], str]:
 
     if scored:
         scored.sort(key=lambda pair: -pair[0])  # 稳定排序：同分保持 RSS 原有顺序
-        return [dict(item, matched=True) for _, item in scored[:max_results]], (
-            f"检索范围仅限{scope}，不是全站历史检索"
-        )
+        hits = [dict(item, matched=True) for _, item in scored[:max_results]]
+        stale = _jwc_annotate_years(hits, asked)
+        note = f"检索范围仅限{scope}，不是全站历史检索"
+        if stale:
+            note += (
+                f"；其中 {stale} 条是 {asked} 年之前（更早）的通知（stale=true），"
+                "只能作为历史参考，不要用来回答今年的安排"
+            )
+        return hits, note
 
     latest = [dict(i, matched=False) for i in items[:max_results]]
+    _jwc_annotate_years(latest, asked)
     terms = "、".join(required + optional)
     return latest, (
         f"未命中：{scope}里没有包含「{terms}」的通知。"
