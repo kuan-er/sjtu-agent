@@ -1011,19 +1011,23 @@ def handle_photo(msg):
                 else:
                     content.append({"type": "text", "text": "（用户发送了一张图片，请描述图片内容或询问用户需要做什么）"})
                 # Anthropic 与 OpenAI 的图片块格式不同，按当前模型选择
+                # MIME 按文件头判断：Anthropic 会拒绝与字节不符的 media_type
+                from sjtu_agent.vision import image_mime_type
+
+                mime = image_mime_type(img_bytes)
                 if agent._is_anthropic_model(model):
                     content.append({
                         "type": "image",
                         "source": {
                             "type": "base64",
-                            "media_type": "image/jpeg",
+                            "media_type": mime,
                             "data": b64,
                         },
                     })
                 else:
                     content.append({
                         "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+                        "image_url": {"url": f"data:{mime};base64,{b64}"},
                     })
                 with lock:
                     reply = _capture_turn_multimodal(sess, content)

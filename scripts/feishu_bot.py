@@ -669,18 +669,21 @@ def _extract_post_content(content_json: str) -> dict:
 
 def _build_vision_content(model: str, text: str, image_bytes_list: list[bytes]) -> list:
     """构建多模态 content：文本块 + 若干图片块（OpenAI / Anthropic 两种格式）。"""
+    from sjtu_agent.vision import image_mime_type
+
     content: list = [{"type": "text", "text": text or "请看这张图片。"}]
     for img_bytes in image_bytes_list:
         b64 = base64.b64encode(img_bytes).decode()
+        mime = image_mime_type(img_bytes)
         if agent._is_anthropic_model(model):
             content.append({
                 "type": "image",
-                "source": {"type": "base64", "media_type": "image/jpeg", "data": b64},
+                "source": {"type": "base64", "media_type": mime, "data": b64},
             })
         else:
             content.append({
                 "type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+                "image_url": {"url": f"data:{mime};base64,{b64}"},
             })
     return content
 

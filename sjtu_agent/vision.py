@@ -34,6 +34,30 @@ def load_vision_config() -> dict | None:
     return None
 
 
+_IMAGE_SIGNATURES = (
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+    (b"BM", "image/bmp"),
+)
+
+
+def image_mime_type(data: bytes, default: str = "image/jpeg") -> str:
+    """按文件头判断图片真实类型。
+
+    之前各 bot 一律把图片标成 `image/jpeg`：OpenAI 兼容端多数不在意，但
+    Anthropic 会直接 400（"media_type does not match"），于是明明是原生视觉
+    模型，微信/QQ 发来的 PNG 却识图失败。
+    """
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    for magic, mime in _IMAGE_SIGNATURES:
+        if data.startswith(magic):
+            return mime
+    return default
+
+
 def analyze_image(image_bytes: bytes, prompt: str = "") -> str:
     """用视觉模型识图，返回描述文本。失败抛异常。
 
@@ -50,11 +74,12 @@ def analyze_image(image_bytes: bytes, prompt: str = "") -> str:
 
     client = _make_client(cfg)
     b64 = base64.b64encode(image_bytes).decode()
+    mime = image_mime_type(image_bytes)
     messages = [{
         "role": "user",
         "content": [
             {"type": "text", "text": prompt or "请描述这张图片的内容，并提取其中的文字。"},
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+            {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
         ],
     }]
     resp = client.chat.completions.create(

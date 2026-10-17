@@ -73,7 +73,7 @@ def test_analyze_image_sends_vision_payload(monkeypatch):
         "base_url": "https://x/v1", "api_key": "vm-key", "model": "qwen-vl-max",
     })
 
-    img = b"\x89PNG fake-image-bytes"
+    img = b"\x89PNG\r\n\x1a\n fake-image-bytes"
     reply = vision.analyze_image(img, "这张图有什么？")
 
     assert reply == "图片里有一份课表"
@@ -82,4 +82,22 @@ def test_analyze_image_sends_vision_payload(monkeypatch):
     content = captured["messages"][0]["content"]
     assert content[0]["type"] == "text"
     assert content[1]["type"] == "image_url"
-    assert "data:image/jpeg;base64," in content[1]["image_url"]["url"]
+    # 真实类型是 PNG，就不能标成 jpeg（anthropic 路径会 400）
+    assert "data:image/png;base64," in content[1]["image_url"]["url"]
+
+
+@pytest.mark.parametrize(
+    "header,expected",
+    [
+        (b"\x89PNG\r\n\x1a\n", "image/png"),
+        (b"\xff\xd8\xff\xe0", "image/jpeg"),
+        (b"GIF89a", "image/gif"),
+        (b"RIFF" + b"\x00" * 4 + b"WEBP", "image/webp"),
+        (b"BM", "image/bmp"),
+        (b"not-an-image", "image/jpeg"),  # 认不出时退回默认值
+    ],
+)
+def test_image_mime_type(header, expected):
+    from sjtu_agent.vision import image_mime_type
+
+    assert image_mime_type(header + b"payload") == expected

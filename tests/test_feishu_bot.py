@@ -696,7 +696,7 @@ def test_build_vision_content_openai_and_anthropic():
     import base64 as _b64
 
     from scripts import feishu_bot
-    img1, img2 = b"\x89PNG123", b"\x89PNG456"
+    img1, img2 = b"\xff\xd8\xff\xe0 fake-jpeg", b"\xff\xd8\xff\xe0 other-jpeg"
     b64_1 = _b64.b64encode(img1).decode()
     b64_2 = _b64.b64encode(img2).decode()
 
@@ -710,6 +710,21 @@ def test_build_vision_content_openai_and_anthropic():
         "type": "image",
         "source": {"type": "base64", "media_type": "image/jpeg", "data": b64_1},
     }
+
+
+def test_build_vision_content_uses_real_mime():
+    """PNG 字节必须标 image/png：Anthropic 会拒绝与字节不符的 media_type。"""
+    import base64 as _b64
+
+    from scripts import feishu_bot
+    png = b"\x89PNG\r\n\x1a\n" + b"0" * 32
+    b64 = _b64.b64encode(png).decode()
+
+    oa = feishu_bot._build_vision_content("gpt-4o", "desc", [png])
+    assert oa[1]["image_url"]["url"] == f"data:image/png;base64,{b64}"
+
+    an = feishu_bot._build_vision_content("claude-4-sonnet", "desc", [png])
+    assert an[1]["source"]["media_type"] == "image/png"
 
 
 # ── 附件解析失败如实透出 / 防幻觉（issue #149-4） ────────────────────────────

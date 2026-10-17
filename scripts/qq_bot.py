@@ -395,15 +395,18 @@ class QQAgentClient(botpy.Client):
                         content.append({"type": "text", "text": text})
                     else:
                         content.append({"type": "text", "text": "用户发送了一张图片，请先描述内容，再回答用户问题。"})
+                    from sjtu_agent.vision import image_mime_type
+
+                    mime = image_mime_type(img_bytes)
                     if agent._is_anthropic_model(model):
                         content.append({
                             "type": "image",
-                            "source": {"type": "base64", "media_type": "image/jpeg", "data": b64},
+                            "source": {"type": "base64", "media_type": mime, "data": b64},
                         })
                     else:
                         content.append({
                             "type": "image_url",
-                            "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+                            "image_url": {"url": f"data:{mime};base64,{b64}"},
                         })
                     reply = await asyncio.to_thread(_capture_turn_multimodal, sess, content)
                 else:
