@@ -104,11 +104,10 @@ def campus_schedule_local(hh: int, mm: int = 0) -> tuple[int, int]:
     """
     hh = hh % 24
     mm = mm % 60
-    beijing = school_now()
-    if not differs_locally(beijing):
-        return hh, mm
+    # Use the campus date and the machine zone, not the user display timezone.
+    # The offset can change within this date when a destination enters/leaves DST.
     combined = _dt.datetime.combine(
-        _dt.date.today(), _dt.time(hh, mm), tzinfo=school_tz()
+        school_now().date(), _dt.time(hh, mm), tzinfo=school_tz()
     )
     local = combined.astimezone(local_tz())
     return local.hour, local.minute

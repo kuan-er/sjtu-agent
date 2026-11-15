@@ -100,27 +100,34 @@ def test_daily_report_header_home_single_timezone(monkeypatch):
     assert "你当地" not in header
 
 
-def test_campus_schedule_local_converts_for_abroad(monkeypatch):
-    """日报触发时刻按北京时钟：换算到机器本地时区（测试注入 PDT）。"""
-    from zoneinfo import ZoneInfo
+@pytest.mark.parametrize("date, expected", [
+    ((2026, 9, 14), ((17, 0), (7, 30), (21, 0))),  # PDT
+    ((2026, 11, 15), ((16, 0), (6, 30), (20, 0))),  # PST
+    ((2026, 3, 8), ((16, 0), (7, 30), (20, 0))),  # spring transition
+    ((2026, 11, 1), ((17, 0), (6, 30), (21, 0))),  # autumn transition
+])
+def test_campus_schedule_local_converts_for_abroad(monkeypatch, date, expected):
+    """Use the offset at each target instant, independent of the test run date."""
+    monkeypatch.setattr(tu, "school_now", lambda: _dt.datetime(
+        *date, 12, tzinfo=ZoneInfo("Asia/Shanghai")))
     monkeypatch.setattr(tu, "_read_config", lambda: {"user_timezone": "America/Los_Angeles"})
-    # 机器系统时区注入为 PDT（CI 机器是 UTC，必须显式控制）
     monkeypatch.setattr(tu, "local_tz", lambda: ZoneInfo("America/Los_Angeles"))
-    assert tu.campus_schedule_local(8, 0) == (17, 0)
-    assert tu.campus_schedule_local(22, 30) == (7, 30)
-    assert tu.campus_schedule_local(12, 0) == (21, 0)
+    assert tu.campus_schedule_local(8, 0) == expected[0]
+    assert tu.campus_schedule_local(22, 30) == expected[1]
+    assert tu.campus_schedule_local(12, 0) == expected[2]
 
 
-def test_campus_schedule_local_uses_system_zone(monkeypatch):
-    """UTC 机器（如 CI）：北京 08:00 → UTC 00:00，跟随系统时区而非写死。"""
-    from zoneinfo import ZoneInfo
-    monkeypatch.setattr(tu, "_read_config", lambda: {"user_timezone": "America/Los_Angeles"})
+@pytest.mark.parametrize("display_zone", ["Asia/Shanghai", "America/Los_Angeles"])
+def test_campus_schedule_local_uses_system_zone(monkeypatch, display_zone):
+    """Display preferences must not change the scheduler's machine timezone."""
+    monkeypatch.setattr(tu, "_read_config", lambda: {"user_timezone": display_zone})
     monkeypatch.setattr(tu, "local_tz", lambda: ZoneInfo("UTC"))
     assert tu.campus_schedule_local(8, 0) == (0, 0)
 
 
 def test_campus_schedule_local_identity_in_china(monkeypatch):
-    monkeypatch.setattr(tu, "_read_config", lambda: {"user_timezone": "Asia/Shanghai"})
+    monkeypatch.setattr(tu, "_read_config", lambda: {"user_timezone": "America/Los_Angeles"})
+    monkeypatch.setattr(tu, "local_tz", lambda: ZoneInfo("Asia/Shanghai"))
     assert tu.campus_schedule_local(8, 0) == (8, 0)
     assert tu.campus_schedule_local(22, 0) == (22, 0)
 
