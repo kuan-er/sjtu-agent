@@ -499,7 +499,7 @@ Leverages PaddleOCR and openai-whisper. Fully integrated across all bot platform
 
 ## AI News
 
-The Feishu Bot includes `/aihot`, a command that fetches curated daily AI news from the [aihot.virxact.com](https://aihot.virxact.com) public API (MIT, no key required).
+The Feishu Bot includes `/aihot`, a command that fetches curated daily AI news from the [aihot.news](https://aihot.news) public API (no key required; hosted API use is subject to AIHOT’s published usage rules).
 
 ```bash
 # Feishu Bot

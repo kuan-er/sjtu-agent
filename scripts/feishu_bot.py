@@ -694,7 +694,7 @@ def _fetch_aihot_news() -> str:
     """获取 AI HOT 精选资讯，返回 Markdown。"""
     try:
         from scripts.aihot_push import _fetch_items, _build_markdown
-        items = _fetch_items(mode="selected", hours=24)
+        items = _fetch_items(mode="selected", window="24h")
         if not items:
             return "暂无 AI 资讯（API 可能暂时不可用，稍后重试）"
         return _build_markdown(items)

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-aihot_push.py — 获取 AI HOT (aihot.virxact.com) 精选 AI 资讯，推送到飞书。
+aihot_push.py — 获取 AI HOT (aihot.news) 精选 AI 资讯，推送到飞书。
 
-数据来源: https://aihot.virxact.com (MIT 协议，公开 API，无需 Key)
+数据来源: https://aihot.news (公开 API，无需 Key；使用范围以官网公开使用规则为准)
 用法:
   python3 aihot_push.py           # 获取 24h 精选并推送飞书
   python3 aihot_push.py --test    # 只打印，不推送
@@ -10,9 +10,9 @@ aihot_push.py — 获取 AI HOT (aihot.virxact.com) 精选 AI 资讯，推送到
 
 import json
 import sys
-import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+from urllib.parse import urlencode
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -22,7 +22,7 @@ from sjtu_agent.logging import get_logger
 _logger = get_logger("aihot_push")
 
 CST = timezone(timedelta(hours=8))
-_API_BASE = "https://aihot.virxact.com/api/public"
+_API_BASE = "https://aihot.news/api/v1"
 _UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 sjtu-agent/0.2"
 
 CATEGORY_LABELS = {
@@ -31,16 +31,18 @@ CATEGORY_LABELS = {
     "industry":    "行业动态",
     "paper":       "论文",
     "tip":         "技巧与观点",
+    "opinion":     "观点",
+    "other":       "其他",
 }
 
 
-def _fetch_items(mode: str = "selected", hours: int = 24) -> list[dict]:
+def _fetch_items(mode: str = "selected", window: str = "24h") -> list[dict]:
     """获取 AI HOT 条目。"""
     import urllib.request
     import urllib.error
 
-    since = (datetime.now(CST) - timedelta(hours=hours)).strftime("%Y-%m-%d")
-    url = f"{_API_BASE}/items?mode={mode}&since={since}&take=30"
+    query = urlencode({"mode": mode, "window": window, "limit": 30})
+    url = f"{_API_BASE}/items?{query}"
     req = urllib.request.Request(url, headers={"User-Agent": _UA})
 
     try:
@@ -82,7 +84,9 @@ def _build_markdown(items: list[dict]) -> str:
     # 按分类分组
     groups: dict[str, list[dict]] = {}
     for item in items:
-        cat = item.get("category", "other")
+        cat = item.get("category")
+        if cat not in CATEGORY_LABELS:
+            cat = "other"
         groups.setdefault(cat, []).append(item)
 
     lines = ["[AI HOT] **精选资讯**", ""]
@@ -96,10 +100,12 @@ def _build_markdown(items: list[dict]) -> str:
         for item in entries:
             n += 1
             title = item.get("title", "无标题")
-            source = item.get("sourceUrl", "")
-            ago = _fmt_time(item.get("pubDate", ""))
+            links = item.get("links") or {}
+            source = links.get("original") or links.get("aihot") or ""
+            ago = _fmt_time(item.get("publishedAt", ""))
             summary = (item.get("summary") or "").strip()
-            line = f"{n}. [{title}]({source}) · {ago}"
+            headline = f"[{title}]({source})" if source else title
+            line = f"{n}. {headline} · {ago}"
             if summary and len(summary) < 120:
                 line += f" — {summary}"
             elif summary:
@@ -107,7 +113,7 @@ def _build_markdown(items: list[dict]) -> str:
             lines.append(line)
         lines.append("")
 
-    lines.append(f"共 {n} 条 · 数据来自 [aihot.virxact.com](https://aihot.virxact.com)")
+    lines.append(f"共 {n} 条 · 数据来自 [aihot.news](https://aihot.news)")
     return "\n".join(lines)
 
 
